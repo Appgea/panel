@@ -180,6 +180,7 @@ Agent launch (inside `start_session`): `kind_program()` maps `opencode-kimi-k3` 
 | `open_server` | `project` | Open the page a running dev server serves. |
 | `open_link` | `url` | Open a web URL (validated by `web_link`). |
 | `open_media` | `project, path` | Hand a file to the OS player. |
+| `made_entries` | `project, paths[]` | → `Made[]`: the named files as Review items (confined to the project; media only). Backs a report's Review button. |
 
 `PANEL_MAX_SIMS` caps simultaneously booted simulators (`capacity_check`).
 

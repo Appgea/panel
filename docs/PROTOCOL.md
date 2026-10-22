@@ -99,7 +99,21 @@ Sent as `/panel/emit` with `type:"message"`.
 | `audio` | | strings or `{path, caption}`; plays inline |
 | `video` | | strings or `{path, url, caption}`; never inline — opens in a real player |
 | `attachments` | | strings or `{path, label, kind: file\|folder}` |
-| `links` | | strings or `{url, label}`; web URLs or project-relative Panel deeplinks |
+| `links` | | strings or `{url, label}`; web URLs or Panel places (below) |
+
+**Panel places** (`ui/src/deeplink.ts`). One-click doors into the report's own project; paths are
+project-relative. The same text printed in an agent terminal is ⌘/Ctrl-clickable.
+
+| link | opens |
+|---|---|
+| `panel:review` | Review, on this report's images/audio/video (else the project's queue) |
+| `panel:review:<path>` | Review, on that file |
+| `panel:work:<path>[:<line>]` | the file in the Work editor, at that line |
+| `panel:git` | the project's Git tab |
+| `panel:manager` | the Manager |
+
+A report with media gets a **Review** button without any link. Anything that is neither a web URL
+nor a place renders as a struck-out chip, so a wrong link is visible.
 
 ### `ask_user`
 Blocks until answered. Params: `prompt` (required), `kind`, `title`, `options`, `fields`, `path`, `draft`,

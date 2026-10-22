@@ -34,6 +34,7 @@ import type {
   SimStart,
   WorkFile,
 } from "./types";
+import type { Place } from "./deeplink";
 import { TerminalDeck } from "./features/terminal";
 import { mountSessionStrip, type SessionStripHandle } from "./features/sessions";
 import { openSkills } from "./features/skills";
@@ -450,7 +451,33 @@ const ctx: RenderCtx = {
     if (!active) throw new Error("No project selected.");
     return (await projectTools.ensureFiles()).finishDocument(path);
   },
+  openPlace(place, alongside) {
+    openPlace(active, place, alongside);
+  },
 };
+
+/**
+ * Where a Panel link goes (deeplink.ts). Review opens the deck on the files the report named —
+ * falling back to the project's queue when none of them is on disk — and never leaves the screen
+ * you were on. Work and Git are the project's own tabs; the Manager is its pane in Chat.
+ */
+function openPlace(project: string | null, place: Place, alongside: string[] = []): void {
+  if (place.to === "manager") {
+    chat.showCpo();
+    return;
+  }
+  // The Manager's own folder is not a project: it has no Review queue, Work tab or Git to open.
+  if (!project || project === CPO_ID) return;
+  if (place.to === "work") {
+    projectCtx(project).openRef(place.line ? `${place.path}:${place.line}` : place.path);
+  } else if (place.to === "git") {
+    void select(project, "git");
+  } else {
+    const paths = [...new Set([...alongside, ...(place.path ? [place.path] : [])])];
+    if (!paths.length) showReview(project);
+    else void review.openFiles(project, paths, place.path).then((opened) => opened || showReview(project));
+  }
+}
 
 /** Chat posts can open a file from ANY project, not whichever project happened to be selected
  * before the Workspace came up. Each post carries its routing context with it. */
@@ -475,6 +502,9 @@ function projectCtx(project: string): RenderCtx {
       await select(project);
       setTab("files");
       return (await projectTools.ensureFiles()).finishDocument(path);
+    },
+    openPlace(place, alongside) {
+      openPlace(project, place, alongside);
     },
   };
 }
@@ -3555,6 +3585,9 @@ async function boot(): Promise<void> {
       if (!/^(\r|\x1b|[0-9])$/.test(data)) return;
       const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
       if (owner) endPermissionWait(owner.project.id, sessionId);
+    },
+    openPlace(sessionId, place) {
+      openPlace(sessionById(sessionId)?.project ?? null, place);
     },
     onExit(sessionId) {
       exited.add(sessionId);

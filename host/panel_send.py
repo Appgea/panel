@@ -32,7 +32,8 @@ def main():
         "--link",
         action="append",
         default=[],
-        help="web URL or project-relative Panel route from the session rule",
+        help="web URL, or a Panel place: panel:review[:<path>], panel:work:<path>[:<line>], "
+        "panel:git, panel:manager (paths project-relative)",
     )
     args = parser.parse_args()
 

@@ -181,8 +181,11 @@ TOOLS = [
                         ]
                     },
                     "description": (
-                        "useful web URLs or project-relative Panel deeplinks. The injected "
-                        "session rule gives the concise route grammar."
+                        "web URLs, or Panel places the human can open with one click: "
+                        "'panel:review' (this work in Review), 'panel:review:<path>' (one "
+                        "file), 'panel:work:<path>:<line>' (the code in Work), 'panel:git', "
+                        "'panel:manager'. Paths are project-relative. images/audio/video "
+                        "already get a Review button; do not repeat them here."
                     )
                 }
             },

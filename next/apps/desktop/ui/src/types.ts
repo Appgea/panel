@@ -4,6 +4,7 @@
  */
 
 import type { SessionKind } from "./features/agent-kinds";
+import type { Place } from "./deeplink";
 
 export type { SessionKind };
 
@@ -234,6 +235,11 @@ export type RenderCtx = {
   openDocument(path: string, draft?: string): Promise<void>;
   /** Save the document if needed and return the exact text to a blocked agent. */
   finishDocument(path: string): Promise<string>;
+  /**
+   * Go to a Panel place (see deeplink.ts). `alongside` is the media of the report the link came
+   * in, so a Review link opens on all of it rather than one file of a set.
+   */
+  openPlace(place: Place, alongside?: string[]): void;
 };
 
 /** Renders one blocking question. `answer` fires at most once and unparks the agent. */

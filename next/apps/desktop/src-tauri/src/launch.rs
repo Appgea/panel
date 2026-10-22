@@ -51,7 +51,10 @@ the only conversation. send_to_user is not a message: it files a report to the h
 when done, blocked, needing a decision, or you made something to see or hear. Never per turn, never \
 for progress. Send a short title, ONE sentence `text`, an `outcome` (progress|done|blocked|\
 needs_decision), and `flow` code refs {ref, label, detail}. Every screenshot goes in `images`, \
-CAPTIONED; clips in `audio`; video in `video`, shown as a link.";
+CAPTIONED; clips in `audio`; video in `video`, shown as a link. To point the human at a place \
+in Panel, in `links` or in this terminal, write panel:review (your work in Review; \
+panel:review:<path> for one file), panel:work:<path>:<line> (the code in Work), panel:git or \
+panel:manager — paths relative to the project. Report media already gets a Review button.";
 
 /// Which agent this is. Workers build a project and report to the Inbox. The manager is the one
 /// agent that does neither, and the worker rule told it it was a worker: it filed reports to

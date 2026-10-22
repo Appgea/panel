@@ -16,6 +16,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { parsePlace, placeLabel } from "../deeplink";
 import { projectAssetUrl, projectImage } from "../project-assets";
 import type { Payload, ViewRenderer } from "../types";
 import { arr, el, obj, str } from "./dom";
@@ -147,7 +148,9 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
 
   const attachments = arr(payload.attachments).map((item) => named(item, "path"));
   const links = arr(payload.links).map((item) => named(item, "url"));
-  if (attachments.length || links.length) {
+  // Everything this report made you look at or hear. Its Review opens on exactly these.
+  const media = project ? [...images, ...clips, ...films].map((item) => str(item.path)).filter(Boolean) : [];
+  if (attachments.length || links.length || media.length) {
     const rail = el("div", "v-message-attachments");
     rail.append(el("i", "v-message-attachments-cap", "Open"));
     /** A door that names its own kind. `node` is a <button> or an <a>; only the label differs. */
@@ -158,6 +161,20 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
       node.append(el("span", "v-message-attachment-name", name));
       return node;
     };
+    const door = (kind: string, name: string, title: string, go: () => void): HTMLElement => {
+      const button = el("button", undefined) as HTMLButtonElement;
+      button.type = "button";
+      button.title = title;
+      button.addEventListener("click", go);
+      return notate(button, kind, name);
+    };
+    // Reviewing what was made is the usual reason to open a report, so it is the first door.
+    if (media.length) {
+      const reviewDoor = door("Review", media.length === 1 ? basename(media[0]) : `${media.length} files`,
+        "Review what this report made", () => ctx.openPlace({ to: "review" }, media));
+      reviewDoor.classList.add("is-primary");
+      rail.append(reviewDoor);
+    }
     for (const attachment of attachments) {
       const path = str(attachment.path);
       const folder = str(attachment.kind, "file") === "folder";
@@ -173,6 +190,22 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
     for (const link of links) {
       const url = str(link.url);
       if (!url) continue;
+      const place = parsePlace(url);
+      if (place) {
+        // A bare `review` says what the Review door above already does.
+        if (place.to === "review" && !place.path && media.length) continue;
+        const { kind, name } = placeLabel(place);
+        rail.append(door(kind, str(link.label, name), url, () => ctx.openPlace(place, media)));
+        continue;
+      }
+      if (!/^https?:\/\//i.test(url)) {
+        // Not a web page and not a Panel place: say so instead of a door that does nothing.
+        const dead = notate(el("span", undefined), "Link", str(link.label, url));
+        dead.classList.add("is-dead");
+        dead.title = `${url}: not a web link or a Panel place (panel:review, panel:work:<path>, panel:git, panel:manager)`;
+        rail.append(dead);
+        continue;
+      }
       const anchor = el("a", undefined) as HTMLAnchorElement;
       anchor.href = url;
       anchor.target = "_blank";

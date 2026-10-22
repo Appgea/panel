@@ -2744,7 +2744,7 @@ fn open_link(url: String) -> Result<(), String> {
         return Err("Only web links open from here.".into());
     }
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("open").arg(&url).status();
+        let _ = platform::open(&url).status();
     });
     Ok(())
 }
@@ -2762,6 +2762,22 @@ async fn open_server(project: String) -> Result<(), String> {
 
 /// Hand a file to the OS. Video is the reason this exists: Panel will not play a clip inline,
 /// so "watch it" has to mean the real player, with a scrubber and a volume control.
+/// The files a report names, as Review keeps them — so its Review button opens exactly those,
+/// including one the watcher has not settled yet or one made before any session was open.
+/// Anything missing, outside the project, or not a picture, sound or video is left out.
+#[tauri::command]
+async fn made_entries(project: String, paths: Vec<String>) -> Result<Vec<made::Made>, String> {
+    off_main(move || {
+        let root = find_project(&project)?.path;
+        Ok(paths
+            .iter()
+            .filter_map(|path| confine(&root, path).ok())
+            .filter_map(|file| made::describe(&project, &file))
+            .collect())
+    })
+    .await
+}
+
 #[tauri::command]
 async fn open_media(project: String, path: String) -> Result<(), String> {
     off_main(move || {
@@ -3722,6 +3738,7 @@ fn main() {
             open_link,
             clipboard_text,
             open_media,
+            made_entries,
             cancel_shutdown,
             shutdown_panel,
             answer_ask,

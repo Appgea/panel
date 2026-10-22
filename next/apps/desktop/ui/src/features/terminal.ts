@@ -23,6 +23,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { IS_MAC, matches, matchesShortcut, label as chordLabel } from "./keymap";
 import { projectIconUrl } from "../project-assets";
+import { PLACE_IN_TEXT, parsePlace, type Place } from "../deeplink";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalChunk = {
@@ -194,6 +195,8 @@ export type DeckEvents = {
   /** Start the same kind of session again. Given, an ended pane offers a Restart button. */
   onRestart?(sessionId: string): void;
   canRestart?(sessionId: string): boolean;
+  /** A `panel:` link this session printed was clicked (deeplink.ts). */
+  openPlace?(sessionId: string, place: Place): void;
 };
 
 export class TerminalDeck {
@@ -533,6 +536,30 @@ export class TerminalDeck {
         },
       ),
     );
+    // An agent's `panel:review:…` / `panel:work:…` is a place in Panel, opened the same way.
+    term.registerLinkProvider({
+      provideLinks: (y, callback) => {
+        const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
+        const links = [...text.matchAll(PLACE_IN_TEXT)].flatMap((match) => {
+          const place = parsePlace(match[0]);
+          if (!place || match.index === undefined) return [];
+          return [{
+            range: { start: { x: match.index + 1, y }, end: { x: match.index + match[0].length, y } },
+            text: match[0],
+            activate: (event: MouseEvent) => {
+              if (MAC ? event.metaKey : event.ctrlKey) this.events.openPlace?.(sessionId, place);
+            },
+            hover: () => {
+              mount.title = MAC ? "⌘-click to open in Panel" : "Ctrl-click to open in Panel";
+            },
+            leave: () => {
+              mount.title = "";
+            },
+          }];
+        });
+        callback(links.length ? links : undefined);
+      },
+    });
     term.open(mount);
 
     const pane: Pane = {

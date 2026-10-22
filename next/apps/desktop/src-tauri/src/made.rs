@@ -133,7 +133,7 @@ impl MadeWatch {
     }
 }
 
-fn describe(project: &str, path: &Path) -> Option<Made> {
+pub fn describe(project: &str, path: &Path) -> Option<Made> {
     let metadata = std::fs::metadata(path).ok()?;
     if !metadata.is_file() || metadata.len() == 0 {
         return None;

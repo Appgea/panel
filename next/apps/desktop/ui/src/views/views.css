@@ -1166,6 +1166,12 @@
   color: var(--accent);
 }
 .v-message-attachment:hover .v-message-attachment-kind { color: inherit; }
+/* Review is the door a report is usually opened for. */
+.v-message-attachment.is-primary { border-color: var(--accent); color: var(--accent); }
+.v-message-attachment.is-primary .v-message-attachment-kind { color: inherit; }
+/* A link the agent got wrong: shown, so the mistake is visible, but not a door. */
+.v-message-attachment.is-dead { opacity: 0.55; cursor: default; text-decoration: line-through; }
+.v-message-attachment.is-dead:hover { border-color: inherit; color: inherit; }
 .sim-card.sim-error { border-left-color: var(--risk); }
 .sim-card.sim-paused { border-left-color: var(--warn); opacity: 0.85; }
 .sim-card.sim-stopped { border-left-color: var(--line-soft); opacity: 0.75; }

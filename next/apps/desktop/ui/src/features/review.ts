@@ -57,6 +57,11 @@ export type ReviewEvents = {
 export type ReviewHandle = {
   /** Go straight into a project's oldest unseen batch, else its newest. False when it has nothing. */
   openProject(project: string): boolean;
+  /**
+   * Review exactly these files — what one report pointed at — starting on `start`. Files the
+   * queue has not heard of yet join it here. False when none of them is on disk.
+   */
+  openFiles(project: string, paths: string[], start?: string): Promise<boolean>;
   open(): void;
   clear(): void;
 };
@@ -740,6 +745,29 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
       const target = [...mine].reverse().find((batch) => batch.some((item) => !item.seen)) ?? mine[0];
       if (target) review(target, target.some((item) => !item.seen) ? 0 : newestAt(target));
       return Boolean(target);
+    },
+    async openFiles(project, paths, start) {
+      const found = await invoke<Made[]>("made_entries", { project, paths }).catch(() => [] as Made[]);
+      if (!found.length) return false;
+      const batch = inOrder(
+        found.map((made) => {
+          const known = items.get(made.path);
+          // Same version: keep its note and its request. A newer one is news, like panel-made.
+          if (known && known.modified === made.modified) return known;
+          const item: Item = { ...made, seen: true, at: Date.now(), ...(known?.before ? { before: known.before } : {}) };
+          items.set(made.path, item);
+          return item;
+        }),
+      );
+      const wanted = start?.replaceAll("\\", "/");
+      const at = wanted
+        ? batch.findIndex((item) => {
+            const path = item.path.replaceAll("\\", "/");
+            return path === wanted || path.endsWith(`/${wanted}`);
+          })
+        : -1;
+      review(batch, Math.max(0, at));
+      return true;
     },
     open() {
       openState = true;

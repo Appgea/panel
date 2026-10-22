@@ -17,6 +17,7 @@ const CTX: RenderCtx = {
   openRef: () => {},
   openDocument: async () => {},
   finishDocument: async () => "",
+  openPlace: () => {},
 };
 
 const ago = (minutes: number): number => Date.now() - minutes * 60_000;
