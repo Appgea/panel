@@ -72,6 +72,31 @@
 }
 /* New since you last looked: the accent edge, nothing louder. */
 .rv-batch.is-new { box-shadow: inset 3px 0 0 var(--accent); }
+/* Where J/K is: an outline, so it reads apart from the accent edge. */
+.rv-batch.is-focus { border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); }
+
+.rv-filters { display: flex; align-items: center; gap: 8px; }
+.rv-pick {
+  max-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+.rv-seg { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--bg-raised); }
+.rv-seg-btn {
+  padding: 3px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.rv-seg-btn:hover { color: var(--ink); }
+.rv-seg-btn.is-on { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--ink); }
 
 .rv-head { display: flex; align-items: flex-start; gap: 12px; }
 .rv-title { flex: 1; min-width: 0; display: grid; gap: 2px; }
@@ -101,7 +126,20 @@
   cursor: zoom-in;
   text-align: left;
 }
+.rv-shot { position: relative; }
 .rv-shot:hover { border-color: var(--accent); }
+/* Your note on a piece, or a redo of one: a chip in the corner, the words on hover. */
+.rv-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+.rv-chip.is-change { background: #f2b84b; color: #1d1608; }
+.rv-chip.is-redo { background: var(--accent); color: var(--on-accent); }
 .rv-shot.is-audio,
 .rv-shot.is-video,
 .rv-shot.is-more,
@@ -235,7 +273,6 @@
   --rd-ink: #eef1f7;
   --rd-dim: #9aa3b5;
   --rd-line: rgb(255 255 255 / 0.1);
-  --rd-good: #5fd99a;
   --rd-change: #f2b84b;
   position: fixed;
   inset: 0;
@@ -352,7 +389,19 @@
 .rd-dock { display: grid; justify-items: center; gap: 12px; padding: 10px 18px 16px; }
 .rd-caption { color: var(--rd-dim); font: var(--text-sm) ui-monospace, Menlo, monospace; }
 .rd-verdicts { display: flex; gap: 10px; }
-.rd-verdicts[hidden], .rd-note[hidden], .rd-strip[hidden] { display: none; }
+.rd-verdicts[hidden], .rd-note[hidden], .rd-strip[hidden], .rd-verdict[hidden], .rd-asked[hidden] { display: none; }
+/* What you asked for, above a redo: the reason this piece is back. */
+.rd-asked {
+  max-width: min(720px, 90vw);
+  padding: 6px 14px;
+  border: 1px solid rgb(242 184 75 / 0.4);
+  border-radius: 999px;
+  background: rgb(242 184 75 / 0.1);
+  color: var(--rd-ink);
+  font-size: var(--text-sm);
+}
+.rd-frame.is-before .rd-image, .rd-frame.is-before .rd-video, .rd-frame.is-before .rd-audio { outline: 2px dashed var(--rd-change); outline-offset: 6px; }
+.rd-gone { color: var(--rd-dim); }
 .rd-verdict {
   display: flex;
   align-items: center;
@@ -373,7 +422,7 @@
   color: var(--rd-dim);
   font: var(--text-xs) ui-monospace, Menlo, monospace;
 }
-.rd-verdict.is-good:hover, .rd-verdict.is-good.is-on { border-color: var(--rd-good); background: rgb(95 217 154 / 0.14); }
+.rd-verdict.is-flip:hover, .rd-verdict.is-flip.is-on { border-color: var(--rd-ink); background: rgb(255 255 255 / 0.1); }
 .rd-verdict.is-change:hover, .rd-verdict.is-change.is-on { border-color: var(--rd-change); background: rgb(242 184 75 / 0.14); }
 .rd-verdict.is-on { transform: scale(1.04); }
 .rd-note input {
@@ -422,7 +471,6 @@
   height: 10px;
   border-radius: 50%;
 }
-.rd-thumb.is-good .rd-mark { background: var(--rd-good); }
 .rd-thumb.is-change .rd-mark { background: var(--rd-change); }
 
 .rd-summary {

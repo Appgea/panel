@@ -162,6 +162,7 @@ Everything degrades: a missing shim omits its flag and the agent launches plain.
 | Device leases | `~/.panel/leases.json` (+ `.lock`) | shared with `common/lease.py` |
 | Notebook | `~/.appgea/notes.md` | outside the user root on purpose |
 | Review queue | webview `localStorage` | this window's to-do list |
+| Review old versions | webview IndexedDB | files you sent back, kept so the redo can be compared |
 | Keymap, preferences | webview `localStorage` (`panel-keymap`, `panel-prefs`) | only overrides stored |
 | Edit replay | memory only | bounded (see ingress) |
 | Ingress port | `~/.appgeapanel/ingress-port` | removed on clean exit |

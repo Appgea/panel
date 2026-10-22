@@ -133,7 +133,7 @@ A flat, read-only feed (newest last) of everything agents reported via `send_to_
 An ordinary agent session rooted at your **ops tree**, running whichever CLI you start it with. It plans, keeps `ops/` current and writes briefs you hand to workers; it does not edit app code and cannot see or type into worker terminals (it reads their report logs). Its standing prompt is `ops/AGENTS.md` — **editable on the Manager screen, with a reset-to-shipped button**. See [CONFIGURATION.md §4](CONFIGURATION.md) for the ops tree.
 
 ### Review
-Pictures, sounds and videos that appeared in a project while a session was open there (build output and caches skipped; a file counts once it stops changing). Files one project makes within a few minutes form a **batch**. Open the **deck**: big media, keyboard-driven — `← →` previous/next, `Space` play/pause, `G` looks good, `C` needs changes (short note), `Esc` close. At the end your verdicts become one message **sent straight into that agent's terminal**. The queue lives in this window's local storage.
+Pictures, sounds and videos that appeared in a project while a session was open there (build output and caches skipped; a file counts once it stops changing). Files one project makes within a few minutes form a **batch**. Unseen batches sit on top with an accent edge; the corner pop-up's `×` only hides it. Open the **deck**: big media, keyboard-driven — `← →` previous/next, `Space` play/pause, `C` needs changes (short note; empty Enter takes it back), `B` before/after on a redo, `Esc` close. Nothing needs approving: what you don't flag is fine. Notes are kept as you write them, so leaving part way loses nothing. Walking to the end marks the batch reviewed; with notes, they become one message **sent straight into that agent's terminal**. When the agent writes that file again, the new version shows a **redo** chip, what you asked, and `B` flips to the old version. On the Review screen: filter by project and kind, `J`/`K` move, `Enter` review, `D` done, `F` Finder, `U` undo. Files gone from disk leave the list. The queue lives in this window's local storage; old versions in IndexedDB.
 
 ### Support
 Every app's support form (Google Forms) merged into one queue; badge = unread. Needs the `support` extension and a Google service-account key (§12). It never polls — press fetch when you want fresh data.
@@ -276,7 +276,8 @@ Open **Skills** from a Claude/Codex terminal header, the session strip, or Setti
 | Move terminal to tab 1…9 / to a new tab | `⌘⌥1…9` / `⌘⌥T` | `Ctrl+Alt+1…9` / `Ctrl+Alt+T` |
 | Git: press Next move | `⌘↵` | `Ctrl+↵` |
 | Terminal text size (bigger / smaller / reset) | `⌘=` / `⌘-` / `⌘0` | bound to `Meta` in source; behaviour on Windows/Linux unverified |
-| Review deck | `← → Space G C Esc` | same |
+| Review screen | `J K Enter D F U` | same |
+| Review deck | `← → Space C B Esc` | same |
 
 ---
 
@@ -284,7 +285,7 @@ Open **Skills** from a Claude/Codex terminal header, the session strip, or Setti
 
 - **Run three agents on three apps and see who needs you** → start each from its project; watch the sidebar lanes; `⌘⇧A` jumps to the longest-waiting.
 - **Hand an agent a screenshot** → paste into its terminal; Panel types the saved file's path.
-- **Review what an agent drew** → Review → open the batch → `G`/`C` through it → verdict goes to its terminal.
+- **Review what an agent drew** → Review → open the batch → `→` through it, `C` on what needs changes → the notes go to its terminal.
 - **Undo an agent's overreach** → Dashboard station → replay the edit; Git → *Discard* on the turn's card, or *Undo last commit* in the safety bar.
 - **Edit a file the agent is also editing** → just type; if it writes underneath you, resolve the conflict banner (keep your buffer — `⌘S` then overwrites the agent's version — or take the agent's).
 - **Debug a Flutter app** → Debug tab → `F5`; set breakpoints with `F9`.
