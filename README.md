@@ -18,6 +18,11 @@ agent. See [`next/WORK.md`](next/WORK.md).
 [`next/README.md`](next/README.md) is the design document: what the zones are, how routing works,
 how to add a visual. This file is how to get it running.
 
+Full documentation is in [`docs/`](docs/README.md): a [user guide](docs/USER-GUIDE.md),
+[architecture](docs/ARCHITECTURE.md), [backend reference](docs/BACKEND.md),
+[protocol reference](docs/PROTOCOL.md), [configuration](docs/CONFIGURATION.md) and
+[extensions](docs/MODULES.md).
+
 - [Screenshots](#screenshots)
 - [Requirements](#requirements)
 - [Install](#install)
