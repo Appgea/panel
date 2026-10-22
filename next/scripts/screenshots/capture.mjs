@@ -16,6 +16,7 @@ import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { webkit } from "playwright";
+import { asset, icon } from "./mock-media.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
@@ -25,9 +26,13 @@ const PORT = 1488;
 
 /** Start the UI's own Vite on a port nothing else uses, and wait until it serves. */
 async function startVite() {
-  const vite = spawn(join(ui, "node_modules", ".bin", "vite"), ["--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], {
+  const windows = process.platform === "win32";
+  const bin = join(ui, "node_modules", ".bin", windows ? "vite.cmd" : "vite");
+  const vite = spawn(bin, ["--host", "127.0.0.1", "--port", String(PORT), "--strictPort"], {
     cwd: ui,
     stdio: ["ignore", "pipe", "pipe"],
+    // A .cmd only runs through the shell on Windows.
+    shell: windows,
   });
   await new Promise((ready, fail) => {
     const timer = setTimeout(() => fail(new Error("Vite did not start in 30 s")), 30_000);
@@ -44,6 +49,28 @@ async function startVite() {
 
 const settle = (page, ms = 600) => page.waitForTimeout(ms);
 
+/** Stop Vite and, on Windows, the shell it runs under and everything that shell started. */
+function stopVite(vite) {
+  if (!vite) return;
+  if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(vite.pid), "/T", "/F"]);
+  else vite.kill();
+}
+
+/**
+ * The project-icon and project-asset schemes, answered with mock-media.mjs. demo-backend.js makes
+ * the UI ask for them in their Windows form (`http://<scheme>.localhost/…`), which is a URL a
+ * page route can catch.
+ */
+async function serveMockMedia(page) {
+  await page.route(/^http:\/\/project-(icon|asset)\.localhost\//, (route) => {
+    const url = new URL(route.request().url());
+    const [, first] = url.pathname.split("/");
+    const body = url.hostname.startsWith("project-icon") ? icon(decodeURIComponent(first)) : asset(url.pathname);
+    if (!body) return route.fulfill({ status: 404, body: "" });
+    return route.fulfill({ status: 200, contentType: "image/svg+xml", body });
+  });
+}
+
 /** Each shot starts from a fresh, booted app with the demo playing. */
 const SHOTS = [
   {
@@ -55,13 +82,13 @@ const SHOTS = [
   {
     name: "project",
     async prepare(page) {
-      await page.click('#projectList [data-project-id="tavla"]');
+      await page.click('#projectList [data-project-id="tidepool"]');
     },
   },
   {
     name: "dashboard",
     async prepare(page) {
-      await page.click('#projectList [data-project-id="tavla"]');
+      await page.click('#projectList [data-project-id="tidepool"]');
       await settle(page);
       await page.click("#tabDash");
     },
@@ -69,17 +96,44 @@ const SHOTS = [
   {
     name: "work",
     async prepare(page) {
-      await page.click('#projectList [data-project-id="tavla"]');
+      await page.click('#projectList [data-project-id="tidepool"]');
       await settle(page);
       await page.click("#tabFiles");
       await settle(page);
       const tree = page.locator("#filesPane");
-      for (const name of ["lib", "game", "doubling_cube.dart"]) {
+      for (const name of ["lib", "tank", "feeding.dart"]) {
         await tree.getByText(name, { exact: true }).first().click();
         await settle(page, 300);
       }
       // Land on the agent's edit, so the change marks in the gutter are on screen.
-      await page.locator(".cm-line", { hasText: "void resign" }).evaluate((line) => line.scrollIntoView({ block: "center" }));
+      await page.locator(".cm-line", { hasText: "void eat" }).evaluate((line) => line.scrollIntoView({ block: "center" }));
+    },
+  },
+  {
+    // What the agents made, waiting in batches. Dark, like the hero: renders read best on it.
+    name: "review",
+    dark: true,
+    async prepare(page) {
+      await page.click("#reviewButton");
+    },
+  },
+  {
+    // One batch in the deck: a report's Review button lands here.
+    name: "review-deck",
+    dark: true,
+    async prepare(page) {
+      await page.click("#reviewButton");
+      await settle(page);
+      await page.locator(".rv-batch").first().locator(".rv-btn.is-primary").click();
+      await settle(page);
+      await page.keyboard.press("ArrowRight");
+    },
+  },
+  {
+    name: "manager",
+    dark: true,
+    async prepare(page) {
+      await page.click("#cpoButton");
     },
   },
   {
@@ -136,10 +190,14 @@ try {
     if (shot.page) {
       await page.goto(pathToFileURL(join(here, shot.page)).href, { waitUntil: "load" });
     } else {
+      await serveMockMedia(page);
       await page.addInitScript({ path: join(here, "demo-backend.js") });
       await page.goto(url);
       await page.waitForSelector("#panelBoot", { state: "detached", timeout: 15_000 }).catch(() => undefined);
       await page.evaluate(() => window.__panelDemo.play());
+      // Review's corner cards announce the demo's renders. Real, but on every other screen they
+      // only cover the sidebar the shot is about.
+      if (!shot.peeks) await page.addStyleTag({ content: ".rv-peeks { display: none !important; }" });
       await settle(page);
       await shot.prepare(page);
     }
@@ -152,7 +210,7 @@ try {
   }
 } finally {
   await browser.close();
-  vite?.kill();
+  stopVite(vite);
 }
 
 // Retina PNGs are large. pngquant cuts them to about a third with no visible change; without it

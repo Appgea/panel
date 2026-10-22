@@ -34,10 +34,10 @@
   .name { font-size: 64px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; margin-top: 6px; }
   .pitch { margin-top: 40px; font-size: 27px; line-height: 1.35; color: var(--ink); font-weight: 500; }
   .pitch span { color: var(--accent); }
-  .meta { margin-top: 30px; display: flex; gap: 10px; }
+  .meta { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; max-width: 520px; }
   .chip {
     font-size: 15px; font-weight: 600; color: var(--ink-dim); padding: 7px 13px;
-    border: 1px solid var(--line); border-radius: 999px; background: #0c101acc;
+    border: 1px solid var(--line); border-radius: 999px; background: #0c101acc; white-space: nowrap;
   }
   .shot {
     position: absolute; left: 600px; top: 86px; width: 860px;
@@ -59,7 +59,7 @@
     </div>
     <p class="pitch">Every coding agent, every project,<br>one window.<br><span>See which one needs you.</span></p>
     <div class="meta">
-      <span class="chip">macOS</span>
+      <span class="chip">macOS · Windows</span>
       <span class="chip">Claude · Codex · Grok · opencode</span>
       <span class="chip">MIT</span>
     </div>

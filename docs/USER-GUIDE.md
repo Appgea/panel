@@ -1,7 +1,7 @@
 ﻿# User guide
 
-How to use Appgea Panel day to day. Install and first-run steps are in the root
-[README](../README.md); this guide starts once the app is open. Shortcuts shown as macOS / Windows·Linux.
+How to use Appgea Panel day to day. Install and first-run steps are in the
+[setup guide](SETUP.md); this guide starts once the app is open. Shortcuts shown as macOS / Windows·Linux.
 
 **Mental model**
 - **Agents are hosted, not driven.** Each agent (`claude`, `codex`, …) runs in a real terminal exactly as it would anywhere else. Panel only watches.

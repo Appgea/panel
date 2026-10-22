@@ -1,7 +1,7 @@
 # Contributing
 
 Panel is a macOS alpha. Rust, Node, Python, and Xcode command line tools are required.
-See [README.md](README.md) for supported versions and setup.
+See [docs/SETUP.md](docs/SETUP.md) for supported versions and setup.
 
 ## Development
 
@@ -57,7 +57,8 @@ The app uses an ad-hoc signature. It is not notarized. There are no published re
 ## Screenshots
 
 The README images in `docs/screenshots/` come from a script, not a screen grab. It runs the real
-UI in headless WebKit against `next/scripts/screenshots/demo-backend.js`, a made-up portfolio. No
+UI in headless WebKit against `next/scripts/screenshots/demo-backend.js`, a made-up portfolio of six invented apps whose icons
+and renders are drawn by `mock-media.mjs`. No
 window opens and nothing on your machine is read. The top banner, `banner.png`, is rendered from
 `next/scripts/screenshots/banner.html` and shows `hero.png`.
 

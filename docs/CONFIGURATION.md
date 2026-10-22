@@ -60,8 +60,8 @@ are preserved. It is watched: edits by you, an agent, or the folder picker updat
 
 **Project entry**
 ```json
-{ "id": "tavla", "name": "Tavla", "path": "/Users/me/apps/tavla",
-  "group": "appgea", "role": "leaf", "type": "generic",
+{ "id": "tidepool", "name": "Tidepool", "path": "/Users/me/apps/tidepool",
+  "group": "games", "role": "leaf", "type": "generic",
   "parentId": "", "extensionId": "" }
 ```
 - `path` required. `id` defaults to the folder name; **ids must be unique** (Add refuses duplicates by path or id). `name` defaults to `id`.

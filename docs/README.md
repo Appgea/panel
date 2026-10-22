@@ -5,7 +5,7 @@ watches them, tells you which one needs you, and hands you the few files you hav
 
 | I want to… | Read |
 |---|---|
-| install it, first run, update, troubleshoot | [root README](../README.md) |
+| install it, first run, update, troubleshoot | [SETUP.md](SETUP.md) |
 | **use** it — every screen, key and workflow | [USER-GUIDE.md](USER-GUIDE.md) |
 | understand the design (hosted agents, two roots, routing) | [next/README.md](../next/README.md) |
 | see how the pieces fit: crates, event flow, launch wiring, build, tests | [ARCHITECTURE.md](ARCHITECTURE.md) |
