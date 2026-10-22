@@ -216,6 +216,8 @@ export class TerminalDeck {
   private observer: ResizeObserver;
   /** While the all-terminals wall is up, the overview owns layout — show()/fitVisible() stand down. */
   private overviewActive = false;
+  /** The one screen on loan to a host outside the deck, and the observer that fits it there. */
+  private lent: { sessionId: string; observer: ResizeObserver } | null = null;
   /** Shared by every pane, remembered across restarts. See FONT_KEY above. */
   private fontSize = loadFontSize();
 
@@ -795,6 +797,7 @@ export class TerminalDeck {
   /** Show one session's screen and hide the rest. Everything keeps running either way. */
   show(sessionId: string | null): void {
     if (this.overviewActive) return;
+    this.endLoan();
     if (this.searchIn && this.searchIn !== sessionId) this.closeSearch(false);
     this.visible = sessionId;
     if (sessionId) this.focused = sessionId;
@@ -1122,6 +1125,7 @@ export class TerminalDeck {
   /** Enter the all-terminals wall: the deck stops driving the single visible screen — the
    *  overview owns layout and fitting until reclaimAll(). */
   beginOverview(): void {
+    this.endLoan();
     this.overviewActive = true;
   }
 
@@ -1148,6 +1152,56 @@ export class TerminalDeck {
         });
       }
     }
+  }
+
+  /**
+   * Show one session's live screen in a host outside the deck — the Manager pane in Chat. A PTY
+   * belongs to exactly one deck, so a second view would mean a second xterm racing the first for
+   * size; lending moves the one mount instead, and the next show() or reclaim brings it home.
+   */
+  lend(sessionId: string, cell: HTMLElement): void {
+    this.unlend();
+    const pane = this.panes.get(sessionId);
+    if (!pane) return;
+    cell.appendChild(pane.mount);
+    pane.mount.hidden = false;
+    const fit = (): void => {
+      if (pane.mount.parentElement !== cell || pane.mount.clientWidth < 2) return;
+      pane.fit.fit();
+      if (!pane.dead) {
+        void invoke("resize_terminal", {
+          terminalId: pane.terminalId,
+          cols: pane.term.cols,
+          rows: pane.term.rows,
+        });
+      }
+    };
+    const observer = new ResizeObserver(fit);
+    observer.observe(cell);
+    this.lent = { sessionId, observer };
+    requestAnimationFrame(() => {
+      fit();
+      if (pane.term.rows > 0) pane.term.refresh(0, pane.term.rows - 1);
+      pane.term.focus();
+    });
+  }
+
+  /** Forget a loan whose mount something else is about to re-home (show, the wall, a close). */
+  private endLoan(): void {
+    this.lent?.observer.disconnect();
+    this.lent = null;
+  }
+
+  /** Take a lent screen back, hidden, under the deck host. */
+  unlend(): void {
+    if (!this.lent) return;
+    const { sessionId, observer } = this.lent;
+    this.lent = null;
+    observer.disconnect();
+    const pane = this.panes.get(sessionId);
+    if (!pane || this.overviewActive) return;
+    pane.mount.hidden = true;
+    this.host.appendChild(pane.mount);
   }
 
   /** Pull every screen back under the deck host, hidden, WITHOUT leaving the overview — the
@@ -1177,6 +1231,7 @@ export class TerminalDeck {
   remove(sessionId: string): void {
     const pane = this.panes.get(sessionId);
     if (!pane) return;
+    if (this.lent?.sessionId === sessionId) this.endLoan();
     if (this.searchIn === sessionId) this.closeSearch(false);
     pane.term.dispose();
     pane.mount.remove();

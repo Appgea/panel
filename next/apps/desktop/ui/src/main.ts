@@ -222,7 +222,11 @@ const attentionOf = (here: ProjectState): Attention =>
       ? "done"
       : null;
 /** The human can see this project right now. */
-const lookingAt = (id: string): boolean => document.hasFocus() && active === id && !offProject();
+const lookingAt = (id: string): boolean =>
+  document.hasFocus() &&
+  (id === CPO_ID
+    ? chatActive && chat.currentSection() === "manager"
+    : active === id && !offProject());
 
 type Alert = { title: string; body: string; urgent: boolean };
 let badgeShown = -1;
@@ -352,9 +356,22 @@ async function runWithAgent(prompt: string): Promise<void> {
 
 let shutdownPromptOpen = false;
 
-/** The manager's session id. Not a project: it never appears in the portfolio, and the host
- *  resolves it against the ops tree instead of the registry. Mirrors CPO_ID in main.rs. */
+/** The manager's project id. It has a project state like every worker, so its terminal is tracked
+ *  the same way, but it is not in the portfolio: no sidebar row, no Home card, no git surface. The
+ *  host resolves it against the ops tree. Mirrors CPO_ID in main.rs. */
 const CPO_ID = "appgea";
+
+/** Every project state except the manager's — what the portfolio surfaces iterate. */
+function portfolioStates(): ProjectState[] {
+  return [...states.values()].filter((here) => here.project.id !== CPO_ID);
+}
+
+/** The manager's live session, newest first. Null when it is not running. */
+function managerSession(): Session | null {
+  const here = states.get(CPO_ID);
+  const live = here?.sessions.filter((session) => isAgentKind(session.kind) && !exited.has(session.id)) ?? [];
+  return live[live.length - 1] ?? null;
+}
 
 const projectTools = createProjectTools(
   {
@@ -397,12 +414,12 @@ const projectTools = createProjectTools(
         });
     },
     runWithAgent,
-    gitProjects: () => [...states.values()]
+    gitProjects: () => portfolioStates()
       .filter(({ project }) => project.role === "leaf" && project.exists)
       .map(({ project }) => ({ id: project.id, name: project.name, path: project.path })),
     openGitProject: (id) => { void select(id, "git"); },
     openProject(path, tab) {
-      const target = [...states.values()].find(({ project }) =>
+      const target = portfolioStates().find(({ project }) =>
         project.path === path
         || path.startsWith(project.path + "/")
         || project.path.startsWith(path + "/"),
@@ -691,7 +708,7 @@ function showSessions(): void {
   syncProjectTerminals();
   paintBadges();
   if (homeActive) home.sync(homeProjects());
-  if (terminalsActive) terminals.sync(homeProjects());
+  if (terminalsActive) terminals.sync(wallProjects());
 }
 
 /**
@@ -855,6 +872,8 @@ async function closeSession(sessionId: string): Promise<void> {
     setPhase(sessionId, null);
     here.workBySession.delete(sessionId);
     deck.remove(sessionId);
+    // Closed from the wall or its project page, the manager's pane must stop showing it too.
+    chat.noteExit(sessionId);
     here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
     if (active === here.project.id) showSessions();
     if (!here.running) setStatus(here.project.id, "idle", "no agent running");
@@ -885,8 +904,15 @@ async function closeSession(sessionId: string): Promise<void> {
  * On a project the same digits are Work's file slots. ⌘J is the door between the two, and ⌘K
  * lands straight on Runs.
  */
-function homeProjects(): HomeProject[] {
-  return [...states.values()].filter((here) => here.project.role === "leaf").map((here) => ({
+/** The wall's projects: the portfolio plus the manager, so its terminal sits on the wall like any
+ *  worker's. Home and every other portfolio surface use homeProjects() and leave it out. */
+function wallProjects(): HomeProject[] {
+  return homeProjects(true);
+}
+
+function homeProjects(withManager = false): HomeProject[] {
+  const pool = withManager ? [...states.values()] : portfolioStates();
+  return pool.filter((here) => here.project.role === "leaf").map((here) => ({
     id: here.project.id,
     name: here.project.name,
     path: here.project.path,
@@ -985,7 +1011,7 @@ function showTerminals(at?: number): void {
   mainZone().hidden = true;
   el("terminalsScreen").hidden = false;
   deck.beginOverview(); // the deck stands down; the wall owns the panes
-  terminals.open(homeProjects(), at);
+  terminals.open(wallProjects(), at);
   void runner.refreshTargets();
   pushRunBar();
   paintNav();
@@ -1254,7 +1280,7 @@ function exitTerminals(): void {
 }
 
 function runnerProjects(): RunnerProject[] {
-  return [...states.values()].filter((here) => here.project.role === "leaf").map((here) => ({
+  return portfolioStates().filter((here) => here.project.role === "leaf").map((here) => ({
     id: here.project.id,
     name: here.project.name,
     exists: here.project.exists,
@@ -1526,6 +1552,11 @@ function jumpToSession(projectId: string, sessionId: string): void {
   // Set the destination BEFORE selecting: select() -> showSessions() reads activeSession.
   const here = state(projectId);
   if (here) here.activeSession = sessionId;
+  // The manager's home is its pane in Chat, not a project page around the ops tree.
+  if (projectId === CPO_ID) {
+    chat.showCpo();
+    return;
+  }
   void select(projectId, "terminals").then(() => {
     if (active === projectId && projectTerminalVisible()) deck.focus();
   });
@@ -1551,9 +1582,34 @@ function paintNav(): void {
   el("settingsButton").classList.toggle("is-active", settingsActive);
 }
 
+/** The manager's lane, on its own row: parked on you, finished out of sight, or mid-turn. */
+function paintManagerNav(): void {
+  const badge = document.getElementById("cpoState");
+  const here = state(CPO_ID);
+  if (!badge) return;
+  const live = managerSession();
+  const attention = here ? attentionOf(here) : null;
+  const phase = live ? sessionPhase.get(live.id) : undefined;
+  const [label, tone, title] =
+    attention === "needs"
+      ? ["!", "warn", "The manager is waiting on you"]
+      : attention === "done"
+        ? ["✓", "ok", "The manager finished a turn"]
+        : phase === "work"
+          ? ["…", "work", "The manager is working"]
+          : ["", "", ""];
+  badge.hidden = !label;
+  badge.textContent = label;
+  badge.className = `nav-badge nav-state${tone ? ` t-${tone}` : ""}`;
+  badge.title = title;
+}
+
 /** Each sidebar destination reflects the section actually being shown. */
 function paintChatNav(): void {
   const selected = chat.currentSection();
+  // Looking at the manager's pane is looking at the manager: its finished turn has been seen.
+  if (selected === "manager") markSeen(CPO_ID);
+  paintManagerNav();
   for (const [id, section] of [["chatButton", "reports"], ["cpoButton", "manager"]] as const) {
     const button = el(id);
     const on = selected === section;
@@ -1722,7 +1778,7 @@ function activeSort(): SortMode {
  *  so even "recent" never shuffles two projects that were last touched at the same moment. */
 function orderProjects(): ProjectState[] {
   const mode = activeSort();
-  const all = [...states.values()];
+  const all = portfolioStates();
   for (const here of all) if (!manualOrder.includes(here.project.id)) manualOrder.push(here.project.id);
   const children = (id: string): ProjectState[] =>
     all.filter((candidate) => candidate.project.parent_id === id);
@@ -1835,7 +1891,7 @@ async function fileUnder(here: ProjectState, group: string): Promise<void> {
     paintProjects();
     for (const candidate of affected) {
       if (candidate.project.role === "leaf") {
-        terminals.refile(homeProjects(), candidate.project.id);
+        terminals.refile(wallProjects(), candidate.project.id);
       }
     }
   };
@@ -2275,7 +2331,7 @@ function paintRowDrop(row: HTMLElement | null): void {
 /** Display name → project id, any case, for boards that name apps rather than folders. */
 function projectNames(): Map<string, string> {
   const names = new Map<string, string>();
-  for (const here of states.values()) {
+  for (const here of portfolioStates()) {
     names.set(here.project.name, here.project.id);
     names.set(here.project.name.toLowerCase(), here.project.id);
   }
@@ -2288,6 +2344,7 @@ function paintProjects(): void {
     window.clearTimeout(paintSoonTimer);
     paintSoonTimer = 0;
   }
+  paintManagerNav();
   // A repaint mid-drag would tear the row out of your hand. Hold it until the drop lands.
   if (dragging) {
     repaintQueued = true;
@@ -2304,12 +2361,12 @@ function paintProjects(): void {
   }
   const { query, action: queryAction } = parseQuery(projectFilter.value);
   // Platform pairs fold into their host's row, so the row is listed when any member matches.
-  membersOf = platformGroups([...states.values()].map((here) => here.project));
+  membersOf = platformGroups(portfolioStates().map((here) => here.project));
   hostOf.clear();
   for (const [host, members] of membersOf) for (const id of members) if (id !== host) hostOf.set(id, host);
   // The live chip drops itself when the work stops, and it decides whether the rail is collapsed —
   // so it has to settle BEFORE the order is asked for, not after.
-  const liveCount = [...states.values()].filter((here) => here.running).length;
+  const liveCount = portfolioStates().filter((here) => here.running).length;
   if (liveOnly && liveCount === 0) liveOnly = false;
   const collapsed = railCollapsed();
   const allProjects = orderProjects();
@@ -2566,7 +2623,7 @@ function paintProjects(): void {
     projectList.querySelector<HTMLElement>(`.project-row[data-project-id="${CSS.escape(id)}"]`),
   );
   if (query) markTarget(queryAction);
-  pulse.warm([...states.values()].filter((here) => here.project.role === "leaf").map((here) => here.project.id));
+  pulse.warm(portfolioStates().filter((here) => here.project.role === "leaf").map((here) => here.project.id));
   if (narrowed && visibleProjects.length === 0) {
     const empty = document.createElement("div");
     empty.className = "project-filter-empty";
@@ -2612,7 +2669,7 @@ function paintProjects(): void {
   // Everything that changes a project repaints the sidebar, so this one hook is what keeps
   // the portfolio screens live — summaries, card verdicts, wall tiles — while one is open.
   if (homeActive) home.sync(homeProjects());
-  if (terminalsActive) terminals.sync(homeProjects());
+  if (terminalsActive) terminals.sync(wallProjects());
   if (runnerActive) runner.sync(runnerProjects());
   signalAttention();
   repaintQueued = false;
@@ -3109,6 +3166,101 @@ function paintProjectsSoon(): void {
 
 /* ----------------------------------------------------------------- events */
 
+/**
+ * The manager's team tools (list_workers, read_worker, brief_worker in panel_mcp.py). They ride
+ * the ask channel and are answered here because this window holds the truth: which terminal is
+ * mid-turn, which is parked on you, and the rendered screen (the PTY tail is cursor moves, not
+ * text). Only the manager's own sessions get an answer, and no brief is typed until you approve
+ * the exact text in a dialog.
+ */
+async function answerTeam(project: string, qid: string, spec: Payload): Promise<void> {
+  const reply = (value: unknown): void => {
+    void invoke("answer_ask", { qid, value }).catch(() => undefined);
+  };
+  if (project !== CPO_ID) {
+    reply({ error: "only the manager can use the team tools" });
+    return;
+  }
+  const workers = portfolioStates().flatMap((here) =>
+    here.sessions
+      .filter((session) => !exited.has(session.id) && session.kind !== "sim" && session.kind !== "task")
+      .map((session) => ({ here, session })),
+  );
+  const statusOf = (here: ProjectState, session: Session): string => {
+    if (!isAgentKind(session.kind)) return "shell";
+    if (sessionPhase.get(session.id) === "ask") return "waiting_on_human";
+    if (working.has(session.id)) return "working";
+    if (doneUnseen.has(here.project.id) && reviewAgent(here.project.id)?.id === session.id) return "finished_unseen";
+    return "idle";
+  };
+  const describe = (here: ProjectState, session: Session) => ({
+    session: session.id,
+    project: here.project.id,
+    projectName: here.project.name,
+    agent: session.title || session.kind,
+    kind: session.kind,
+    status: statusOf(here, session),
+    prompt: here.workBySession.get(session.id)?.prompt ?? null,
+  });
+
+  const kind = String(spec.kind);
+  if (kind === "team:list") {
+    reply({ workers: workers.map(({ here, session }) => describe(here, session)) });
+    return;
+  }
+  const target = workers.find(({ session }) => session.id === String(spec.session ?? ""));
+  if (!target) {
+    reply({ error: "no live terminal has that session id; call list_workers" });
+    return;
+  }
+  const { here, session } = target;
+  if (kind === "team:read") {
+    const lines = Math.min(400, Math.max(1, Number(spec.lines) || 60));
+    reply({ ...describe(here, session), screen: deck.tail(session.id, lines).join("\n") });
+    return;
+  }
+  if (kind !== "team:brief") {
+    reply({ error: `unknown team request: ${kind}` });
+    return;
+  }
+  // Bracketed paste carries the text; a control character could end the paste and type keys.
+  const text = String(spec.text ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ").trim();
+  const busy = (): string | null =>
+    !isAgentKind(session.kind)
+      ? "that terminal is a shell, not an agent"
+      : exited.has(session.id)
+        ? "that worker has ended"
+        : sessionPhase.has(session.id) || working.has(session.id)
+          ? "the worker is mid-turn or waiting on the human"
+          : null;
+  const refused = !text ? "the brief is empty" : busy();
+  if (refused) {
+    reply({ sent: false, reason: refused });
+    return;
+  }
+  signalAttention({
+    title: "The manager wants to brief a worker",
+    body: `${here.project.name} · ${session.title}`,
+    urgent: true,
+  });
+  const approved = await confirmDialog(
+    `The manager wants to send this to ${session.title} on ${here.project.name}:\n\n${text}`,
+    { okLabel: "Send brief" },
+  );
+  if (!approved) {
+    reply({ sent: false, reason: "the human declined this brief" });
+    return;
+  }
+  // The worker may have started a turn while the dialog was up.
+  const late = busy();
+  if (late) {
+    reply({ sent: false, reason: late });
+    return;
+  }
+  const sent = await deck.sendPrompt(session.id, text);
+  reply(sent ? { sent: true } : { sent: false, reason: "the terminal could not take input" });
+}
+
 function onEvent(event: ProjectEvent): void {
   const id = event.project;
   if (!states.has(id)) return;
@@ -3272,6 +3424,11 @@ function onEvent(event: ProjectEvent): void {
       break;
 
     case "ask_requested": {
+      // A team request is not a question for you; it is answered, or confirmed, on its own.
+      if (String(event.spec.kind ?? "").startsWith("team:")) {
+        void answerTeam(id, event.qid, event.spec);
+        break;
+      }
       // The agent's tool call is parked on a socket until this is answered or times out.
       const headline = String(event.spec.title ?? event.spec.prompt ?? event.spec.ask ?? "needs your answer");
       setPhase(event.session_id, "ask");
@@ -3549,10 +3706,17 @@ async function boot(): Promise<void> {
     },
   },
   {
-    // The manager is a session like any other, with one difference the host owns: its project id
-    // is not in the portfolio, so `start_session` resolves it against the ops tree instead.
-    start: (kind, cols, rows) =>
-      invoke<Session>("start_session", { project: CPO_ID, kind, cols, rows, cwd: null }),
+    // The manager is a session like any other: it opens through the same path as a worker, so
+    // its status, attention, wall seat and restore come from the same bookkeeping.
+    start: async (kind) => {
+      const session = await openSessionFor(CPO_ID, kind);
+      if (!session) throw new Error(lastStartError || "The manager could not start.");
+      return session;
+    },
+    current: () => managerSession(),
+    lend: (sessionId, cell) => deck.lend(sessionId, cell),
+    unlend: () => deck.unlend(),
+    openChanges: () => void select(CPO_ID, "dash"),
     stop: (sessionId) => invoke("stop_session", { session: sessionId }).then(() => undefined),
     write: (terminalId, data) => invoke("write_terminal", { terminalId, data }).then(() => undefined),
     preprompt: () => invoke<string>("cpo_preprompt"),
@@ -4019,6 +4183,10 @@ async function boot(): Promise<void> {
   groups = await invoke<Group[]>("list_groups").catch(() => []);
   const list = await invoke<Project[]>("list_projects");
   for (const project of list) states.set(project.id, makeState(project));
+  // Before the wall comes back, or the manager's restored terminal has no owner and is closed.
+  // No ops tree means no manager; the pane then says why when you try to start it.
+  const manager = await invoke<Project>("manager_project").catch(() => null);
+  if (manager && !states.has(CPO_ID)) states.set(CPO_ID, makeState({ ...manager, name: "Manager" }));
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
   paintProjects();

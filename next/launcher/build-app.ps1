@@ -11,6 +11,27 @@ param([string]$Dest = [Environment]::GetFolderPath('Desktop'))
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 
+# Check what Panel needs at run time, not only to build. Panel calls `python` on Windows, and the
+# Store stub under WindowsApps opens a download page instead of running, which silently breaks the
+# session hook, the panel MCP, report fallback and every module.
+function Need($Name, $Hint) {
+    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) { throw "$Name not found on PATH. $Hint" }
+}
+Need git 'Install Git for Windows: https://git-scm.com/download/win'
+Need cargo 'Install Rust with the MSVC toolchain: https://rustup.rs'
+Need node 'Install Node 22.12+: https://nodejs.org'
+& cargo tauri --version *> $null
+if ($LASTEXITCODE) { throw 'Tauri CLI missing. Run: cargo install tauri-cli --version "^2" --locked' }
+$Python = Get-Command python -ErrorAction SilentlyContinue
+if (-not $Python -or $Python.Source -like '*\WindowsApps\*') {
+    throw 'Panel needs a real `python` (3.9+) on PATH, not the Microsoft Store stub. Install from https://python.org, tick "Add to PATH", and turn off the python.exe App execution alias in Settings.'
+}
+& python -c 'import sys; sys.exit(sys.version_info < (3, 9))'
+if ($LASTEXITCODE) { throw "Panel needs Python 3.9+; $($Python.Source) is older." }
+if (-not (Get-Command claude -ErrorAction SilentlyContinue)) {
+    Write-Warning 'claude not found on PATH. Panel still builds; install an agent CLI to use it: npm install -g @anthropic-ai/claude-code'
+}
+
 # The shared staging scripts are bash; igncr tolerates a CRLF checkout. Git's own bash, found
 # next to git.exe — a bare `bash` is WSL's, or nothing at all.
 $Git = (Get-Command git -ErrorAction Stop).Source

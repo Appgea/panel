@@ -158,7 +158,9 @@ impl TerminalManager {
 
         let program = program.unwrap_or_else(default_shell);
         #[cfg(windows)]
-        let (launch, prefix) = windows_launch(&program);
+        let terminal_path = windows_terminal_path();
+        #[cfg(windows)]
+        let (launch, prefix) = windows_launch(&program, &terminal_path);
         #[cfg(not(windows))]
         let (launch, prefix) = (program.clone(), Vec::<String>::new());
         let mut command = CommandBuilder::new(&launch);
@@ -168,6 +170,8 @@ impl TerminalManager {
         command.cwd(&cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        #[cfg(windows)]
+        command.env("PATH", &terminal_path);
         for (key, value) in env {
             command.env(key, value);
         }
@@ -471,12 +475,86 @@ fn kill_tree(pid: u32) {
         .output();
 }
 
+/// Explorer (or an already-running Panel) can retain the PATH from before npm was installed.
+/// Give both shell terminals and direct agent launches access to npm's per-user CLI shims.
+/// Keep the inherited order so explicitly selected installations still win.
+#[cfg(windows)]
+fn windows_terminal_path() -> std::ffi::OsString {
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let Some(appdata) = std::env::var_os("APPDATA") else { return current };
+    let npm = PathBuf::from(appdata).join("npm");
+    let mut paths: Vec<PathBuf> = std::env::split_paths(&current).collect();
+    if npm.is_dir() && !paths.iter().any(|path| {
+        path.to_string_lossy().eq_ignore_ascii_case(&npm.to_string_lossy())
+    }) {
+        paths.push(npm);
+    }
+    std::env::join_paths(paths).unwrap_or(current)
+}
+
+#[cfg(all(test, windows))]
+mod windows_opencode_tests {
+    use super::*;
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    // Run alone: this deliberately simulates a GUI app whose inherited PATH predates npm.
+    #[test]
+    #[ignore = "requires OpenCode installed with npm; run with --test-threads=1"]
+    fn opencode_starts_in_shell_and_direct_terminals_with_a_stale_path() {
+        let original_path = std::env::var_os("PATH");
+        let system = PathBuf::from(std::env::var_os("SystemRoot").unwrap());
+        std::env::set_var("PATH", std::env::join_paths([
+            system.join("System32"),
+            system.join("System32/WindowsPowerShell/v1.0"),
+        ]).unwrap());
+        for (program, args, marker) in [
+            ("powershell.exe", vec!["-NoProfile", "-Command",
+                "& opencode --version; if ($LASTEXITCODE -ne 0) { exit 1 }; Write-Output PANEL_OPENCODE_OK"],
+                "PANEL_OPENCODE_OK"),
+            ("opencode", vec!["--version"], ""),
+        ] {
+            let (tx, rx) = mpsc::channel();
+            let sink: TerminalSink = Arc::new(move |chunk| { let _ = tx.send(chunk); });
+            let mut terminals = TerminalManager::default();
+            let spec = SpawnSpec::shell(std::env::temp_dir(), 100, 30)
+                .run(program, args.into_iter().map(str::to_owned).collect())
+                .answering_cursor_query();
+            let id = terminals.spawn(spec, sink).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(20);
+            let mut output = String::new();
+            while Instant::now() < deadline {
+                if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(100)) {
+                    output.push_str(&chunk.data);
+                    let version = output.split(|c: char| !c.is_ascii_digit() && c != '.')
+                        .any(|word| word.split('.').count() == 3
+                            && word.split('.').all(|part| !part.is_empty()));
+                    // ConPTY may keep its output handle open after the command has finished.
+                    if chunk.closed || (version && output.contains(marker)) { break; }
+                }
+            }
+            terminals.close(&id).unwrap();
+            let version = output.split(|c: char| !c.is_ascii_digit() && c != '.')
+                .any(|word| word.split('.').count() == 3
+                    && word.split('.').all(|part| !part.is_empty()));
+            assert!(version, "{program} did not print an OpenCode version: {output}");
+            assert!(output.contains(marker), "{program} did not run OpenCode: {output}");
+            assert!(!output.contains("CommandNotFoundException"), "{output}");
+            eprintln!("{program}: {output}");
+        }
+        match original_path {
+            Some(path) => std::env::set_var("PATH", path),
+            None => std::env::remove_var("PATH"),
+        }
+    }
+}
+
 /// What to actually start for `program` on Windows. CreateProcess runs only real executables,
 /// but npm installs agents (codex, opencode) as `.cmd` shims. Rather than route them through
 /// cmd.exe, whose quoting mangles the long instruction arguments agents get, the shim is read
 /// for the target it wraps: a native exe, or a Node script run by node.
 #[cfg(windows)]
-fn windows_launch(program: &str) -> (String, Vec<String>) {
+fn windows_launch(program: &str, terminal_path: &std::ffi::OsStr) -> (String, Vec<String>) {
     use std::path::{Path, PathBuf};
     let unchanged = (program.to_string(), Vec::new());
     if Path::new(program).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
@@ -485,9 +563,7 @@ fn windows_launch(program: &str) -> (String, Vec<String>) {
     let candidates: Vec<PathBuf> = if program.contains(['\\', '/']) {
         vec![PathBuf::from(program)]
     } else {
-        std::env::var_os("PATH")
-            .map(|path| std::env::split_paths(&path).map(|dir| dir.join(program)).collect())
-            .unwrap_or_default()
+        std::env::split_paths(terminal_path).map(|dir| dir.join(program)).collect()
     };
     for base in candidates {
         if base.with_extension("exe").is_file() || base.with_extension("com").is_file() {

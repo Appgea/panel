@@ -160,6 +160,10 @@ const chat = mountChat(document.getElementById("chatRail")!, {
   // No PTY without Tauri, so Manager stays on its start card. Everything else about the
   // pane — the preprompt editor, the engine picker — is real and can be looked at.
   start: async () => { throw new Error("no terminal in the dev harness"); },
+  current: () => null,
+  lend: () => {},
+  unlend: () => {},
+  openChanges: () => {},
   stop: async () => {},
   write: async () => {},
   preprompt: async () => "# You are the appgea manager\n\nEdit me.\n",

@@ -394,6 +394,11 @@ html.sidebar-compact .nav-badge {
   font-size: var(--text-xs);
   box-shadow: 0 0 0 2px var(--bg-sunken);
 }
+/* The manager's turn state, on its row: the one agent with no project row of its own. */
+.nav-state { font-weight: 650; }
+.nav-state.t-warn { background: var(--warn); }
+.nav-state.t-ok { background: var(--ok); }
+.nav-state.t-work { color: var(--ink-soft, var(--ink)); background: color-mix(in oklab, var(--accent) 18%, var(--bg-raised)); }
 /* No .is-active for a row on purpose — see .side-nav above. Hover is all a row gets: it is a
    jump to a tab, and the tab strip is what says where you landed. */
 .nav-row:hover { transform: none; color: var(--ink); background: color-mix(in oklab, var(--accent) 6%, var(--bg-raised)); }

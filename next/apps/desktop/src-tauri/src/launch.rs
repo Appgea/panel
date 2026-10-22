@@ -62,18 +62,32 @@ pub enum Role {
     Manager,
 }
 
+impl Role {
+    /// `PANEL_ROLE` for the panel MCP. Only the manager is offered the team tools; the UI checks
+    /// the asking session's project as well, so a worker setting this itself gets nothing.
+    fn env(self) -> &'static str {
+        match self {
+            Role::Worker => "worker",
+            Role::Manager => "manager",
+        }
+    }
+}
+
 fn manager_rule() -> String {
     let reports = crate::paths::brain_dir().join("reports");
     format!(
         "You are the Manager inside Panel, the human's admin app for the Appgea portfolio. You are \
 not a worker. You do not change app code and you do not file reports, so never call send_to_user \
 or panel_send.py. TALK TO THE HUMAN IN THIS TERMINAL: it is Panel's Manager screen, opened with \
-Cmd+Shift+M. Your folder is the ops tree, the company brain. Its AGENTS.md is your standing \
+{}+Shift+M. Your folder is the ops tree, the company brain. Its AGENTS.md is your standing \
 instructions, and the human edits it from that screen. Workers are separate agents, one or more per \
-project, each in its own Panel terminal. You cannot see or type into them. What they report lands \
-in {} as one Markdown log per project, newest entry last. Read those logs and ops to answer what \
-is going on. Your job: tell the human where things stand, plan the work, keep ops current, and write \
-briefs the human can hand to a worker.",
+project, each in its own Panel terminal. What they report lands in {} as one Markdown log per \
+project, newest entry last. If the appgea-panel tools are available, list_workers shows every live \
+terminal with its status, read_worker shows what is on one's screen right now, and brief_worker \
+types a prompt into one after the human approves it in Panel. Read before you brief, and never \
+brief a worker that is mid-turn or waiting on the human. Your job: tell the human where things \
+stand, plan the work, keep ops current, and brief workers.",
+        if cfg!(target_os = "macos") { "Cmd" } else { "Ctrl" },
         reports.display()
     )
 }
@@ -96,9 +110,10 @@ fn rule_with_fallback(panel_home: &Path) -> String {
     }
     format!(
         "{PANEL_RULE} If the appgea-panel MCP tool is unavailable or errors, do the same thing by \
-running `python3 {}` with --title, --text, --outcome, one or more '--flow ref|label|detail' \
+running `{} {}` with --title, --text, --outcome, one or more '--flow ref|label|detail' \
 values, one --image per screenshot, --audio per clip and --video per film (plus any useful --file, \
 --folder, --link). Never silently skip a report you owed.",
+        crate::platform::python(),
         shell_quote(&sender.to_string_lossy())
     )
 }
@@ -114,7 +129,7 @@ pub fn agent_args(panel_home: &Path, port: u16, instance: &str, role: Role) -> A
         args.push("--settings".into());
         args.push(settings.to_string_lossy().into_owned());
     }
-    if let Some(mcp) = write_mcp(panel_home, port, instance) {
+    if let Some(mcp) = write_mcp(panel_home, port, instance, role) {
         args.push("--mcp-config".into());
         args.push(mcp.to_string_lossy().into_owned());
     }
@@ -173,6 +188,8 @@ pub fn codex_args(panel_home: &Path, port: u16, instance: &str, role: Role) -> A
                 "mcp_servers.appgea-panel.env.PANEL_INSTANCE={}",
                 quote(instance)
             ),
+            "-c".into(),
+            format!("mcp_servers.appgea-panel.env.PANEL_ROLE={}", quote(role.env())),
             "-c".into(),
             format!("developer_instructions={}", quote(&rule)),
         ],
@@ -245,7 +262,12 @@ fn write_settings(panel_home: &Path, instance: &str) -> Option<PathBuf> {
             "allow": [
                 "mcp__appgea-panel__panel_emit",
                 "mcp__appgea-panel__send_to_user",
-                "mcp__appgea-panel__ask_user"
+                "mcp__appgea-panel__ask_user",
+                // The manager's team tools. Only its MCP lists them, and Panel already shows
+                // the human every brief before typing it, so a second prompt here adds nothing.
+                "mcp__appgea-panel__list_workers",
+                "mcp__appgea-panel__read_worker",
+                "mcp__appgea-panel__brief_worker"
             ]
         }
     });
@@ -253,14 +275,18 @@ fn write_settings(panel_home: &Path, instance: &str) -> Option<PathBuf> {
     write_temp(&format!("appgea-panel-settings-{instance}.json"), &settings)
 }
 
-fn write_mcp(panel_home: &Path, port: u16, instance: &str) -> Option<PathBuf> {
+fn write_mcp(panel_home: &Path, port: u16, instance: &str, role: Role) -> Option<PathBuf> {
     let server = panel_server(panel_home)?;
     let config = json!({
         "mcpServers": {
             "appgea-panel": {
                 "command": crate::platform::python(),
                 "args": [server.to_string_lossy()],
-                "env": { "PANEL_PORT": port.to_string(), "PANEL_INSTANCE": instance },
+                "env": {
+                    "PANEL_PORT": port.to_string(),
+                    "PANEL_INSTANCE": instance,
+                    "PANEL_ROLE": role.env(),
+                },
             }
         }
     });

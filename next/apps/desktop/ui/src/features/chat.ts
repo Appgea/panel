@@ -26,7 +26,6 @@
 import type { ChangeStep, Payload, Session, SessionKind } from "../types";
 import { icon, type IconName } from "../icons";
 import { buildPeek, type PeekHandle } from "./inbox_peek";
-import { TerminalDeck } from "./terminal";
 import { ENGINES } from "./agent-kinds";
 import { errorText } from "../errors";
 import "./chat.css";
@@ -81,7 +80,16 @@ export type ChatEvents = {
 /** What the rail needs from the host to run the manager's terminal. Kept as callbacks rather than
  *  imports so the rail never reaches into the app's session bookkeeping. */
 export type CpoEvents = {
-  start(kind: SessionKind, cols: number, rows: number): Promise<Session>;
+  /** Start the manager as a tracked session: it joins the wall, the attention lanes and the
+   *  restored wall like any worker. Rejects with the reason it could not start. */
+  start(kind: SessionKind): Promise<Session>;
+  /** The manager's live session — started here, from the wall, or restored at boot. */
+  current(): Session | null;
+  /** Show the manager's screen in this pane, and give it back. */
+  lend(sessionId: string, cell: HTMLElement): void;
+  unlend(): void;
+  /** The manager's Dashboard: what it changed in the ops tree this turn. */
+  openChanges(): void;
   stop(sessionId: string): Promise<void>;
   /** Type into the manager's terminal. How the Sprint screen hands it a question. */
   write(terminalId: string, data: string): Promise<void>;
@@ -182,10 +190,16 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
   promptToggle.title = "Edit manager instructions";
   promptToggle.setAttribute("aria-label", "Edit manager instructions");
   promptToggle.innerHTML = svg('<path d="M4 20h16"/><path d="m14 4 6 6-9 9H5v-6z"/>');
+  const changesButton = make("button", "chat-head-tool") as HTMLButtonElement;
+  changesButton.type = "button";
+  changesButton.title = "What the manager changed";
+  changesButton.setAttribute("aria-label", "What the manager changed");
+  changesButton.innerHTML = svg('<path d="M6 3h9l4 4v14H6z"/><path d="M9 13h6M12 10v6"/>');
+  changesButton.addEventListener("click", () => cpo.openChanges());
   const hideButton = make("button", "chat-head-tool") as HTMLButtonElement;
   hideButton.type = "button";
   hideButton.innerHTML = svg('<path d="m6 6 12 12M18 6 6 18"/>');
-  head.append(heading, searchToggle, promptToggle, hideButton);
+  head.append(heading, searchToggle, changesButton, promptToggle, hideButton);
 
   const search = document.createElement("input");
   search.type = "search";
@@ -230,11 +244,17 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
 
   host.append(head, search, feed, jump, cpoPane);
 
-  /** The manager's terminal is its own deck. It shares the global output event and filters by
-   *  terminal id, so a second instance beside the workspace one costs a map entry, not a channel. */
-  const cpoDeck = new TerminalDeck(cpoTerm, { onExit: () => endCpo() });
-  let cpoSession: Session | null = null;
+  /** The manager's terminal lives in the workspace deck like every other session, so it keeps its
+   *  status, its wall seat and its restore. This pane borrows its screen while it is up. */
+  let cpoSession: Session | null = cpo.current();
   let starting = false;
+  /** Borrow the manager's screen into this pane — only while the pane is what you are looking at. */
+  const lendCpo = (): void => {
+    cpoSession = cpo.current();
+    if (cpoSession && visible && section === "manager") {
+      cpo.lend(cpoSession.id, cpoTerm);
+    }
+  };
   /** Why the last start failed. Painted with the card, so a repaint cannot wipe it. */
   let startError = "";
 
@@ -273,14 +293,10 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
     startError = "";
     paintCpoStart();
     try {
-      const size = cpoDeck.proposeSize();
-      const session = await cpo.start(kind, size.cols, size.rows);
-      cpoSession = session;
+      cpoSession = await cpo.start(kind);
       localStorage.setItem(CPO_KIND_KEY, kind);
-      cpoDeck.add(session.id, session.terminal_id);
-      cpoDeck.show(session.id);
       paintCpoStart();
-      cpoDeck.focus();
+      lendCpo();
     } catch (error) {
       startError = errorText(error, "The manager could not start. Try again.");
     } finally {
@@ -293,7 +309,7 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
    *  than leaving a frozen pane that looks alive. */
   function endCpo(): void {
     if (!cpoSession) return;
-    cpoDeck.remove(cpoSession.id);
+    cpo.unlend();
     cpoSession = null;
     paintCpoStart();
   }
@@ -644,6 +660,7 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
     hideButton.setAttribute("aria-label", `Close ${section}`);
     searchToggle.hidden = !reports;
     promptToggle.hidden = reports;
+    changesButton.hidden = reports;
     feed.hidden = !reports;
     cpoPane.hidden = reports;
     search.hidden = !reports || !searchToggle.classList.contains("is-on");
@@ -735,18 +752,24 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
         land = true;
         markRead();
       }
+      if (section === "manager") {
+        // Started from the wall, restored at boot or ended elsewhere: ask, never assume.
+        cpoSession = cpo.current();
+        paintCpoStart();
+      } else {
+        cpo.unlend();
+      }
       paint();
       if (entering) applyVisible();
       if (section === "manager") requestAnimationFrame(() => {
-        if (!visible || section !== "manager") return;
-        cpoDeck.fitAdopted();
-        if (cpoSession && cpoEditor.hidden) cpoDeck.focus();
+        if (visible && section === "manager") lendCpo();
       });
     },
 
     hide() {
       if (!visible) return;
       visible = false;
+      cpo.unlend();
       applyVisible();
     },
 
@@ -766,7 +789,7 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
       }
       if (!cpoSession) return;
       await cpo.write(cpoSession.terminal_id, `${prompt}\r`);
-      cpoDeck.focus();
+      lendCpo();
     },
     showCpo() {
       handle.show("manager");

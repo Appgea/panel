@@ -237,6 +237,57 @@ TOOLS = [
 ]
 
 
+# The manager's eyes and hands on the workers. They ride the ask channel because the answers live
+# in Panel's window: which terminal is mid-turn, which waits on the human, and the rendered screen
+# (the raw PTY tail is cursor moves, not text). Panel answers list/read at once, refuses all three
+# for any session that is not its manager, and shows the human every brief before it is typed.
+TEAM_TOOLS = [
+    {
+        "name": "list_workers",
+        "description": (
+            "List every live terminal in Panel across the portfolio: session id, project, agent, "
+            "and status (working | waiting_on_human | finished_unseen | idle | shell). Call this "
+            "first to see where things stand."
+        ),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "read_worker",
+        "description": (
+            "Read what is on one worker terminal's screen right now, as plain text, plus its "
+            "status and its current prompt. Use the session id from list_workers."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "session id from list_workers"},
+                "lines": {"type": "number", "description": "screen lines to return (default 60, max 400)"},
+            },
+            "required": ["session"],
+        },
+    },
+    {
+        "name": "brief_worker",
+        "description": (
+            "Type a prompt into a worker's terminal and submit it. Panel shows the human the "
+            "exact text and the target first; nothing is sent unless they approve. Refused while "
+            "the worker is mid-turn or waiting on the human. Returns {sent: true} or why not."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "session": {"type": "string", "description": "session id from list_workers"},
+                "text": {"type": "string", "description": "the brief, as the worker should read it"},
+            },
+            "required": ["session", "text"],
+        },
+    },
+]
+
+if os.environ.get("PANEL_ROLE") == "manager":
+    TOOLS = TOOLS + TEAM_TOOLS
+
+
 def _post(path, body, timeout):
     data = json.dumps(body).encode()
     req = urllib.request.Request(BASE + path, data=data,
@@ -264,6 +315,16 @@ def _call(name, args):
         spec = {k: args[k] for k in ("kind", "prompt", "title", "options", "fields", "handoff",
                                      "path", "draft", "why")
                 if k in args and args[k] is not None}
+        r = _post("/panel/ask",
+                  {"instance": INSTANCE, "spec": spec, "timeout": timeout}, timeout + 20)
+        return json.dumps(r)
+    if name in ("list_workers", "read_worker", "brief_worker"):
+        spec = {"kind": "team:" + name.split("_")[0]}
+        for key in ("session", "lines", "text"):
+            if args.get(key) is not None:
+                spec[key] = args[key]
+        # A brief waits on the human's approval; list and read answer at once.
+        timeout = 600 if name == "brief_worker" else 20
         r = _post("/panel/ask",
                   {"instance": INSTANCE, "spec": spec, "timeout": timeout}, timeout + 20)
         return json.dumps(r)

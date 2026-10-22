@@ -125,6 +125,8 @@ an agent CLI. From PowerShell in `panel\next`:
 powershell -ExecutionPolicy Bypass -File launcher\build-app.ps1
 ```
 
+It checks these first and stops with the fix if one is missing. `python` must be a real install,
+not the Microsoft Store stub: Panel runs its session hook, panel MCP and modules with it.
 It puts **Appgea Panel.exe** and a **Rebuild Appgea Panel** shortcut on the Desktop (`-Dest
 <folder>` picks another place). The exe reads `host\` from the checkout, so keep the checkout where
 it is. `launcher/build-windows.sh` builds a self-contained NSIS installer instead. Shortcuts use Ctrl

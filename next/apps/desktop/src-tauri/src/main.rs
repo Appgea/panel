@@ -142,6 +142,14 @@ fn preprompt_paths() -> Result<(PathBuf, PathBuf), String> {
     Ok((live.join("AGENTS.md"), default))
 }
 
+/// The manager as the UI tracks it: one more project state, so its terminal gets the same
+/// status, attention, wall seat and restore as every worker. Kept out of `list_projects` because
+/// it is not in the portfolio and must not grow a sidebar row, a Home card or a git surface.
+#[tauri::command]
+fn manager_project() -> Result<Project, String> {
+    cpo_root()
+}
+
 #[tauri::command]
 fn cpo_preprompt() -> Result<String, String> {
     let (live, default) = preprompt_paths()?;
@@ -633,6 +641,11 @@ fn guard_shutdown(app: &AppHandle) -> bool {
 /// `DesktopState::project` convenience method: it would be a main-thread disk read waiting to
 /// happen, and every caller here is already inside a blocking task.
 fn find_project(id: &str) -> Result<Project, String> {
+    // The manager is not in the portfolio, so it resolves from the ops tree. Every per-project
+    // command (sessions, file changes, Work) then serves it like any other project.
+    if id == CPO_ID {
+        return cpo_root();
+    }
     all_projects()
         .into_iter()
         .find(|project| project.id == id)
@@ -1243,16 +1256,7 @@ async fn open_session(
     reopen: Reopen,
 ) -> Result<Session, String> {
     let id = project.clone();
-    // The manager is not in the portfolio, so it resolves from the ops tree instead of a lookup.
-    // Everything past this line treats it as any other session.
-    let found = off_main(move || {
-        if id == CPO_ID {
-            cpo_root()
-        } else {
-            find_project(&id)
-        }
-    })
-    .await?;
+    let found = off_main(move || find_project(&id)).await?;
     if found.role == ProjectRole::Collection {
         return Err(format!("project {} is a collection", found.id));
     }
@@ -3646,6 +3650,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             launch_context,
+            manager_project,
             cpo_preprompt,
             set_cpo_preprompt,
             reset_cpo_preprompt,
