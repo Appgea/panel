@@ -1222,7 +1222,8 @@ PROJ=$(ls -d "$OUT"/*.xcodeproj 2>/dev/null | head -1)
 SCHEME=$(basename "$PROJ" .xcodeproj)
 echo ">> building $SCHEME for the simulator"
 xcodebuild -project "$PROJ" -scheme "$SCHEME" -configuration Debug -destination "id=$UDID" -derivedDataPath "$OUT/dd" CODE_SIGNING_ALLOWED=NO build
-APP=$(find "$OUT/dd/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' | head -1)
+APP="$OUT/dd/Build/Products/Debug-iphonesimulator/$SCHEME.app"
+[ -d "$APP" ] || APP=$(find "$OUT/dd/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' ! -name '*-Runner.app' | head -1)
 [ -n "$APP" ] || {{ echo "error: the simulator build produced no .app" >&2; exit 2; }}
 echo ">> installing $APP"
 xcrun simctl install "$UDID" "$APP"
@@ -1297,7 +1298,8 @@ pub fn native_debug_script(udid: &str, xcodegen: bool) -> String {
         r#"{preamble}DD=build/panel-debug-dd
 echo ">> building $SCHEME"
 xcodebuild "${{FLAG[@]}}" -scheme "$SCHEME" -configuration Debug -destination "id={udid}" -derivedDataPath "$DD" build
-APP=$(find "$DD/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' | head -1)
+APP="$DD/Build/Products/Debug-iphonesimulator/$SCHEME.app"
+[ -d "$APP" ] || APP=$(find "$DD/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' ! -name '*-Runner.app' | head -1)
 if [ -z "$APP" ]; then echo "error: the simulator build produced no .app" >&2; exit 2; fi
 echo ">> installing $APP"
 xcrun simctl install {udid} "$APP"
@@ -1316,7 +1318,8 @@ fn native_script(udid: &str, xcodegen: bool) -> String {
         r#"{preamble}DD=build/panel-sim-dd
 echo ">> building $SCHEME"
 xcodebuild "${{FLAG[@]}}" -scheme "$SCHEME" -configuration Debug -destination "id={udid}" -derivedDataPath "$DD" build
-APP=$(find "$DD/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' | head -1)
+APP="$DD/Build/Products/Debug-iphonesimulator/$SCHEME.app"
+[ -d "$APP" ] || APP=$(find "$DD/Build/Products/Debug-iphonesimulator" -maxdepth 1 -name '*.app' ! -name '*-Runner.app' | head -1)
 echo ">> installing $APP"
 xcrun simctl install {udid} "$APP"
 BID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist")
@@ -1334,7 +1337,8 @@ fn native_device_script(udid: &str, xcodegen: bool) -> String {
 DD="build/panel-device-$DEVICE-dd"
 echo ">> building $SCHEME for device"
 xcodebuild "${{FLAG[@]}}" -scheme "$SCHEME" -configuration Debug -sdk iphoneos -destination "id=$DEVICE" -derivedDataPath "$DD" build
-APP=$(find "$DD/Build/Products/Debug-iphoneos" -maxdepth 1 -name '*.app' | head -1)
+APP="$DD/Build/Products/Debug-iphoneos/$SCHEME.app"
+[ -d "$APP" ] || APP=$(find "$DD/Build/Products/Debug-iphoneos" -maxdepth 1 -name '*.app' ! -name '*-Runner.app' | head -1)
 if [ -z "$APP" ]; then echo "error: the device build produced no .app" >&2; exit 2; fi
 echo ">> installing $APP"
 xcrun devicectl device install app --device "$DEVICE" "$APP"
@@ -1354,7 +1358,8 @@ fn native_mac_script(xcodegen: bool) -> String {
         r#"{preamble}DD=build/panel-mac-dd
 echo ">> building $SCHEME"
 xcodebuild "${{FLAG[@]}}" -scheme "$SCHEME" -configuration Debug -destination "platform=macOS" -derivedDataPath "$DD" build
-APP=$(find "$DD/Build/Products/Debug" -maxdepth 1 -name '*.app' | head -1)
+APP="$DD/Build/Products/Debug/$SCHEME.app"
+[ -d "$APP" ] || APP=$(find "$DD/Build/Products/Debug" -maxdepth 1 -name '*.app' ! -name '*-Runner.app' | head -1)
 if [ -z "$APP" ]; then echo "error: the macOS build produced no .app" >&2; exit 2; fi
 BIN=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$APP/Contents/Info.plist")
 echo ">> launching $APP"

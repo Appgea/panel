@@ -167,7 +167,8 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const current = new Map<string, Item[]>();
     for (const item of sorted) {
       const batch = current.get(item.project);
-      if (batch && batch[batch.length - 1].at - item.at <= BATCH_GAP) {
+      // A new file is a new entry: it never folds into a batch that was already looked at.
+      if (batch && batch[0].seen === item.seen && batch[batch.length - 1].at - item.at <= BATCH_GAP) {
         batch.push(item);
         continue;
       }
@@ -199,6 +200,15 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     paint();
   }
 
+  /** Where the work that just arrived sits in a batch's order. */
+  const newestAt = (batch: Item[]): number => {
+    let best = 0;
+    batch.forEach((item, at) => {
+      if (item.at > batch[best].at) best = at;
+    });
+    return best;
+  };
+
   /** The batch as the deck sees it, and a review of it from any item. */
   function review(batch: Item[], at = 0): void {
     const project = batch[0].project;
@@ -225,10 +235,8 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
           return false;
         }
       },
-      onClose: () => {
-        // Seen is reviewed: a batch that was opened does not wait for attention, finished or not.
-        dismiss(batch);
-      },
+      // Opening marked the batch seen. It stays in Review until Done or Mark all reviewed.
+      onClose: () => undefined,
     });
   }
 
@@ -366,11 +374,12 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const card = existing?.node ?? make("aside", "rv-peek");
     card.setAttribute("role", "status");
     card.classList.remove("is-leaving");
-    // Whatever is tapped opens: a face opens that file, anywhere else opens the batch from the top.
+    // Whatever is tapped opens: a face opens that file, anywhere else opens the newest file.
     const reviewFrom = (path?: string): void => {
       const latest = batches().find((candidate) => candidate[0].project === project);
       if (!latest) return hidePeek(project);
-      review(latest, Math.max(0, latest.findIndex((item) => item.path === path)));
+      const found = latest.findIndex((item) => item.path === path);
+      review(latest, found >= 0 ? found : newestAt(latest));
     };
     const faces = make("div", "rv-peek-faces");
     // The newest three, the ones that made this card appear.
@@ -470,7 +479,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   return {
     openProject(project) {
       const newest = batches().find((batch) => batch[0].project === project);
-      if (newest) review(newest);
+      if (newest) review(newest, newestAt(newest));
       return Boolean(newest);
     },
     open() {
@@ -492,18 +501,6 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     },
     clear() {
       openState = false;
-      // Leaving Review: whatever was on screen has been seen, so it does not stay in the queue.
-      let seenAny = false;
-      for (const [path, item] of items) {
-        if (item.seen) {
-          items.delete(path);
-          seenAny = true;
-        }
-      }
-      if (seenAny) {
-        save();
-        announce();
-      }
       for (const player of screen.querySelectorAll<HTMLMediaElement>("audio, video")) player.pause();
       screen.replaceChildren();
     },
