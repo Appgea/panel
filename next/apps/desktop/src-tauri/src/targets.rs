@@ -81,7 +81,7 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
             let presets = sim::godot_presets(&dir);
             let exports = |platform: &str| presets.iter().any(|p| p.platform == platform);
             let mut families = vec!["desktop"];
-            if exports("iOS") {
+            if exports("iOS") && apple_tooling() {
                 families.push("iphone");
                 families.push("ipad");
             }
@@ -108,6 +108,9 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
         "native" => {
             let platforms = sim::native_platforms(&dir);
             let mut families = Vec::new();
+            if !apple_tooling() {
+                return families;
+            }
             if platforms.contains(&"ios") {
                 families.push("iphone");
                 families.push("ipad");
@@ -120,9 +123,16 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
         }
         _ => {
             let mut families = Vec::new();
+            // A phone app is a phone app on every OS. Where there is no Xcode, its phone is an
+            // Android one, and that family has to LEAD: Auto runs on the first family, and a
+            // Windows machine that put Chrome first would open a mobile app in a browser tab.
+            let android = dir.join("android").is_dir() && android::available();
+            if android && !apple_tooling() {
+                families.push("android");
+            }
             // A Flutter app without an `ios/` folder has no simulator build to make. It used to
             // get the rows anyway, which is the same mistake the Chrome row was written to avoid.
-            if dir.join("ios").is_dir() {
+            if dir.join("ios").is_dir() && apple_tooling() {
                 families.push("iphone");
                 families.push("ipad");
                 families.push("ios");
@@ -141,12 +151,19 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
             // Both halves have to be true: the project must have an Android platform folder, and
             // this machine must have an SDK to talk to. Offering the family without a `adb` only
             // produces an empty group nobody can act on.
-            if dir.join("android").is_dir() && android::available() {
+            if android && apple_tooling() {
                 families.push("android");
             }
             families
         }
     }
+}
+
+/// Simulators, `xcodebuild` and `devicectl` exist only on a Mac. Anywhere else the iOS families
+/// can only ever be empty groups — and worse, the first family is where Auto goes, so an `ios/`
+/// folder on Windows sent every run to a simulator clone that could not happen.
+fn apple_tooling() -> bool {
+    cfg!(target_os = "macos")
 }
 
 /// Every target this project could be launched on right now, in picker order: its own device

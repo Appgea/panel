@@ -662,7 +662,9 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     if (device) {
       return { label: `Auto — ${device}, its device`, title: `Run on ${device}` };
     }
-    if ((families.get(projectId) ?? []).length === 1 && families.get(projectId)?.[0] === "android") {
+    // Auto goes to the first family. Off the Mac a phone app's first family is Android, and
+    // "fresh simulator" there would name a device this machine cannot have.
+    if (families.get(projectId)?.[0] === "android") {
       return { label: "Auto — ready Android device", title: "Run on an Android device" };
     }
     return { label: "Auto — fresh simulator", title: "Build and launch on a fresh simulator" };

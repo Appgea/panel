@@ -1671,7 +1671,12 @@ package/unique_name="com.example.game"
         assert_eq!(presets[2].options["gradle_build/export_format"], "0");
         let families = crate::targets::families_for(&root, "godot");
         assert_eq!(families[0], "desktop");
-        assert!(families.contains(&"iphone") && families.contains(&"ipad"), "{families:?}");
+        // No Xcode off the Mac, so no simulator rows to offer there.
+        assert_eq!(
+            families.contains(&"iphone") && families.contains(&"ipad"),
+            cfg!(target_os = "macos"),
+            "{families:?}"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

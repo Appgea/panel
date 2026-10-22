@@ -67,8 +67,31 @@ fn sdk_root() -> PathBuf {
     home().join("Library/Android/sdk")
 }
 
+/// `HOME` is a shell's variable. Windows sets `USERPROFILE`, and Panel opened from Explorer has
+/// no `HOME` at all — which turned every AVD path into a relative one and every name into a guess.
 fn home() -> PathBuf {
-    PathBuf::from(std::env::var("HOME").unwrap_or_default())
+    ["HOME", "USERPROFILE"]
+        .iter()
+        .filter_map(std::env::var_os)
+        .map(PathBuf::from)
+        .find(|path| path.is_dir())
+        .unwrap_or_default()
+}
+
+/// Where AVDs live: `ANDROID_AVD_HOME`, then `ANDROID_USER_HOME/avd`, then `~/.android/avd` —
+/// the emulator's own lookup order, so Panel reads the same config the emulator boots.
+fn avd_home() -> PathBuf {
+    if let Some(dir) = std::env::var_os("ANDROID_AVD_HOME").map(PathBuf::from) {
+        if dir.is_dir() {
+            return dir;
+        }
+    }
+    if let Some(dir) = std::env::var_os("ANDROID_USER_HOME").map(|d| PathBuf::from(d).join("avd")) {
+        if dir.is_dir() {
+            return dir;
+        }
+    }
+    home().join(".android").join("avd")
 }
 
 /// The SDK's binary if it is there, else the bare name so a machine with a custom install still
@@ -195,10 +218,7 @@ fn defined_avds() -> Vec<String> {
 /// `~/.android/avd/<name>.avd/config.ini`, as key/value pairs. The AVD's display name and its
 /// system image both live here, which is the only way to say anything about a device that is off.
 fn avd_config(avd: &str) -> Vec<(String, String)> {
-    let path = home()
-        .join(".android/avd")
-        .join(format!("{avd}.avd"))
-        .join("config.ini");
+    let path = avd_home().join(format!("{avd}.avd")).join("config.ini");
     let Ok(text) = std::fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -340,8 +360,7 @@ const POLL: Duration = Duration::from_millis(1500);
 
 /// Has this AVD a quick-boot snapshot to restore from? Only then is there anything to distrust.
 fn has_snapshot(avd: &str) -> bool {
-    home()
-        .join(".android/avd")
+    avd_home()
         .join(format!("{avd}.avd"))
         .join("snapshots/default_boot/ram.bin")
         .is_file()
@@ -497,6 +516,7 @@ pub fn shutdown_now(serial: &str) {
 /// The window belongs to a `qemu-system-*` process, which has no bundle to `open -a`, so this
 /// goes through System Events. Best-effort and silent: a machine that refuses the permission
 /// still gets its run, just without the window jumping to the front.
+#[cfg(not(windows))]
 pub fn focus() {
     std::thread::spawn(|| {
         let _ = crate::platform::command("osascript")
@@ -506,6 +526,28 @@ pub fn focus() {
                      set candidates to (every process whose name contains "qemu-system")
                      if (count of candidates) > 0 then set frontmost of item 1 of candidates to true
                    end tell"#,
+            ])
+            .output();
+    });
+}
+
+/// The Windows half: the same `qemu-system-*` window, raised by its handle through user32.
+/// A minimised window is restored first, or activation only flashes the taskbar button.
+#[cfg(windows)]
+pub fn focus() {
+    std::thread::spawn(|| {
+        let _ = crate::platform::command("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                r#"$p = Get-Process -Name 'qemu-system-*' -ErrorAction SilentlyContinue |
+                     Where-Object { $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+                   if ($p) {
+                     Add-Type -Namespace W -Name U -MemberDefinition '[DllImport("user32.dll")] public static extern bool ShowWindow(System.IntPtr h, int c); [DllImport("user32.dll")] public static extern bool SetForegroundWindow(System.IntPtr h);'
+                     [W.U]::ShowWindow($p.MainWindowHandle, 9) | Out-Null
+                     [W.U]::SetForegroundWindow($p.MainWindowHandle) | Out-Null
+                   }"#,
             ])
             .output();
     });
