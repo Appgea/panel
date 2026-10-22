@@ -12,6 +12,7 @@
  */
 
 import { invoke } from "@tauri-apps/api/core";
+import { schemeOrigin } from "../project-assets";
 
 declare global {
   interface Window {
@@ -87,7 +88,7 @@ export function loadModuleAssets(name: string): Promise<void> {
   if (existing) return existing;
 
   const pending = new Promise<void>((resolve, reject) => {
-    const base = `module://panel/m/${name}/assets`;
+    const base = `${schemeOrigin("module")}/m/${name}/assets`;
 
     const css = document.createElement("link");
     css.rel = "stylesheet";

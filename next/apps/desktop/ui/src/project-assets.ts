@@ -1,5 +1,29 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
+
 /** Media knowledge shared by every surface that renders files from an open project. */
 export type ProjectMediaKind = "image" | "audio" | "video" | "pdf";
+
+/**
+ * Where a Panel scheme (`project-icon`, `project-asset`, `module`) is served from. macOS serves
+ * `project-icon://panel/…` as written; the Windows webview only reaches a custom scheme as
+ * `http://project-icon.localhost/…`. Tauri knows which form this webview speaks. Browser
+ * previews and partial IPC mocks have no Tauri to ask, so they keep the native form.
+ */
+export function schemeOrigin(scheme: string): string {
+  const internals = (window as Window & {
+    __TAURI_INTERNALS__?: { convertFileSrc?: unknown };
+  }).__TAURI_INTERNALS__;
+  if (typeof internals?.convertFileSrc === "function") {
+    const base = convertFileSrc("", scheme);
+    if (/^https?:/.test(base)) return base.replace(/\/$/, "");
+  }
+  return `${scheme}://panel`;
+}
+
+/** The app icon of one project, from `project-icon`. */
+export function projectIconUrl(projectId: string): string {
+  return `${schemeOrigin("project-icon")}/${encodeURIComponent(projectId)}`;
+}
 
 const MEDIA_EXTENSIONS: Record<ProjectMediaKind, ReadonlySet<string>> = {
   image: new Set(["png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "avif", "svg"]),
@@ -67,5 +91,5 @@ export function projectAssetUrl(projectId: string, path: string): string {
   const encoded = [projectId, ...path.replaceAll("\\", "/").split("/")]
     .map(encodeURIComponent)
     .join("/");
-  return `project-asset://panel/${encoded}`;
+  return `${schemeOrigin("project-asset")}/${encoded}`;
 }

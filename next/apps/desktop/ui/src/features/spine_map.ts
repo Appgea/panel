@@ -15,6 +15,7 @@
  */
 
 import { moduleGet, modulePost } from "./modules";
+import { schemeOrigin } from "../project-assets";
 import { mountInspector, type Runtime } from "./spine_inspect";
 import { computeLayout, type GroupCard, type Rect } from "./spine_layout";
 import "./spine_map.css";
@@ -98,7 +99,7 @@ type Laid = {
 };
 
 const M = "/m/product-spine";
-const ORIGIN = "module://panel";
+const ORIGIN = schemeOrigin("module");
 const EXPANDED_STORE = "spine.map.expanded";
 
 /** Read a CSS token off the pane so the canvas wears the app's own theme. */

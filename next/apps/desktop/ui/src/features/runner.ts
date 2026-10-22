@@ -61,6 +61,7 @@ import type {
 import { ENGINES } from "./agent-kinds";
 import { label as chordText } from "./keymap";
 import { icon } from "../icons";
+import { projectIconUrl } from "../project-assets";
 import "./runner.css";
 
 export type RunnerProject = {
@@ -796,7 +797,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     glyph.textContent = p.name.trim().charAt(0).toUpperCase();
     ico.append(glyph);
     const img = document.createElement("img");
-    img.src = `project-icon://panel/${encodeURIComponent(p.id)}`;
+    img.src = projectIconUrl(p.id);
     img.alt = "";
     img.draggable = false;
     img.addEventListener("error", () => img.remove());

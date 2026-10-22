@@ -28,7 +28,7 @@ const SCREEN_CAP: usize = 192 * 1024;
 
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
     /// The tail of everything this PTY has printed. Written by the reader thread, read by
     /// whoever is saving the wall — hence the lock the thread already holds a handle to.
@@ -81,6 +81,10 @@ pub struct SpawnSpec {
     pub env: Vec<(String, String)>,
     pub cols: u16,
     pub rows: u16,
+    /// Answer the cursor-position query (`ESC[6n`) ourselves. Windows' ConPTY asks it before it
+    /// prints a single byte and holds all output until someone replies. A terminal pane replies
+    /// through xterm; a build/run PTY has no pane, so without this it sits silent forever.
+    pub answer_cursor_query: bool,
 }
 
 impl SpawnSpec {
@@ -92,7 +96,13 @@ impl SpawnSpec {
             env: Vec::new(),
             cols,
             rows,
+            answer_cursor_query: false,
         }
+    }
+
+    pub fn answering_cursor_query(mut self) -> Self {
+        self.answer_cursor_query = true;
+        self
     }
 
     pub fn run(mut self, command: impl Into<String>, args: Vec<String>) -> Self {
@@ -133,6 +143,7 @@ impl TerminalManager {
             env,
             cols,
             rows,
+            answer_cursor_query,
         } = spec;
         if !cwd.is_dir() {
             return Err(anyhow!("terminal folder does not exist: {}", cwd.display()));
@@ -171,6 +182,8 @@ impl TerminalManager {
         let terminal_id = Uuid::new_v4().to_string();
         let reader_id = terminal_id.clone();
         let mut reader = pair.master.try_clone_reader()?;
+        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let reader_writer = Arc::clone(&writer);
         let screen = Arc::new(Mutex::new(String::new()));
         let reader_screen = Arc::clone(&screen);
         thread::spawn(move || {
@@ -190,6 +203,12 @@ impl TerminalManager {
                     }
                     Ok(read) => {
                         let data = decode_stream(&mut carry, &buffer[..read]);
+                        if answer_cursor_query && data.contains("[6n") {
+                            if let Ok(mut out) = reader_writer.lock() {
+                                let _ = out.write_all(b"[1;1R");
+                                let _ = out.flush();
+                            }
+                        }
                         if data.is_empty() {
                             continue; // the whole read was an unfinished character; wait for more
                         }
@@ -209,7 +228,6 @@ impl TerminalManager {
             }
         });
 
-        let writer = pair.master.take_writer()?;
         self.sessions.insert(
             terminal_id.clone(),
             TerminalSession {
@@ -242,8 +260,9 @@ impl TerminalManager {
             .sessions
             .get_mut(terminal_id)
             .ok_or_else(|| anyhow!("terminal is not open"))?;
-        session.writer.write_all(data.as_bytes())?;
-        session.writer.flush()?;
+        let mut writer = session.writer.lock().map_err(|_| anyhow!("terminal writer is poisoned"))?;
+        writer.write_all(data.as_bytes())?;
+        writer.flush()?;
         Ok(())
     }
 

@@ -1687,6 +1687,8 @@ package/unique_name="com.example.game"
              else echo unknown; fi\n",
         )
         .unwrap();
+        // Windows runs it through Git Bash, which needs no execute bit.
+        #[cfg(unix)]
         std::fs::set_permissions(&runner, std::os::unix::fs::PermissionsExt::from_mode(0o755))
             .unwrap();
         TEST_RUNNER.with(|slot| *slot.borrow_mut() = Some(runner.clone()));

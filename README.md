@@ -65,8 +65,8 @@ full size.
 
 ## Requirements
 
-macOS only. The build scripts are `zsh`, the bundle is a `.app`, and the terminal integration is
-Apple-specific. There is no Linux or Windows path today. Keep about 3 GB free for the Rust build.
+macOS first, Windows too (see [Windows](#windows)). There is no Linux path today. Keep about 3 GB
+free for the Rust build.
 
 | you need | why | install | check |
 |---|---|---|---|
@@ -109,6 +109,22 @@ macOS blocks it, use **System Settings → Privacy & Security → Open Anyway**.
 
 To build without installing over your daily copy, pass an empty folder:
 `./launcher/build-app.sh /tmp/panel-check`.
+
+### Windows
+
+You need Git for Windows (Panel runs project scripts through its Git Bash), Rust with the MSVC
+build tools, `cargo install tauri-cli --version "^2" --locked`, Node, Python 3 (as `python`) and
+an agent CLI. From PowerShell in `panel\next`:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File launcher\build-app.ps1
+```
+
+It puts **Appgea Panel.exe** and a **Rebuild Appgea Panel** shortcut on the Desktop (`-Dest
+<folder>` picks another place). The exe reads `host\` from the checkout, so keep the checkout where
+it is. `launcher/build-windows.sh` builds a self-contained NSIS installer instead. Shortcuts use Ctrl
+where macOS uses ⌘. Ctrl+C copies when the terminal has a selection and interrupts otherwise, and
+F11 is full screen. A Bridge-era `~\.appgeabridge` is reused through a junction.
 
 ## First run
 

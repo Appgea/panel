@@ -11,6 +11,7 @@
  */
 
 import { fileVisual } from "./file_icons";
+import { matchesShortcut } from "../keymap";
 import "./quick_open.css";
 
 export type QuickOpenTarget = {
@@ -63,7 +64,7 @@ export type QuickOpenOptions = {
   restoreFocus?(): void;
   placeholder?: string;
   emptyText?: string;
-  /** The chord that opens it. ⌘⇧O unless the host says otherwise. Always ⌘, never ⌃ or ⌥.
+  /** The chord that opens it. Cmd/Ctrl+Shift+O unless the host says otherwise.
    *  `late` listens in the bubble phase: every pane on screen gets first refusal, and this one
    *  answers only when none of them swallowed the chord — the portfolio picker's place. */
   shortcut?: Shortcut | Shortcut[];
@@ -399,10 +400,9 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
   const late = chords.some((chord) => chord.late);
   const onShortcut = (event: KeyboardEvent): void => {
     if (
-      !chords.some((chord) => event.key.toLowerCase() === chord.key && event.shiftKey === chord.shift) ||
-      !event.metaKey ||
-      event.ctrlKey ||
-      event.altKey ||
+      !chords.some((chord) =>
+        matchesShortcut(event, `Meta+${chord.shift ? "Shift+" : ""}Key${chord.key.toUpperCase()}`),
+      ) ||
       event.repeat ||
       options.host.closest("[hidden]") ||
       options.host.getClientRects().length === 0

@@ -23,6 +23,7 @@
 
 import type { GitState, Project, WorkFile } from "../types";
 import { icon, type IconName } from "../icons";
+import { projectIconUrl } from "../project-assets";
 import { ENGINES, type SessionKind } from "./agent-kinds";
 import type { ProjectRunView } from "./runner";
 import { openGitSweep } from "./git-sync";
@@ -579,7 +580,7 @@ export function mountDashboard(
       if (tile.dataset.project !== project.id) {
         tile.dataset.project = project.id;
         tileImage.hidden = false;
-        tileImage.src = `project-icon://panel/${encodeURIComponent(project.id)}`;
+        tileImage.src = projectIconUrl(project.id);
       }
       tileImage.onerror = () => {
         tileImage.hidden = true;

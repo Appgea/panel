@@ -43,6 +43,7 @@ import { projectAssetUrl, projectMediaKind } from "../project-assets";
 import { confirmDialog, promptDialog } from "../views/dialog";
 import { modulePost } from "./modules";
 import { errorText } from "../errors";
+import { matchesShortcut, shortcutLabel, IS_MAC } from "./keymap";
 import {
   createCodeEditor,
   fileVisual,
@@ -382,17 +383,17 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
 
   /* ‹ › in the jump bar. A jump — a ⌘-click, a Find hit, a symbol from ⌃6 — is a promise that
      you can come back, and a promise needs a button. ⌃⌘← / ⌃⌘→, Xcode's keys. */
-  const backButton = barButton(BAR_ICONS.back, "Back (⌃⌘←)");
-  const forwardButton = barButton(BAR_ICONS.forward, "Forward (⌃⌘→)");
+  const backButton = barButton(BAR_ICONS.back, `Back (${shortcutLabel("Meta+Ctrl+ArrowLeft", "Alt+ArrowLeft")})`);
+  const forwardButton = barButton(BAR_ICONS.forward, `Forward (${shortcutLabel("Meta+Ctrl+ArrowRight", "Alt+ArrowRight")})`);
 
   /* RELATED — what the open file reaches and what reaches it, as Xcode's related-items menu
      (⌃1). The count is in the tooltip and the menu. A number pinned to the icon read as a badge
      to clear, and it came and went with every scan. */
-  const relatedButton = barButton(BAR_ICONS.related, "Related files (⌃1)");
+  const relatedButton = barButton(BAR_ICONS.related, `Related files (${shortcutLabel("Ctrl+Digit1")})`);
   const barDivider = document.createElement("span");
   barDivider.className = "jb-divider";
   jumpBar.lead.append(navigatorButton, barDivider, relatedButton, backButton, forwardButton);
-  jumpBar.trail.append(barButton(BAR_ICONS.search, "Find in project (⌘⇧F)", "search"));
+  jumpBar.trail.append(barButton(BAR_ICONS.search, `Find in project (${shortcutLabel("Meta+Shift+KeyF")})`, "search"));
 
   /*
    * The debug bar.
@@ -478,12 +479,12 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       </div>
     </div>
     <div class="ed-start-actions">
-      <button type="button" data-work-action="open">${icon("code")}<span><b>Open a file</b><small>Jump anywhere in this project</small></span><kbd>⌘P</kbd></button>
-      <button type="button" data-work-action="search">${icon("log")}<span><b>Search the code</b><small>Find text across project files</small></span><kbd>⌘⇧F</kbd></button>
+      <button type="button" data-work-action="open">${icon("code")}<span><b>Open a file</b><small>Jump anywhere in this project</small></span><kbd>${shortcutLabel("Meta+KeyP")}</kbd></button>
+      <button type="button" data-work-action="search">${icon("log")}<span><b>Search the code</b><small>Find text across project files</small></span><kbd>${shortcutLabel("Meta+Shift+KeyF")}</kbd></button>
       <button type="button" data-work-action="new">${icon("work")}<span><b>Create a file</b><small>Start in the project root</small></span><span aria-hidden="true">＋</span></button>
     </div>
     <section class="ed-recent" hidden aria-label="Recently visited files"><h3>Pick up where you left off</h3><div class="ed-recent-files"></div></section>
-    <div class="ed-welcome-notes"><span><kbd>⌘⇧O</kbd> open any file or symbol</span><span><kbd>⌘</kbd> click a name to jump to it</span><span><kbd>⌃6</kbd> jump within the file</span></div>`;
+    <div class="ed-welcome-notes"><span><kbd>${shortcutLabel("Meta+Shift+KeyO")}</kbd> open any file or symbol</span><span><kbd>${IS_MAC ? "⌘" : "Ctrl"}</kbd> click a name to jump to it</span><span><kbd>${shortcutLabel("Ctrl+Digit6")}</kbd> jump within the file</span></div>`;
   empty.append(emptyCard);
 
   /* The status bar. An editor without one reads as a text box: you cannot say what language is
@@ -1099,10 +1100,10 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     relatedButton.disabled = activePath === null;
     relatedButton.title =
       activePath === null
-        ? "Related files (⌃1)"
+        ? `Related files (${shortcutLabel("Ctrl+Digit1")})`
         : relationshipsLoading
-          ? "Related files, looking… (⌃1)"
-          : `${count} related ${count === 1 ? "file" : "files"} (⌃1)`;
+          ? `Related files, looking… (${shortcutLabel("Ctrl+Digit1")})`
+          : `${count} related ${count === 1 ? "file" : "files"} (${shortcutLabel("Ctrl+Digit1")})`;
   }
 
   /* ------------------------------------------------------------ jump bar */
@@ -1195,10 +1196,10 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
             key: `${item.kind}:${item.line}`,
             label: item.name,
             icon: symbolBadge(item.kind),
-            title: `${item.name}, line ${item.line} (⌃6)`,
+            title: `${item.name}, line ${item.line} (${shortcutLabel("Ctrl+Digit6")})`,
             menu: () => documentItems(item),
           }))
-        : [{ key: "none", label: "No Selection", dim: true, title: "Document items (⌃6)", menu: () => documentItems(null) }],
+        : [{ key: "none", label: "No Selection", dim: true, title: `Document items (${shortcutLabel("Ctrl+Digit6")})`, menu: () => documentItems(null) }],
     );
   }
 
@@ -1248,7 +1249,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       } else if (ctrlOnly && event.code === "Digit1") {
         if (!tab) return;
         openRelated();
-      } else if (event.metaKey && event.shiftKey && !event.ctrlKey && event.code === "KeyJ") {
+      } else if (matchesShortcut(event, "Meta+Shift+KeyJ")) {
         if (!tab) return;
         void revealActive();
       } else {
@@ -2012,7 +2013,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
   function tabMenu(tab: Tab, x: number, y: number): void {
     const others = order.filter((path) => path !== tab.path);
     openMenu(x, y, [
-      { label: "Close", hint: "⌘W", run: () => void closeTab(tab.path) },
+      { label: "Close", hint: shortcutLabel("Meta+KeyW"), run: () => void closeTab(tab.path) },
       { label: "Close Others", disabled: !others.length, run: () => closeWhere((other) => other.path === tab.path) },
       { label: "Close Saved", run: () => closeWhere((other) => other.kind === "text" && isDirty(other)) },
       { label: "Close All", run: () => closeWhere(() => false) },
@@ -2209,9 +2210,9 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       if (armed) add(`${armed} ${armed === 1 ? "breakpoint" : "breakpoints"}`, "");
       let unsaved = 0;
       for (const other of tabs.values()) if (other.kind === "text" && isDirty(other)) unsaved += 1;
-      if (unsaved > 1) act(`${unsaved} unsaved`, "Save all (⌥⌘S)", "is-warn", () => void saveAll());
+      if (unsaved > 1) act(`${unsaved} unsaved`, `Save all (${shortcutLabel("Meta+Alt+KeyS", "Ctrl+Shift+KeyS")})`, "is-warn", () => void saveAll());
       if (tab.conflict) add("Conflict", "is-risk is-state");
-      else if (isDirty(tab)) act("Unsaved", "Save (⌘S)", "is-warn is-state", () => void save());
+      else if (isDirty(tab)) act("Unsaved", `Save (${shortcutLabel("Meta+KeyS")})`, "is-warn is-state", () => void save());
       else add("Saved", "is-ok is-state");
       add(indentLabel(state), "");
       const wrapped = tab.path === activePath ? code.wrapped() : false;
@@ -2386,7 +2387,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     keep.type = "button";
     keep.className = "ed-conflict-keep";
     keep.textContent = "Keep mine";
-    keep.title = "Keep your buffer; ⌘S will overwrite the agent's version";
+    keep.title = `Keep your buffer; ${shortcutLabel("Meta+KeyS")} will overwrite the agent's version`;
     keep.addEventListener("click", () => {
       // Their buffer stands and stays dirty, so the tab still says "unsaved" and ⌘S is an
       // explicit, deliberate overwrite. We drop the parked copy — disk is still intact.
@@ -2484,10 +2485,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     "keydown",
     (event) => {
       if (
-        !event.metaKey ||
-        !event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
+        !matchesShortcut(event, `Meta+Ctrl+${event.code}`, `Alt+${event.code}`) ||
         event.repeat ||
         (event.code !== "ArrowLeft" && event.code !== "ArrowRight") ||
         host.closest("[hidden]") ||
@@ -2640,10 +2638,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     "keydown",
     (event) => {
       if (
-        !event.metaKey ||
-        !event.altKey ||
-        event.ctrlKey ||
-        event.shiftKey ||
+        !matchesShortcut(event, "Meta+Alt+KeyS", "Ctrl+Shift+KeyS") ||
         event.repeat ||
         event.code !== "KeyS" ||
         host.closest("[hidden]") ||

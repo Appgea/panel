@@ -8,6 +8,7 @@
 
 import type { GitState, Session } from "../types";
 import { icon, type IconName } from "../icons";
+import { projectIconUrl } from "../project-assets";
 import { isAgentKind } from "./agent-kinds";
 import { moduleGet } from "./modules";
 import { errorText } from "../errors";
@@ -387,7 +388,7 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
     // The real app icon paints over the initial when the protocol has one — same graceful
     // fallback the sidebar rows use.
     const img = document.createElement("img");
-    img.src = `project-icon://panel/${encodeURIComponent(p.id)}`;
+    img.src = projectIconUrl(p.id);
     img.alt = "";
     img.draggable = false;
     img.addEventListener("error", () => img.remove());

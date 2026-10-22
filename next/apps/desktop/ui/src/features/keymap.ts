@@ -10,9 +10,8 @@
  * different actions on one code.
  *
  * A binding lives as a spec string ("Meta+Alt+ArrowLeft"): the modifiers in a fixed order, then
- * the code. Defaults are written out per platform rather than derived — on macOS ⌘ is free
- * because the system never lets it reach a PTY, while everywhere else the same chords are
- * readline bindings the shells on the wall actually need.
+ * the code. Defaults are written out per platform. Terminal creation keeps the same letters
+ * and Shift variants on Windows/Linux, with Ctrl taking the place of macOS Command.
  *
  * Only overrides are stored. Change a default later and everyone who never rebound it moves.
  */
@@ -55,6 +54,8 @@ export type ActionId =
   | "term.prev"
   | "term.waiting"
   | "term.zoom"
+  | "term.find"
+  | "term.copy"
   | "term.fullscreen"
   | "term.unzoom"
   | "term.focusLeft"
@@ -93,7 +94,7 @@ export const ACTIONS: ActionDef[] = [
     name: "Open Notebook",
     note: "Open the private local Markdown notebook",
     mac: "Meta+Shift+KeyN",
-    other: "Ctrl+Alt+KeyN",
+    other: "Ctrl+Shift+KeyN",
   },
   {
     id: "app.runApp",
@@ -182,7 +183,7 @@ export const ACTIONS: ActionDef[] = [
     name: "New terminal",
     note: "Open this tab's ＋ picker",
     mac: "Meta+KeyN",
-    other: "Ctrl+Shift+KeyN",
+    other: "Ctrl+KeyN",
   },
   {
     id: "wall.newShell",
@@ -190,7 +191,7 @@ export const ACTIONS: ActionDef[] = [
     name: "New shell here",
     note: "Another shell beside the focused one, in the folder it is standing in — ⌘T means what it means in every terminal",
     mac: "Meta+KeyT",
-    other: "Ctrl+Shift+KeyT",
+    other: "Ctrl+KeyT",
   },
   {
     id: "wall.newTab",
@@ -198,7 +199,7 @@ export const ACTIONS: ActionDef[] = [
     name: "New tab",
     note: "Add an empty terminal tab",
     mac: "Meta+Shift+KeyT",
-    other: "Ctrl+Alt+Shift+KeyT",
+    other: "Ctrl+Shift+KeyT",
   },
   {
     id: "wall.layout",
@@ -295,7 +296,23 @@ export const ACTIONS: ActionDef[] = [
     name: "Zoom terminal",
     note: "Blow the focused tile up to the whole wall, and back",
     mac: "Meta+Enter",
-    other: "Ctrl+Shift+Enter",
+    other: "Ctrl+Enter",
+  },
+  {
+    id: "term.find",
+    group: "Terminals",
+    name: "Find in terminal",
+    note: "Search the focused terminal's scrollback",
+    mac: "Meta+KeyF",
+    other: "Ctrl+KeyF",
+  },
+  {
+    id: "term.copy",
+    group: "Terminals",
+    name: "Copy terminal selection",
+    note: "Copy selected terminal text. With no selection, Ctrl+C still interrupts the command",
+    mac: "Meta+KeyC",
+    other: "Ctrl+KeyC",
   },
   {
     id: "term.fullscreen",
@@ -303,7 +320,8 @@ export const ACTIONS: ActionDef[] = [
     name: "Full screen",
     note: "Open project Terminals, or zoom the focused terminal on the wall",
     mac: "Ctrl+KeyF",
-    other: "Ctrl+KeyF",
+    // Ctrl+Shift+F is Find in project off macOS; F11 is the Windows full-screen key.
+    other: "F11",
   },
   {
     id: "term.unzoom",
@@ -448,9 +466,7 @@ export const chordFromEvent = (event: KeyboardEvent): Chord => ({
 });
 
 /** Exact modifier match, so ⌃Tab and ⌃⇧Tab stay two different actions. */
-export const matches = (event: KeyboardEvent, id: ActionId): boolean => {
-  const def = BY_ID.get(id)!;
-  const chord = chordOf(id);
+const matchesChord = (event: KeyboardEvent, chord: Chord, digits = false): boolean => {
   if (
     event.metaKey !== chord.meta ||
     event.ctrlKey !== chord.ctrl ||
@@ -459,7 +475,7 @@ export const matches = (event: KeyboardEvent, id: ActionId): boolean => {
   ) {
     return false;
   }
-  return def.digits ? /^Digit[1-9]$/.test(event.code) : event.code === chord.code;
+  return digits ? /^Digit[1-9]$/.test(event.code) : event.code === chord.code;
 };
 
 /** Keys that type a character. With ⌥ alone held, macOS types a character on them instead:
@@ -472,6 +488,15 @@ export const typesText = (id: ActionId): boolean => {
   const chord = chordOf(id);
   return IS_MAC && chord.alt && !chord.meta && !chord.ctrl && (!!BY_ID.get(id)?.digits || TYPING_CODE.test(chord.code));
 };
+export const matches = (event: KeyboardEvent, id: ActionId): boolean =>
+  matchesChord(event, chordOf(id), !!BY_ID.get(id)?.digits);
+
+/** Platform-aware chords for contextual commands outside the rebindable action table. */
+export const matchesShortcut = (
+  event: KeyboardEvent,
+  mac: string,
+  other = mac.replace(/Meta/g, "Ctrl"),
+): boolean => matchesChord(event, parseChord(IS_MAC ? mac : other));
 
 /** Which digit a digit-family event carried, 1…9, or null. */
 export const digitOf = (event: KeyboardEvent): number | null =>
@@ -527,6 +552,9 @@ export const chordLabel = (chord: Chord, digits = false): string => {
     .filter(Boolean)
     .join("+");
 };
+
+export const shortcutLabel = (mac: string, other = mac.replace(/Meta/g, "Ctrl")): string =>
+  chordLabel(parseChord(IS_MAC ? mac : other));
 
 /** The label for one action — what buttons and tooltips print. */
 export const label = (id: ActionId): string =>

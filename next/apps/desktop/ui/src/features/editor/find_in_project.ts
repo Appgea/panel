@@ -17,6 +17,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { fileVisual } from "./file_icons";
+import { matchesShortcut } from "../keymap";
 import "./find_in_project.css";
 
 type SearchHit = {
@@ -335,11 +336,7 @@ export function mountFindInProject(options: FindInProjectOptions): FindInProject
 
   const onShortcut = (event: KeyboardEvent): void => {
     if (
-      event.key.toLowerCase() !== "f" ||
-      !event.metaKey ||
-      !event.shiftKey ||
-      event.ctrlKey ||
-      event.altKey ||
+      !matchesShortcut(event, "Meta+Shift+KeyF") ||
       event.repeat ||
       options.host.closest("[hidden]") ||
       options.host.getClientRects().length === 0

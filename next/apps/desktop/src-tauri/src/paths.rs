@@ -63,10 +63,10 @@ pub fn user_root() -> PathBuf {
             // Panel was called Bridge, and its home was `~/.appgeabridge`. Link the new name to
             // the old folder rather than move it: other tools may still read the old path, and a
             // link breaks none of them. This runs before the create below, or that would win.
+            // On Windows the link is a junction unless Developer Mode allows a real symlink.
             let legacy = home.join(".appgeabridge");
-            #[cfg(unix)]
             if !root.exists() && legacy.is_dir() {
-                let _ = std::os::unix::fs::symlink(&legacy, &root);
+                let _ = crate::platform::link_dir(&legacy, &root);
             }
             root
         });

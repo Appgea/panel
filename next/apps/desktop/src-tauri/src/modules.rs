@@ -557,10 +557,16 @@ pub fn call(manifest: &Manifest, method: &str, path: &str, body: Vec<u8>) -> Res
 /// "status\ncontent-type\n\nbody". A module that crashes emits no header — surface its stderr
 /// rather than a blank page, because a silent module is the hardest kind to debug.
 fn parse(stdout: &[u8], stderr: &[u8]) -> Response {
-    let split = stdout
+    // Windows Python print()s `\r\n`. The hosts here write bytes, but a module may not.
+    let lf = stdout
         .windows(2)
         .position(|pair| pair == b"\n\n")
         .map(|at| (&stdout[..at], &stdout[at + 2..]));
+    let crlf = stdout
+        .windows(4)
+        .position(|quad| quad == b"\r\n\r\n")
+        .map(|at| (&stdout[..at], &stdout[at + 4..]));
+    let split = lf.into_iter().chain(crlf).min_by_key(|(head, _)| head.len());
 
     let Some((head, body)) = split else {
         let message = if stderr.is_empty() { stdout } else { stderr };
@@ -643,7 +649,8 @@ mod tests {
         let exec = root.join("host.py");
         fs::write(
             &exec,
-            "import helper\nprint('200\\napplication/json\\n\\n{\"value\":%d}' % helper.VALUE)\n",
+            // Bytes, as the real hosts write them: print() would turn \n into \r\n on Windows.
+            "import helper, sys\nsys.stdout.buffer.write(b'200\\napplication/json\\n\\n{\"value\":%d}\\n' % helper.VALUE)\n",
         )
         .unwrap();
         let manifest = Manifest {
@@ -681,6 +688,14 @@ mod tests {
         let parsed = parse(b"", b"Traceback: boom");
         assert_eq!(parsed.status, 502);
         assert_eq!(String::from_utf8_lossy(&parsed.body), "Traceback: boom");
+    }
+
+    #[test]
+    fn a_windows_print_head_still_parses() {
+        let parsed = parse(b"404\r\ntext/plain\r\n\r\nmissing\n\nline", b"");
+        assert_eq!(parsed.status, 404);
+        assert_eq!(parsed.content_type, "text/plain");
+        assert_eq!(parsed.body, b"missing\n\nline");
     }
 
     /// The module's own HTML links to `/m/<name>/...`, so this route shape is not cosmetic.

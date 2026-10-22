@@ -24,6 +24,7 @@ import {
   replaceNext,
   setSearchQuery,
 } from "@codemirror/search";
+import { IS_MAC } from "../keymap";
 
 /** Past this many matches the count says "10000+" — an exact number would cost a full scan. */
 const MAX_COUNT = 10_000;
@@ -233,7 +234,7 @@ export function createFindPanel(view: EditorView): Panel {
     } else if (event.key === "Enter" && event.target === input) {
       (event.shiftKey ? findPrevious : findNext)(view);
     } else if (event.key === "Enter" && event.target === replaceInput) {
-      (event.metaKey ? replaceAll : replaceNext)(view);
+      ((IS_MAC ? event.metaKey : event.ctrlKey) ? replaceAll : replaceNext)(view);
     } else if (meta && event.key.toLowerCase() === "g") {
       (event.shiftKey ? findPrevious : findNext)(view);
     } else if (meta && event.altKey && event.code === "KeyF") {

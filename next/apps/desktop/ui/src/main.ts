@@ -14,6 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { icon } from "./icons";
+import { projectIconUrl, schemeOrigin } from "./project-assets";
 import { withViewTransition } from "./motion";
 import { renderView } from "./registry";
 import { str } from "./views/dom";
@@ -55,10 +56,13 @@ import {
 } from "./features/settings";
 import {
   KEYMAP_EVENT,
+  IS_MAC,
   type ActionId,
   digitOf,
   label as chordLabel,
   matches as chordMatches,
+  matchesShortcut,
+  shortcutLabel,
 } from "./features/keymap";
 import { mountPulse } from "./features/pulse";
 import {
@@ -2485,7 +2489,7 @@ function paintProjects(): void {
       row.innerHTML = `<span class="project-icon"><span class="project-glyph"></span><i class="dot"></i></span><span class="project-label"><b></b></span><small></small><span class="project-meta"></span><span class="project-tools"><button class="project-pin" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z"/><path d="M12 14v7"/></svg></button><button class="project-more" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></span>`;
       row.querySelector(".project-glyph")!.textContent = here.project.name.trim().charAt(0).toUpperCase();
       const icon = document.createElement("img");
-      icon.src = `project-icon://panel/${encodeURIComponent(here.project.id)}`;
+      icon.src = projectIconUrl(here.project.id);
       icon.alt = "";
       icon.draggable = false;
       icon.addEventListener("error", () => icon.remove());
@@ -2831,7 +2835,7 @@ function loadExtensionTab(entry: TabEntry, project: Project): void {
     .replaceAll("{path}", encodeURIComponent(project.path));
   const path = mount.startsWith("/") ? mount : `/${mount}`;
   const separator = path.includes("?") ? "&" : "?";
-  const target = `module://panel/m/${extension.module}${path}${separator}panel_refresh=${Date.now()}`;
+  const target = `${schemeOrigin("module")}/m/${extension.module}${path}${separator}panel_refresh=${Date.now()}`;
   extension.frame.setAttribute("src", target);
 }
 
@@ -3575,12 +3579,7 @@ async function boot(): Promise<void> {
         !event.ctrlKey &&
         !event.altKey &&
         !event.shiftKey;
-      const closeChord =
-        event.code === "KeyW" &&
-        event.metaKey &&
-        !event.ctrlKey &&
-        !event.altKey &&
-        !event.shiftKey;
+      const closeChord = matchesShortcut(event, "Meta+KeyW");
       if (!escape && !closeChord) return;
       // The manager is an agent in a terminal, and Esc is how you interrupt an agent. While its
       // terminal has the caret, Esc goes to the agent. ⌘W, ⌘⇧M and × still close the screen.
@@ -3704,12 +3703,14 @@ async function boot(): Promise<void> {
     }
   };
   paintChordHints();
+  el("chatButton").title = `Agent reports · ${shortcutLabel("Meta+Shift+KeyC", "Ctrl+Alt+KeyC")}`;
+  el("cpoButton").title = `Manager · Plan work with an agent · ${shortcutLabel("Meta+Shift+KeyM")}`;
   window.addEventListener(KEYMAP_EVENT, paintChordHints);
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Meta") document.body.classList.add("is-cmd-held");
+    if (event.key === (IS_MAC ? "Meta" : "Control")) document.body.classList.add("is-cmd-held");
   });
   window.addEventListener("keyup", (event) => {
-    if (event.key === "Meta") document.body.classList.remove("is-cmd-held");
+    if (event.key === (IS_MAC ? "Meta" : "Control")) document.body.classList.remove("is-cmd-held");
   });
   window.addEventListener("blur", () => document.body.classList.remove("is-cmd-held"));
   el("runButton").addEventListener("click", () => showTerminals(TAB_RUNS));
@@ -3785,14 +3786,14 @@ async function boot(): Promise<void> {
     "keydown",
     (event) => {
       if (isRecording() || isLightboxOpen()) return;
-      if (!event.metaKey || event.ctrlKey || event.altKey || !event.shiftKey || event.repeat) return;
-      if (event.code === "KeyM") {
+      if (event.repeat) return;
+      if (matchesShortcut(event, "Meta+Shift+KeyM")) {
         chat.toggle("manager");
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
-      if (event.code !== "KeyC") return;
+      if (!matchesShortcut(event, "Meta+Shift+KeyC", "Ctrl+Alt+KeyC")) return;
       chat.toggle("reports");
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -3826,9 +3827,9 @@ async function boot(): Promise<void> {
       // A chord being RECORDED in Settings must not also fire the thing it is bound to today,
       // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
-      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || event.repeat) return;
-      if (!/^[1-9]$/.test(event.key)) return;
-      const at = Number(event.key) - 1;
+      if (event.repeat || !/^Digit[1-9]$/.test(event.code)) return;
+      if (!matchesShortcut(event, `Meta+${event.code}`)) return;
+      const at = Number(event.code.slice(5)) - 1;
       if (terminalsActive) {
         // The tabs layout's second row takes the digits while it is up; terminals.ts decides.
         if (terminals.digit(at)) {
@@ -3938,11 +3939,7 @@ async function boot(): Promise<void> {
       // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
       if (
-        event.key.toLowerCase() !== "f" ||
-        !event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
+        !chordMatches(event, "term.find") ||
         event.repeat
       ) {
         return;
@@ -3965,13 +3962,12 @@ async function boot(): Promise<void> {
     "keydown",
     (event) => {
       if (isRecording() || isLightboxOpen()) return;
-      if (!event.metaKey || event.ctrlKey || event.altKey) return;
       const step =
-        event.key === "=" || event.key === "+"
+        matchesShortcut(event, "Meta+Equal") || matchesShortcut(event, "Meta+Shift+Equal")
           ? 1
-          : event.key === "-" || event.key === "_"
+          : matchesShortcut(event, "Meta+Minus") || matchesShortcut(event, "Meta+Shift+Minus")
             ? -1
-            : event.key === "0"
+            : matchesShortcut(event, "Meta+Digit0")
               ? 0
               : null;
       if (step === null) return;
@@ -4103,11 +4099,7 @@ async function boot(): Promise<void> {
       // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen() || document.querySelector(".skills-overlay")) return;
       if (
-        event.key.toLowerCase() !== "w" ||
-        !event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
+        !matchesShortcut(event, "Meta+KeyW") ||
         event.repeat
       ) {
         return;
@@ -4243,7 +4235,7 @@ async function boot(): Promise<void> {
         path: here.project.id,
         detail: here.project.role === "collection" ? "collection" : here.project.path,
         // The letter sits under the icon; a project without one shows the letter.
-        icon: `<b>${here.project.name.trim().charAt(0).toUpperCase()}</b><img src="project-icon://panel/${encodeURIComponent(here.project.id)}" alt="" onerror="this.remove()" />`,
+        icon: `<b>${here.project.name.trim().charAt(0).toUpperCase()}</b><img src="${projectIconUrl(here.project.id)}" alt="" onerror="this.remove()" />`,
         label: here.running ? "live" : "",
         name: here.project.name,
       })),
@@ -4260,11 +4252,7 @@ async function boot(): Promise<void> {
       // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
       if (
-        event.key.toLowerCase() !== "k" ||
-        !event.metaKey ||
-        event.ctrlKey ||
-        event.altKey ||
-        event.shiftKey ||
+        !matchesShortcut(event, "Meta+KeyK") ||
         event.repeat ||
         document.body.classList.contains("single-project")
       ) {

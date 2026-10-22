@@ -30,6 +30,11 @@ const SKIP_ICON_DIRS: &[&str] = &[
     "Preview Content",
     "xcuserdata",
     ".git",
+    "target",
+    "dist",
+    ".next",
+    ".venv",
+    "venv",
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -790,6 +795,7 @@ pub fn app_icon(project: &Project) -> Option<PathBuf> {
     };
 
     let icon = declared
+        .or_else(|| desktop_icon(&project.path))
         .or_else(|| godot_icon(&project.path))
         .or_else(|| flutter_icon(&project.path))
         .or_else(|| android_icon(&project.path))
@@ -1012,14 +1018,58 @@ fn is_raster_image(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn desktop_icon(root: &Path) -> Option<PathBuf> {
+    [
+        "src-tauri/icons",
+        "apps/desktop/src-tauri/icons",
+        "next/apps/desktop/src-tauri/icons",
+    ]
+    .iter()
+    .flat_map(|dir| {
+        ["icon.png", "128x128@2x.png", "128x128.png", "icon.ico"]
+            .map(|name| root.join(dir).join(name))
+    })
+    .find(|path| path.is_file())
+}
+
 fn web_icon(root: &Path) -> Option<PathBuf> {
+    web_icon_at(root).or_else(|| {
+        // Web apps may live in a package below the registered repository (including apps/*).
+        let mut packages = Vec::new();
+        for parent in [root.to_path_buf(), root.join("apps")] {
+            if let Ok(entries) = fs::read_dir(parent) {
+                packages.extend(entries.flatten().map(|entry| entry.path()).filter(|path| {
+                    path.is_dir()
+                        && path.join("package.json").is_file()
+                        && !path.file_name().and_then(|name| name.to_str())
+                            .is_some_and(|name| SKIP_ICON_DIRS.contains(&name))
+                }));
+            }
+        }
+        packages.sort();
+        packages.into_iter().find_map(|package| web_icon_at(&package))
+    })
+}
+
+fn web_icon_at(root: &Path) -> Option<PathBuf> {
     [
         "public/apple-touch-icon.png",
+        "public/images/apple-touch-icon.png",
         "public/icon.png",
         "public/logo.png",
         "public/favicon.png",
         "public/favicon.svg",
+        "public/favicon.ico",
+        "src/app/icon.png",
+        "src/app/icon.svg",
+        "src/app/favicon.ico",
+        "app/icon.png",
+        "app/icon.svg",
+        "app/favicon.ico",
+        "assets/favicon.png",
+        "favicon.png",
         "favicon.svg",
+        "favicon.ico",
     ]
     .iter()
     .map(|path| root.join(path))
@@ -1858,6 +1908,40 @@ mod tests {
             root.join("assets/app_icon.png").canonicalize().ok()
         );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn desktop_and_nested_web_app_icons_are_discovered() {
+        let root = std::env::temp_dir().join(format!("panel-package-icons-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("next/apps/desktop/src-tauri/icons")).unwrap();
+        let desktop = root.join("next/apps/desktop/src-tauri/icons/icon.png");
+        fs::write(&desktop, "desktop artwork").unwrap();
+        assert_eq!(desktop_icon(&root), Some(desktop));
+
+        fs::create_dir_all(root.join("src/app")).unwrap();
+        let next_icon = root.join("src/app/favicon.ico");
+        fs::write(&next_icon, "web artwork").unwrap();
+        assert_eq!(web_icon(&root), Some(next_icon.clone()));
+        fs::remove_file(next_icon).unwrap();
+
+        fs::create_dir_all(root.join("pairdrop/public/images")).unwrap();
+        fs::write(root.join("pairdrop/package.json"), "{}").unwrap();
+        let nested_icon = root.join("pairdrop/public/images/apple-touch-icon.png");
+        fs::write(&nested_icon, "nested web artwork").unwrap();
+        assert_eq!(web_icon(&root), Some(nested_icon.clone()));
+
+        fs::create_dir_all(root.join("node_modules/public")).unwrap();
+        fs::write(root.join("node_modules/package.json"), "{}").unwrap();
+        fs::write(root.join("node_modules/public/icon.png"), "dependency artwork").unwrap();
+        fs::remove_file(nested_icon).unwrap();
+        assert_eq!(web_icon(&root), None);
+
+        fs::create_dir_all(root.join("apps/web/public")).unwrap();
+        fs::write(root.join("apps/web/package.json"), "{}").unwrap();
+        let workspace_icon = root.join("apps/web/public/favicon.svg");
+        fs::write(&workspace_icon, "workspace artwork").unwrap();
+        assert_eq!(web_icon(&root), Some(workspace_icon));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

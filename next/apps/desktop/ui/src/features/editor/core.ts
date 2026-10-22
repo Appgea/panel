@@ -104,6 +104,7 @@ import {
   setChangeDocument,
   type StageHunk,
 } from "./change_hunks";
+import { IS_MAC } from "../keymap";
 import "./editor.css";
 
 /* ------------------------------------------------------------- scroll spot */
@@ -466,15 +467,18 @@ const linkField = StateField.define<DecorationSet>({
 /**
  * ⌘-hover underlines the name, ⌘-click jumps to it, ⌃⌘J jumps from the caret. The underline is
  * the promise: a name you can see will jump is a name you will actually click. Mouse moves cost
- * nothing until ⌘ is down.
+ * nothing until ⌘ is down. Off macOS, Ctrl stands in for ⌘.
  */
+const PRIMARY_KEY = IS_MAC ? "Meta" : "Control";
+const primaryHeld = (event: MouseEvent): boolean => (IS_MAC ? event.metaKey : event.ctrlKey);
+
 function definitionLinks(go: (symbol: string, position: number) => void): Extension {
   const linkPlugin = ViewPlugin.fromClass(
     class {
       private current: string | null = null;
       pointer: { x: number; y: number } | null = null;
       private readonly onKey = (event: KeyboardEvent): void => {
-        if (event.key !== "Meta") return;
+        if (event.key !== PRIMARY_KEY) return;
         if (event.type === "keyup") this.clear();
         else if (this.pointer) this.aim(this.pointer.x, this.pointer.y);
       };
@@ -497,7 +501,7 @@ function definitionLinks(go: (symbol: string, position: number) => void): Extens
 
       move(event: MouseEvent): void {
         this.pointer = { x: event.clientX, y: event.clientY };
-        if (event.metaKey) this.aim(event.clientX, event.clientY);
+        if (primaryHeld(event)) this.aim(event.clientX, event.clientY);
         else if (this.current) this.clear();
       }
 
@@ -530,7 +534,7 @@ function definitionLinks(go: (symbol: string, position: number) => void): Extens
     linkPlugin,
     EditorView.domEventHandlers({
       mousedown(event, view) {
-        if (!event.metaKey || event.button !== 0 || event.shiftKey || event.altKey) return false;
+        if (!primaryHeld(event) || event.button !== 0 || event.shiftKey || event.altKey) return false;
         const position = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
         const word = position === null ? null : wordAt(view.state, position);
         // No name under the pointer: ⌘-click falls through to adding a caret.
@@ -850,7 +854,7 @@ export function createCodeEditor(options: CodeEditorOptions): CodeEditor {
         /* ⌃⇧click adds a cursor, as in Xcode. ⌘click is a definition jump when the host offers
            one and there is a name under the pointer; otherwise it adds a cursor too. */
         EditorView.clickAddsSelectionRange.of(
-          (event) => (event.ctrlKey && event.shiftKey) || event.metaKey,
+          (event) => (event.ctrlKey && event.shiftKey) || primaryHeld(event),
         ),
         selectBracketBlock,
         symbolSource.of(options.symbols ?? (() => null)),

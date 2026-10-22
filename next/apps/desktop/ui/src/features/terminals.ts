@@ -48,8 +48,7 @@
  * away (Esc does the same), tap a picture to fill the screen with it (←/→ walks the set, Esc
  * closes). Nothing in a notice navigates: you are looking at it, not going somewhere.
  *
- * Off macOS the ⌘ chords become Ctrl+Shift or Ctrl+Alt — plain Ctrl+T/N are readline bindings
- * the shells on the wall need.
+ * Off macOS, new-terminal and new-shell chords use Ctrl+N/T; Ctrl+Shift+T creates a tab.
  *
  * A sim run is still not a terminal you work in: the Runs pane keeps its own verbs
  * (run / reload / rebuild / stop) and its PTY never joins the deck or the wall. Merging put
@@ -63,7 +62,7 @@ import type { Session } from "../types";
 import type { LiveRun, ProjectRunView } from "./runner";
 import { icon, type IconName } from "../icons";
 import { ENGINES, type SessionKind } from "./agent-kinds";
-import { projectImage } from "../project-assets";
+import { projectImage, projectIconUrl } from "../project-assets";
 import { prose } from "../views/dom";
 import { isLightboxOpen, showLightbox, type LightboxShot } from "../views/lightbox";
 import { IS_MAC, KEYMAP_EVENT, chordLabel, chordOf, digitOf, label as chordText, matches } from "./keymap";
@@ -2159,7 +2158,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     glyph.textContent = p.name.trim().charAt(0).toUpperCase();
     ico.append(glyph);
     const img = document.createElement("img");
-    img.src = `project-icon://panel/${encodeURIComponent(p.id)}`;
+    img.src = projectIconUrl(p.id);
     img.alt = "";
     img.draggable = false;
     img.addEventListener("error", () => img.remove());
@@ -2683,7 +2682,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     logo.querySelector<HTMLElement>(".term-logo-glyph")!.textContent =
       p.name.trim().charAt(0).toUpperCase();
     const logoImg = document.createElement("img");
-    logoImg.src = `project-icon://panel/${encodeURIComponent(p.id)}`;
+    logoImg.src = projectIconUrl(p.id);
     logoImg.alt = "";
     logoImg.draggable = false;
     logoImg.addEventListener("error", () => logoImg.remove());

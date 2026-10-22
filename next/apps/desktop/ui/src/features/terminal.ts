@@ -21,6 +21,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
+import { IS_MAC, matches, matchesShortcut, label as chordLabel } from "./keymap";
+import { projectIconUrl } from "../project-assets";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalChunk = {
@@ -644,14 +646,16 @@ export class TerminalDeck {
       this.copySelection(pane);
     }, true);
     term.attachCustomKeyEventHandler((event) => {
-      if (event.type !== "keydown" || !(event.metaKey || event.ctrlKey) || event.altKey) return true;
+      if (event.type !== "keydown") return true;
       // ⌘A selects the scrollback, as it does in every Mac terminal. ⌃A stays line-start.
-      if (event.metaKey && !event.shiftKey && event.key.toLowerCase() === "a") {
+      if (IS_MAC && matchesShortcut(event, "Meta+KeyA")) {
         term.selectAll();
         return false;
       }
-      // ⌃C must stay the interrupt — only ⌘C is a copy, and only when there is something to copy.
-      if (event.key.toLowerCase() !== "c" || !event.metaKey || !term.hasSelection()) return true;
+      // Without a selection, Ctrl+C reaches the shell as its normal interrupt.
+      // Ctrl+Shift+C remains available as the familiar Windows/Linux copy alias.
+      const copy = matches(event, "term.copy") || (!IS_MAC && matchesShortcut(event, "Meta+Shift+KeyC"));
+      if (!copy || !term.hasSelection()) return true;
       this.copySelection(pane);
       return false;
     });
@@ -904,7 +908,7 @@ export class TerminalDeck {
       const art = document.createElement("img");
       art.alt = "";
       art.draggable = false;
-      art.src = `project-icon://panel/${encodeURIComponent(about.projectId)}`;
+      art.src = projectIconUrl(about.projectId);
       art.addEventListener("error", () => art.remove());
       seal.append(art);
 
@@ -1035,6 +1039,7 @@ export class TerminalDeck {
     this.searchIn = sessionId;
     pane.mount.appendChild(bar);
     const input = this.searchInput!;
+    input.title = `Find in terminal (${chordLabel("term.find")})`;
     input.focus();
     input.select();
     if (input.value) this.runSearch(input.value, "next");

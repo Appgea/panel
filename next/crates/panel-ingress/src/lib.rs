@@ -292,7 +292,9 @@ impl Ingress {
     /// Exact edit history for a station. A UI path may be relative while hooks report absolute;
     /// suffix matching joins those two spellings without exposing arbitrary filesystem reads.
     pub fn file_changes(&self, project: &str, path: &str) -> Vec<ChangeStep> {
-        let needle = path.trim().trim_start_matches('/');
+        // Keys are native paths; Windows writes them with `\` while callers ask with `/`.
+        let needle = path.trim().replace('\\', "/");
+        let needle = needle.trim_start_matches('/');
         let changes = self.changes.lock().unwrap();
         changes
             .files
@@ -301,7 +303,8 @@ impl Ingress {
                 let Some((owner, file)) = key.split_once('\0') else {
                     return false;
                 };
-                owner == project && (file == path || file.trim_start_matches('/').ends_with(needle))
+                owner == project
+                    && (file == path || file.replace('\\', "/").trim_start_matches('/').ends_with(needle))
             })
             .map(|(_, steps)| steps.clone())
             .unwrap_or_default()
@@ -583,7 +586,14 @@ impl Ingress {
         };
         candidate
             .strip_prefix(root)
-            .map(|relative| relative.to_string_lossy().into_owned())
+            // `/` on every platform: the UI and file_changes speak forward slashes.
+            .map(|relative| {
+                relative
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/")
+            })
             .unwrap_or_else(|_| path.to_string())
     }
 
@@ -837,6 +847,10 @@ mod tests {
         assert_eq!(log.step_bytes, log.files["other\0kept.rs"][0].memory_bytes());
     }
 
+    /// The fixture project root. Report paths must be absolute to be made project-relative,
+    /// and `/tmp` is not absolute on Windows.
+    const TAVLA: &str = if cfg!(windows) { "C:/tmp/tavla" } else { "/tmp/tavla" };
+
     /// An ingress with one agent bound to project "tavla", working in /tmp/tavla.
     fn ingress() -> (Ingress, mpsc::Receiver<ProjectEvent>) {
         let (tx, rx) = mpsc::channel();
@@ -844,7 +858,7 @@ mod tests {
             let _ = tx.send(event);
         });
         let ingress = Ingress::serve(sink).unwrap();
-        ingress.register_agent("s1", "tavla", "/tmp/tavla");
+        ingress.register_agent("s1", "tavla", TAVLA);
         (ingress, rx)
     }
 
@@ -858,7 +872,7 @@ mod tests {
                 "Notification",
                 &json!({
                     "instance": "s1",
-                    "cwd": "/tmp/tavla",
+                    "cwd": TAVLA,
                     "notification_type": kind,
                     "message": message,
                 }),
@@ -955,16 +969,16 @@ mod tests {
             "PostToolUse",
             &json!({
                 "session_id": "some-claude-uuid-we-have-never-seen",
-                "cwd": "/tmp/tavla/lib",
+                "cwd": format!("{TAVLA}/lib"),
                 "tool_name": "Edit",
-                "tool_input": {"file_path": "/tmp/tavla/lib/a.dart"},
+                "tool_input": {"file_path": format!("{TAVLA}/lib/a.dart")},
             }),
         );
         let event = rx.recv().unwrap();
         assert_eq!(event.project, "tavla");
         match event.event {
             PanelEvent::FileChanged { path, .. } => {
-                assert_eq!(path.to_str(), Some("/tmp/tavla/lib/a.dart"));
+                assert_eq!(path, PathBuf::from(format!("{TAVLA}/lib/a.dart")));
             }
             other => panic!("expected a file change, got {other:?}"),
         }
@@ -978,7 +992,7 @@ mod tests {
             &json!({
                 "instance": "s1",
                 "session_id": "claude-internal-id",
-                "cwd": "/tmp/tavla",
+                "cwd": TAVLA,
                 "prompt": "Fix only the current request",
             }),
         );
@@ -1003,10 +1017,10 @@ mod tests {
             "payload": {
                 "title": "Three widget directions",
                 "images": [
-                    "/tmp/tavla/design/one.png",
-                    {"path": "/tmp/tavla/design/two.png", "caption": "quiet"}
+                    format!("{TAVLA}/design/one.png"),
+                    {"path": format!("{TAVLA}/design/two.png"), "caption": "quiet"}
                 ],
-                "attachments": [{"path": "/tmp/tavla/design", "kind": "folder"}]
+                "attachments": [{"path": format!("{TAVLA}/design"), "kind": "folder"}]
             }
         }));
         let event = rx.recv().unwrap();
@@ -1031,9 +1045,9 @@ mod tests {
         let (ingress, rx) = ingress();
         ingress.on_emit(&json!({
             "instance": "",
-            "cwd": "/tmp/tavla/design",
+            "cwd": format!("{TAVLA}/design"),
             "type": "message",
-            "payload": { "title": "shot", "images": ["/tmp/tavla/design/one.png"] }
+            "payload": { "title": "shot", "images": [format!("{TAVLA}/design/one.png")] }
         }));
         let event = rx.recv().unwrap();
         assert_eq!(event.project, "tavla");

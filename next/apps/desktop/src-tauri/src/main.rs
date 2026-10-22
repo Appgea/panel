@@ -2214,7 +2214,10 @@ async fn start_sim(
         }
     });
 
-    let spec = SpawnSpec::shell(&run.cwd, cols, rows).run(run.program.clone(), run.args.clone());
+    // A run has no terminal pane to answer ConPTY's cursor query, so the PTY answers it itself.
+    let spec = SpawnSpec::shell(&run.cwd, cols, rows)
+        .run(run.program.clone(), run.args.clone())
+        .answering_cursor_query();
     let spawned = state.terminals.lock().unwrap().spawn(spec, sink.clone());
     let terminal_id = match spawned {
         Ok(terminal_id) => terminal_id,
@@ -3772,6 +3775,8 @@ mod origin_tests {
         assert!(app_origin("tauri://localhost"));
         assert!(app_origin("http://localhost:1421"));
         assert!(!app_origin("module://panel"));
+        assert!(!app_origin("http://module.localhost"));
+        assert!(app_origin("http://tauri.localhost"));
         assert!(!app_origin("https://example.com"));
         assert!(!app_origin("http://localhost.evil.com"));
     }
