@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Appgea Deploy",
+  "version": "0.1.0",
+  "description": "Uploads finished videos to YouTube, Facebook, Instagram, TikTok and X in your own logged-in Chrome. Stops before Publish.",
+  "permissions": ["storage", "tabs", "scripting", "debugger", "alarms"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "https://studio.youtube.com/*",
+    "https://www.youtube.com/*",
+    "https://business.facebook.com/*",
+    "https://www.facebook.com/*",
+    "https://www.instagram.com/*",
+    "https://www.tiktok.com/*",
+    "https://x.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_popup": "popup.html", "default_title": "Appgea Deploy" }
+}

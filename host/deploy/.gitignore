@@ -1,0 +1,5 @@
+.env
+.state/
+__pycache__/
+# your own accounts; copy accounts.example.json
+accounts.json
