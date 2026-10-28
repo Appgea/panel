@@ -348,6 +348,11 @@
         <!-- Project memory and private notes. -->
         <nav id="planNav" class="side-nav plan-nav" aria-label="Desk">
           <span class="side-label side-nav-label"><span>DESK</span></span>
+          <!-- Who holds what, what waits on you, and the scouts that find the work. Shown only with
+               the scout extension installed, like Support. -->
+          <button id="boardButton" class="nav-row" type="button" title="Board: who holds what, what needs you, the scouts" hidden>
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v6h-4z"/></svg></span> Board
+          </button>
           <button id="sprintButton" class="nav-row" type="button" title="Project desk">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h6"/><path d="m14 16 2.5 2.5L21 14"/></svg></span> Project desk
           </button>
@@ -411,6 +416,9 @@
       <!-- CHAT: the conversation, as a screen. It swaps with the workspace, Home, Settings or the
            project chrome exactly as they swap with each other, and hands back whatever it took on
            Esc. Opened by the Chat row above, or ⌘⇧C. -->
+      <!-- BOARD STRIP: above every screen in the work track. features/board.ts fills it. -->
+      <div id="boardStrip" class="board-strip" hidden></div>
+
       <aside id="chatRail"></aside>
 
       <!-- Human-only Markdown notes. This screen never receives project or agent context. -->
@@ -427,6 +435,8 @@
       <section id="sprintScreen" class="sprint" hidden></section>
       <!-- OPS MAP: the company brain as a network. Portfolio-wide, like Home. -->
       <section id="opsMapScreen" class="ops-map" hidden tabindex="-1"></section>
+      <!-- BOARD: the issue board and the scouts. Portfolio-wide, like Home. -->
+      <section id="boardScreen" class="board" hidden tabindex="-1"></section>
 
       <!-- SUPPORT: every app's support form, read into one queue. Portfolio-wide like Home —
            the queue is one queue, and splitting it per project would make eleven of it. -->

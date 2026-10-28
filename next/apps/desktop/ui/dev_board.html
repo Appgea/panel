@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>Panel — board harness</title>
+  </head>
+  <body>
+    <main id="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span><small>APPGEA</small><b>Panel</b></span>
+        </header>
+        <nav class="side-nav plan-nav" aria-label="Desk">
+          <span class="side-label side-nav-label"><span>DESK</span></span>
+          <button id="boardButton" class="nav-row is-on" type="button">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v6h-4z"/></svg></span> Board
+          </button>
+          <button class="nav-row" type="button">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="6" r="1.8"/><circle cx="19" cy="6.5" r="1.8"/></svg></span> Ops map
+          </button>
+        </nav>
+        <section id="projectsSection" class="side-section projects-section">
+          <div class="side-label projects-label"><span>PROJECTS</span></div>
+          <div id="projectList" class="project-list"></div>
+        </section>
+      </aside>
+      <div id="boardStrip" class="board-strip" hidden></div>
+      <section id="boardScreen" class="board" hidden></section>
+      <section id="homeScreen" class="home" hidden><p style="padding:24px;color:var(--ink-dim)">Any other screen sits here, under the strip.</p></section>
+    </main>
+    <script type="module" src="/src/dev_board.ts"></script>
+  </body>
+</html>

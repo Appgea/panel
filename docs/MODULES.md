@@ -80,7 +80,7 @@ go in `$PANEL_STATE_DIR/secrets/` or the OS keychain; keep calls cheap (one proc
 
 ## 5. Shipped modules
 
-Only four are in this checkout. The UI also has screens for **Product Spine**, **Release** and
+Only five are in this checkout. The UI also has screens for **Product Spine**, **Release** and
 **Analytics**, but their module hosts (`product-spine`, `release-manager`, `analytics`) are **not in
 `host/modules/`** here. The root README says the Release tab appears only when a `release-manager`
 module is linked into `~/.appgeapanel/modules/<name>`; I found nothing stating where Product Spine or
@@ -105,6 +105,9 @@ Portfolio-wide uptime board (Settings → Servers). Ships an **empty list**. Per
 
 ### support (public; needs `python3`) — see its [AGENT.md](../host/modules/support/AGENT.md)
 Reads every app's Google Form responses into one inbox (Support screen). Read-only against Google. Routes: `GET /setup /forms /inbox?days=&app=&unread=1&limit= /schema`; `POST /autodiscover /scan /fetch /read`. `setup.stage` ∈ `no_key | no_access | partial | ready`. Setup: `POST /autodiscover` (registers the repos' fastlane Google identity by path) or drop `*.sa.json` into `state/support/secrets/`; enable Drive + Forms APIs in that project; **share every form with `grant_email` as Editor** (Viewer isn't enough); `POST /fetch`. The registry is *scanned* from the repos (store `support_url.txt`, privacy pages, `Links.swift`…) — never hand-edit `forms.json`; unreadable forms are listed in `forms_unreachable`; forms Drive sees that no repo publishes are `orphan_forms`. `SUPPORT_ENABLE_ADC=1` allows gcloud ADC (needs a login that carried Forms scopes). Tests: `test_sources.py`.
+
+### scout (public; needs `python3`, `gh`)
+Recurring checks and the work board. Drives the **Board** screen and the strip above every screen; both stay hidden without it. Scouts are `<ops>/scouts/*.md` (files starting `_` are not scouts): frontmatter `title`, `every` (`daily`, `sunday`, `manual`, `<N>h`), `after` (hour), and one of `run` (a shell command, no AI; `FOUND <title> | <body>` lines are filed once through `board.py file`) or `agent` (a session kind; the UI opens it as a visible terminal), plus optional `model` and `needs`. Routes: `GET /scouts /board[?fresh=1] /prompt?id=`, `POST /run /start /record`. CLI: `bin/host.py record <id> --found N --note TEXT`, which the scout's prompt tells the agent to run. State `$PANEL_STATE_DIR/runs.json`; board cache 60 s. The UI never polls it: reads happen on focus, session exit, reports, and a timer set to the next due scout. Tests: `test_host.py`.
 
 ### Product Spine (not in this checkout)
 Deterministic product-ownership layer: Flutter-first extractor, one-shot host; per the overview it

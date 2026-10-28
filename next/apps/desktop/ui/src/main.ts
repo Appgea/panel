@@ -43,13 +43,14 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
+import type { BoardData, BoardHandle, Scout, ScoutList, ScoutRun } from "./features/board";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
 import type { SupportHandle } from "./features/support";
 import { mountReview } from "./features/review";
 import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
-import { moduleGet } from "./features/modules";
+import { moduleGet, modulePost } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
 import {
@@ -337,6 +338,11 @@ let chatFromSprint = false;
 let opsMap: OpsMapHandle | null = null;
 let opsMapLoading: Promise<OpsMapHandle> | null = null;
 let opsMapActive = false;
+let board: BoardHandle | null = null;
+let boardLoading: Promise<BoardHandle> | null = null;
+let boardActive = false;
+/** Scouts open terminals on the main folder, so none starts before boot has loaded it. */
+let scoutsReady = false;
 let settingsFromOpsMap = false;
 let chatFromOpsMap = false;
 /** The support queue. Lazy for the same reason as the plan: it is a screen you go to, not one
@@ -688,6 +694,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1152,6 +1159,7 @@ function showSettings(): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1199,6 +1207,7 @@ function showTerminals(at?: number): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1225,6 +1234,7 @@ function showHome(): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1259,6 +1269,7 @@ function showNotebook(): void {
   dropHome();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1303,6 +1314,7 @@ function showSprint(): void {
   if (terminalsActive) exitTerminals();
   dropHome();
   dropOpsMap();
+  dropBoard();
   if (sprintActive) return;
   sprintActive = true;
   mainZone().hidden = true;
@@ -1337,6 +1349,7 @@ function dropSprint(): void {
 
 /** The ops tree as a network: what finished lately, what is stuck. See features/ops_map.ts. */
 function showOpsMap(): void {
+  dropBoard();
   dropHistory();
   dropSettings();
   dropChat();
@@ -1383,6 +1396,97 @@ function dropOpsMap(): void {
   el("opsMapScreen").hidden = true;
 }
 
+/** Who holds what, what waits on you, and the scouts. Portfolio-wide. See features/board.ts. */
+function showBoard(): void {
+  if (!board) return;
+  dropHistory();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  dropSupport();
+  dropReview();
+  dropOpsMap();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  if (boardActive) return;
+  boardActive = true;
+  mainZone().hidden = true;
+  board.open();
+  paintNav();
+  paintProjects();
+}
+
+function dropBoard(): void {
+  if (!boardActive) return;
+  board?.clear();
+  boardActive = false;
+}
+
+/** The Board and its strip come with the scout extension and leave with it. */
+function setupBoard(on: boolean): void {
+  el("boardButton").hidden = !on;
+  if (!on) {
+    dropBoard();
+    board?.dispose();
+    board = null;
+    boardLoading = null;
+    return;
+  }
+  if (board || boardLoading) return;
+  const loading = import("./features/board").then(({ mountBoard }) => {
+    board = mountBoard(el("boardScreen"), el("boardStrip"), {
+      api: {
+        scouts: () => moduleGet<ScoutList>("/m/scout/scouts"),
+        board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
+        run: (id) => modulePost<ScoutRun>("/m/scout/run", { id }),
+        prompt: (id) =>
+          moduleGet<{ prompt: string }>(`/m/scout/prompt?id=${encodeURIComponent(id)}`).then((answer) => answer.prompt),
+        start: (id, session) => modulePost<ScoutRun>("/m/scout/start", { id, session }),
+        record: (id, status, note) => modulePost<ScoutRun>("/m/scout/record", { id, status, found: 0, note }),
+      },
+      openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
+      ready: () => scoutsReady,
+      launch: launchScout,
+      showSession: (id) => {
+        showTerminals();
+        return terminals.reveal(id);
+      },
+      isLive: (id) => Boolean(sessionById(id)) && !exited.has(id),
+      openBoard: () => showBoard(),
+    });
+    return board;
+  });
+  boardLoading = loading;
+  loading.catch((error: unknown) => {
+    boardLoading = null;
+    console.warn("[panel] board", error);
+  });
+}
+
+/**
+ * A scout runs where you can see it: a terminal on the main folder, its prompt typed once the
+ * agent is up. It never takes the screen you are on; the strip says it is running.
+ */
+async function launchScout(
+  scout: Scout,
+  prompt: string,
+  started: (session: string) => Promise<unknown>,
+): Promise<string | null> {
+  const session = await openSessionFor(MAIN_ID, (scout.agent ?? "claude") as SessionKind);
+  if (!session) return null;
+  // Recorded before the prompt, so a quick agent's own "done" can never be overwritten by it.
+  await started(session.id);
+  // Typed before the agent switches on bracketed paste, a prompt arrives as raw keys.
+  const until = Date.now() + 20_000;
+  while (!deck.pasteReady(session.id) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 250));
+  if (scout.model && scout.agent === "claude") {
+    await deck.sendPrompt(session.id, `/model ${scout.model}`);
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  return (await deck.sendPrompt(session.id, prompt)) ? session.id : null;
+}
+
 /** Support is a screen like Home: one queue for the whole portfolio. Every app publishes its own
  *  support form, but the person reading them is one person, so this is one list and not a tab
  *  that appears eleven times. */
@@ -1394,6 +1498,7 @@ function showSupport(): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (supportActive) return;
@@ -1439,6 +1544,7 @@ function showReview(projectId?: string): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (reviewActive) return;
@@ -1467,6 +1573,7 @@ function showHistory(focus?: { query?: string; session?: string }): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   if (terminalsActive) exitTerminals();
   dropHome();
   historyActive = true;
@@ -1615,6 +1722,7 @@ function showChat(): void {
   dropNotebook();
   dropSprint();
   dropOpsMap();
+  dropBoard();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1684,6 +1792,7 @@ const offProject = (): boolean =>
   notebookActive ||
   sprintActive ||
   opsMapActive ||
+  boardActive ||
   supportActive ||
   reviewActive ||
   historyActive;
@@ -1970,9 +2079,10 @@ function paintNav(): void {
   el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || historyActive);
   el("historyButton").classList.toggle("is-on", historyActive);
   el("reviewButton").classList.toggle("is-on", reviewActive);
-  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive);
+  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
+  el("boardButton").classList.toggle("is-on", boardActive);
   el("supportButton").classList.toggle("is-on", supportActive);
   el("notebookButton").classList.toggle("is-on", notebookActive);
   // The gear is a door like any other row: lit while its screen is the one on the glass.
@@ -3247,6 +3357,7 @@ async function refreshProjectSurfaces(): Promise<void> {
   registerProjectSurfaces(modules);
   // Support is a sidebar row rather than a project tab, so nothing above hides it. A row that
   // opens onto "module not installed" is worse than no row, so it follows the install directly.
+  setupBoard(modules.some((module) => module.name === "scout"));
   const supportOn = modules.some((module) => module.name === "support");
   el("supportButton").hidden = !supportOn;
   if (!supportOn) {
@@ -3736,6 +3847,8 @@ function onEvent(event: ProjectEvent): void {
     case "visual_requested":
       endPermissionWait(id, event.session_id);
       if (event.view === "message") {
+        // A report often means an issue moved or a scout finished.
+        board?.refresh(true);
         const here = state(id);
         const source = here?.sessions.find((session) => session.id === event.session_id);
         const flowFiles =
@@ -3953,6 +4066,8 @@ async function boot(): Promise<void> {
   // Coming back to the window is looking at whatever project is on screen.
   window.addEventListener("focus", () => {
     if (active && !offProject()) markSeen(active);
+    // Coming back is also when the board and due scouts are read. Nothing polls.
+    board?.refresh();
   });
 
   deck = new TerminalDeck(el("terminalHost"), {
@@ -3973,6 +4088,7 @@ async function boot(): Promise<void> {
     openAppLink: followAppLink,
     onExit(sessionId) {
       exited.add(sessionId);
+      board?.refresh();
       askTray.closeSession(sessionId);
       // The manager's terminal shares the exit path with every other session, so the rail hears
       // about its own death here rather than through a second channel.
@@ -4261,12 +4377,14 @@ async function boot(): Promise<void> {
   el("notebookButton").addEventListener("click", () => showNotebook());
   el("sprintButton").addEventListener("click", () => showSprint());
   el("opsMapButton").addEventListener("click", () => showOpsMap());
+  el("boardButton").addEventListener("click", () => showBoard());
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
   el("historyButton").addEventListener("click", () => showHistory());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.
   el("supportButton").hidden = true;
+  el("boardButton").hidden = true;
   const paintNotebookHint = (): void => {
     el("notebookButton").title = `Notebook (${chordLabel("app.notebook")})`;
   };
@@ -4625,6 +4743,8 @@ async function boot(): Promise<void> {
   await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
+  scoutsReady = true;
+  board?.refresh();
   paintProjects();
   // The portfolio lands on Home. Only a Panel scoped to ONE project skips it — there is no
   // portfolio to look across, so it goes straight in, exactly as before.

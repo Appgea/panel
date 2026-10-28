@@ -222,6 +222,11 @@ Targets (one address scheme): `iphone:` / `ipad:` / `ios:` (simulators / a plugg
 
 ## 9. Desk
 
+### Board and the strip (needs the `scout` extension)
+A thin strip sits on top of every screen: the issues sessions hold right now, with how long, any scout that is running, and how many issues wait on you. Click it for the **Board**: Now, Needs you, Next up, and the Scouts column. The board is GitHub Issues in the ops repo, read through `board.py json`.
+
+A **scout** is a recurring check that finds work and files it as an issue. Each one is a file in `ops/scouts/`: add a file, get a scout. A script scout (`run:`) runs with no AI. An agent scout (`agent:`) opens a terminal on the main folder you can watch, with its prompt typed in. Scouts run only while Panel is open: due ones start when Panel opens, when you come back to the window, and on the hour they fall due. One agent scout runs at a time. **Run** on a row starts one now, **Show** brings its terminal forward.
+
 ### Project desk
 A per-project page that works **without an agent**: release target (set a date; overdue ones are flagged), "Waiting to ship" (commits since the last release tag per platform), Todos, Notes, "Second brain" documents, recent work and uncommitted files. Overview mode lists every project with open/blocked todos and overdue targets. It stores `~/.appgeapanel/brain/projects/<hex id>/desk.md` (Markdown: `Release target:`, `## Todos`, `## Notes`). Edit documents in place (`⌘S`), with undo of the last edit and stale-save protection.
 

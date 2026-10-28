@@ -1,0 +1,1 @@
+{"name":"scout","title":"Scouts","visibility":"public","summary":"Recurring checks that find work, and the board, visible in Panel.","icon":"🔭","protocol":"cgi-argv","exec":"bin/host.py","args":[],"requires":["python3","gh"]}

@@ -1059,6 +1059,11 @@ export class TerminalDeck {
     }
   }
 
+  /** True once the app in a session has switched on bracketed paste: its input is up. */
+  pasteReady(sessionId: string): boolean {
+    return Boolean(this.panes.get(sessionId)?.term.modes.bracketedPasteMode);
+  }
+
   /** Paste file paths into a session's prompt without submitting, as a Finder drop would. */
   pastePaths(sessionId: string, paths: string[]): boolean {
     const pane = this.panes.get(sessionId);

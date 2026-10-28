@@ -255,6 +255,14 @@ button.ghost[aria-pressed="true"] {
 html.sidebar-compact #app { grid-template-columns: 80px minmax(0, 1fr); }
 
 body.single-project #app { grid-template-columns: minmax(0, 1fr); }
+
+/* The board strip rides on top of every screen in the work track (features/board.ts). With the
+   scout extension absent it is hidden and its row collapses to nothing. Placed by line from the
+   end, so the same rules hold with the sidebar and without it. */
+#app { grid-template-rows: auto minmax(0, 1fr); }
+#app > .sidebar { grid-row: 1 / -1; }
+#app > #boardStrip { grid-row: 1; grid-column: -2 / -1; }
+#app > section, #app > #chatRail { grid-row: 2; grid-column: -2 / -1; }
 body.single-project .sidebar { display: none; }
 
 /* Chat is a grid item like every other screen, so it has to leave the track entirely when it is
