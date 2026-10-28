@@ -3770,33 +3770,103 @@ async fn delete_entry(project: String, path: String) -> Result<(), String> {
 /// Show the file in Finder (or the platform equivalent), selected.
 #[tauri::command]
 async fn reveal_entry(project: String, path: String) -> Result<(), String> {
+    off_main(move || reveal(&confine(&find_project(&project)?.path, &path)?)).await
+}
+
+/// A full path an agent printed, or a link pointed at: `/…` or `~/…`, and it must exist.
+fn full_path(path: &str) -> Result<PathBuf, String> {
+    let raw = path.trim();
+    let target = match raw.strip_prefix("~/") {
+        Some(rest) => PathBuf::from(std::env::var_os("HOME").ok_or("no home folder")?).join(rest),
+        None => PathBuf::from(raw),
+    };
+    if !target.is_absolute() {
+        return Err(format!("not a full path: {raw}"));
+    }
+    if !target.exists() {
+        return Err(format!("{} is not there.", target.display()));
+    }
+    Ok(target)
+}
+
+/// Opening one of these runs something. A printed path is untrusted, so these are only shown.
+fn runs_code(target: &Path) -> bool {
+    const RUNNABLE: &[&str] = &[
+        "app", "command", "sh", "bash", "zsh", "fish", "tool", "pkg", "mpkg", "scpt", "applescript",
+        "workflow", "terminal", "jar", "py", "rb", "pl", "js", "vbs", "exe", "bat", "cmd", "ps1",
+        "msi", "url", "webloc", "inetloc", "fileloc", "prefpane", "action", "bundle", "plugin",
+    ];
+    let runnable = target
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| RUNNABLE.contains(&ext.to_ascii_lowercase().as_str()));
+    #[cfg(unix)]
+    let executable = {
+        use std::os::unix::fs::PermissionsExt;
+        target.is_file()
+            && std::fs::metadata(target).is_ok_and(|meta| meta.permissions().mode() & 0o111 != 0)
+    };
+    #[cfg(not(unix))]
+    let executable = false;
+    runnable || executable
+}
+
+/// Where a full path is, for the UI to decide between Panel and the Mac.
+#[tauri::command]
+async fn locate_path(path: String) -> Result<Value, String> {
     off_main(move || {
-        let target = confine(&find_project(&project)?.path, &path)?;
-        #[cfg(target_os = "macos")]
-        {
-            crate::platform::command("open")
-                .arg("-R")
-                .arg(&target)
+        let target = full_path(&path)?;
+        Ok(serde_json::json!({ "path": target.to_string_lossy(), "folder": target.is_dir() }))
+    })
+    .await
+}
+
+/// A path from a terminal or a link, opened by the Mac: a folder in Finder, a file in its app.
+/// `reveal` shows it in its folder instead, and so does anything that would run.
+#[tauri::command]
+async fn open_path(path: String, reveal_only: bool) -> Result<(), String> {
+    off_main(move || {
+        let target = full_path(&path)?;
+        // Judged on what the path really is: a plain name can be a symlink to an app.
+        let real = std::fs::canonicalize(&target).map_err(|error| error.to_string())?;
+        if reveal_only || runs_code(&target) || runs_code(&real) {
+            reveal(&target)
+        } else if target.is_dir() {
+            open_folder(&target)
+        } else {
+            crate::platform::open(&target)
                 .spawn()
                 .map(|_| ())
-                .map_err(|error| format!("could not reveal {}: {error}", target.display()))
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let mut select = std::ffi::OsString::from("/select,");
-            select.push(&target);
-            crate::platform::command("explorer")
-                .arg(select)
-                .spawn()
-                .map(|_| ())
-                .map_err(|error| format!("could not reveal {}: {error}", target.display()))
-        }
-        #[cfg(all(unix, not(target_os = "macos")))]
-        {
-            open_folder(target.parent().unwrap_or(&target))
+                .map_err(|error| format!("could not open {}: {error}", target.display()))
         }
     })
     .await
+}
+
+fn reveal(target: &Path) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        crate::platform::command("open")
+            .arg("-R")
+            .arg(target)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("could not reveal {}: {error}", target.display()))
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let mut select = std::ffi::OsString::from("/select,");
+        select.push(target);
+        crate::platform::command("explorer")
+            .arg(select)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| format!("could not reveal {}: {error}", target.display()))
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        open_folder(target.parent().unwrap_or(target))
+    }
 }
 
 /// Resolve a path against its project root, and refuse anything outside it.
@@ -4302,6 +4372,8 @@ fn main() {
             rename_entry,
             delete_entry,
             reveal_entry,
+            locate_path,
+            open_path,
             project_files,
             warm_code_nav,
             list_modules,
@@ -4367,6 +4439,25 @@ mod link_tests {
         ] {
             assert!(!web_link(bad), "{bad}");
         }
+    }
+
+    /// A printed path is untrusted. Anything that would run is shown in Finder, never opened.
+    #[cfg(unix)]
+    #[test]
+    fn a_path_that_would_run_is_only_revealed() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("panel-runs-code-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Evil.app")).unwrap();
+        let tool = dir.join("tool");
+        std::fs::write(&tool, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(dir.join("shot.png"), "").unwrap();
+        assert!(super::runs_code(&dir.join("Evil.app")));
+        assert!(super::runs_code(&dir.join("go.COMMAND")));
+        assert!(super::runs_code(&tool));
+        assert!(!super::runs_code(&dir.join("shot.png")));
+        assert!(!super::runs_code(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 

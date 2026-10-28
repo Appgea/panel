@@ -23,7 +23,15 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { IS_MAC, matches, matchesShortcut, label as chordLabel } from "./keymap";
 import { projectIconUrl } from "../project-assets";
-import { PLACE_IN_TEXT, parsePlace, type Place } from "../deeplink";
+import {
+  APP_LINK_IN_TEXT,
+  PATH_IN_TEXT,
+  PLACE_IN_TEXT,
+  fileTarget,
+  parsePlace,
+  type FileTarget,
+  type Place,
+} from "../deeplink";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalChunk = {
@@ -178,7 +186,50 @@ type Pane = {
   pendingCopy: boolean;
   /** The app turned on mode 2031 and wants a report when the theme flips. */
   themeNotify: boolean;
+  /** The link under the pointer, so right-click can offer what to do with it. */
+  hovered: TermLink | null;
 };
+
+/** Anything clickable in a terminal, whichever way it was printed. */
+type TermLink =
+  | { kind: "web"; url: string }
+  | { kind: "place"; text: string; place: Place }
+  | { kind: "app"; url: string }
+  | { kind: "file"; text: string; target: FileTarget };
+
+/** What a printed link or an OSC 8 link points at. Unknown schemes are not links. */
+function termLink(uri: string): TermLink | null {
+  if (/^https?:\/\//i.test(uri)) return { kind: "web", url: uri };
+  if (/^appgeapanel:/i.test(uri)) return { kind: "app", url: uri };
+  if (/^panel:/i.test(uri)) {
+    const place = parsePlace(uri);
+    return place ? { kind: "place", text: uri, place } : null;
+  }
+  const target = fileTarget(uri);
+  return target ? { kind: "file", text: target.path, target } : null;
+}
+
+/** What the tooltip and the menu say a link does. */
+function linkHint(link: TermLink): string {
+  const mod = MAC ? "⌘" : "Ctrl-";
+  if (link.kind === "web") return `${mod}click to open link`;
+  if (link.kind === "file") return `${mod}click to open · ${MAC ? "⌥⌘" : "Ctrl-Alt-"}click to show in ${MAC ? "Finder" : "folder"}`;
+  return `${mod}click to open in Panel`;
+}
+
+/** A row and the rows it wraps into, as one string. Long paths wrap; a link must survive it. */
+function logicalLine(term: Terminal, y: number): { text: string; first: number } {
+  const buffer = term.buffer.active;
+  let first = y - 1;
+  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1;
+  let last = y - 1;
+  while (buffer.getLine(last + 1)?.isWrapped) last += 1;
+  let text = "";
+  for (let row = first; row <= last; row += 1) {
+    text += buffer.getLine(row)?.translateToString(row === last) ?? "";
+  }
+  return { text, first };
+}
 
 
 /** What the on-terminal close prompt needs to name itself: the session, and the app it belongs
@@ -204,6 +255,10 @@ export type DeckEvents = {
   canRestart?(sessionId: string): boolean;
   /** A `panel:` link this session printed was clicked (deeplink.ts). */
   openPlace?(sessionId: string, place: Place): void;
+  /** A full path or file link was clicked. `reveal` asks for its folder, not the file. */
+  openFile?(sessionId: string, target: FileTarget, reveal: boolean): Promise<void>;
+  /** An `appgeapanel://` link was clicked. */
+  openAppLink?(url: string): void;
   /** Put to sleep rather than ended: its bar offers Wake, and says what sleeping gave back when
    *  that is known. Null for a session that is not asleep. */
   asleep?(sessionId: string): { freed: number | null } | null;
@@ -401,6 +456,31 @@ export class TerminalDeck {
     pane.mount.append(bar);
   }
 
+  /** ⌘-click on any link. A plain click stays a click, so selecting across one never opens it. */
+  private follow(sessionId: string, link: TermLink, event: MouseEvent, reveal = event.altKey): void {
+    if (!(MAC ? event.metaKey : event.ctrlKey)) return;
+    this.open(sessionId, link, reveal);
+  }
+
+  private open(sessionId: string, link: TermLink, reveal = false): void {
+    switch (link.kind) {
+      case "web":
+        void invoke("open_link", { url: link.url }).catch((error) => console.warn("[panel] link", error));
+        return;
+      case "place":
+        this.events.openPlace?.(sessionId, link.place);
+        return;
+      case "app":
+        this.events.openAppLink?.(link.url);
+        return;
+      case "file":
+        void Promise.resolve(this.events.openFile?.(sessionId, link.target, reveal)).catch((error: unknown) => {
+          const pane = this.panes.get(sessionId);
+          if (pane) this.flash(pane, String(error).endsWith("is not there.") ? "not there" : "could not open");
+        });
+    }
+  }
+
   /** The right-click menu. One per deck, rebuilt on each open; any click or key elsewhere closes it. */
   private openMenu(pane: Pane, x: number, y: number): void {
     document.querySelector(".term-menu")?.remove();
@@ -440,6 +520,23 @@ export class TerminalDeck {
       pane.term.selectAll();
       pane.term.focus();
     });
+    const link = pane.hovered;
+    const sessionId = [...this.panes].find(([, each]) => each === pane)?.[0];
+    if (link && sessionId) {
+      menu.append(make("div", "row-menu-sep"));
+      if (link.kind === "file") {
+        item("Open", `${mod}click`, true, () => this.open(sessionId, link));
+        item(MAC ? "Show in Finder" : "Show in folder", MAC ? "⌥⌘click" : "Ctrl+Alt+click", true, () =>
+          this.open(sessionId, link, true));
+        item("Copy path", "", true, () => void this.copyText(link.target.path).then((ok) =>
+          this.flash(pane, ok ? "copied" : "copy blocked")));
+      } else {
+        item(link.kind === "web" ? "Open link" : "Open in Panel", `${mod}click`, true, () => this.open(sessionId, link));
+        const text = link.kind === "place" ? link.text : link.url;
+        item("Copy link", "", true, () => void this.copyText(text).then((ok) =>
+          this.flash(pane, ok ? "copied" : "copy blocked")));
+      }
+    }
     document.body.append(menu);
     const box = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(6, Math.min(x, innerWidth - box.width - 6))}px`;
@@ -575,6 +672,23 @@ export class TerminalDeck {
       // Right-click is the Copy / Paste menu. Selecting a word there replaced the selection the
       // menu was opened to copy.
       rightClickSelectsWord: false,
+      // OSC 8: a link the program printed under its own text, such as a file Codex cites.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (event, uri) => {
+          const link = termLink(uri);
+          if (link) this.follow(sessionId, link, event);
+        },
+        hover: (_event, uri) => {
+          const link = termLink(uri);
+          pane.hovered = link;
+          mount.title = link ? linkHint(link) : "";
+        },
+        leave: () => {
+          pane.hovered = null;
+          mount.title = "";
+        },
+      },
     });
     const fit = new FitAddon();
     const search = new SearchAddon();
@@ -582,39 +696,54 @@ export class TerminalDeck {
     term.loadAddon(search);
     // Agents print PR, CI and docs URLs constantly. ⌘-click opens one, the way iTerm and VS Code
     // do; a plain click stays a click, so selecting across a URL never launches a browser.
+    const web = (url: string): TermLink => ({ kind: "web", url });
     term.loadAddon(
       new WebLinksAddon(
-        (event, uri) => {
-          if (!(MAC ? event.metaKey : event.ctrlKey)) return;
-          void invoke("open_link", { url: uri }).catch((error) => console.warn("[panel] link", error));
-        },
+        (event, uri) => this.follow(sessionId, web(uri), event),
         {
-          hover: () => {
-            mount.title = MAC ? "⌘-click to open link" : "Ctrl-click to open link";
+          hover: (_event, uri) => {
+            pane.hovered = web(uri);
+            mount.title = linkHint(pane.hovered);
           },
           leave: () => {
+            pane.hovered = null;
             mount.title = "";
           },
         },
       ),
     );
-    // An agent's `panel:review:…` / `panel:work:…` is a place in Panel, opened the same way.
+    // Typed text that is a place: `panel:review:…`, `appgeapanel://…`, or a full path. Paths are
+    // what every agent prints, so this is the part that needs no cooperation from any of them.
     term.registerLinkProvider({
       provideLinks: (y, callback) => {
-        const text = term.buffer.active.getLine(y - 1)?.translateToString(true) ?? "";
-        const links = [...text.matchAll(PLACE_IN_TEXT)].flatMap((match) => {
+        const { text, first } = logicalLine(term, y);
+        const cols = term.cols;
+        const found: { index: number; text: string; link: TermLink }[] = [];
+        for (const match of text.matchAll(PLACE_IN_TEXT)) {
           const place = parsePlace(match[0]);
-          if (!place || match.index === undefined) return [];
+          if (place) found.push({ index: match.index, text: match[0], link: { kind: "place", text: match[0], place } });
+        }
+        for (const match of text.matchAll(APP_LINK_IN_TEXT)) {
+          found.push({ index: match.index, text: match[0], link: { kind: "app", url: match[0] } });
+        }
+        for (const match of text.matchAll(PATH_IN_TEXT)) {
+          const target = fileTarget(match[0]);
+          if (target) found.push({ index: match.index, text: match[0], link: { kind: "file", text: match[0], target } });
+        }
+        const links = found.flatMap(({ index, text: shown, link }) => {
+          const start = { x: (index % cols) + 1, y: first + Math.floor(index / cols) + 1 };
+          const end = { x: ((index + shown.length - 1) % cols) + 1, y: first + Math.floor((index + shown.length - 1) / cols) + 1 };
+          if (start.y > y || end.y < y) return [];
           return [{
-            range: { start: { x: match.index + 1, y }, end: { x: match.index + match[0].length, y } },
-            text: match[0],
-            activate: (event: MouseEvent) => {
-              if (MAC ? event.metaKey : event.ctrlKey) this.events.openPlace?.(sessionId, place);
-            },
+            range: { start, end },
+            text: shown,
+            activate: (event: MouseEvent) => this.follow(sessionId, link, event),
             hover: () => {
-              mount.title = MAC ? "⌘-click to open in Panel" : "Ctrl-click to open in Panel";
+              pane.hovered = link;
+              mount.title = linkHint(link);
             },
             leave: () => {
+              pane.hovered = null;
               mount.title = "";
             },
           }];
@@ -633,6 +762,7 @@ export class TerminalDeck {
       dead: false,
       pendingCopy: false,
       themeNotify: false,
+      hovered: null,
     };
     // See THEME_NOTIFY_MODE. Returning false lets xterm run its own handling of the other modes.
     const trackThemeNotify = (on: boolean) => (params: (number | number[])[]): boolean => {

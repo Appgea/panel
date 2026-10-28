@@ -35,7 +35,7 @@ import type {
   SimStart,
   WorkFile,
 } from "./types";
-import { parseAppLink, type Place } from "./deeplink";
+import { parseAppLink, type FileTarget, type Place } from "./deeplink";
 import { TerminalDeck } from "./features/terminal";
 import { mountSessionStrip, type SessionStripHandle } from "./features/sessions";
 import { openSkills } from "./features/skills";
@@ -1457,6 +1457,29 @@ function openHistoryFile(projectId: string, cwd: string, path: string): void {
   openPlace(projectId, { to: "work", path: relative });
 }
 
+/**
+ * A full path a terminal printed or a link named. Inside a project it opens in Panel: what was
+ * made in Review, any other file in Work. A folder, a path outside every project, or a reveal
+ * goes to the Mac. `near` is the project the path was printed in, which wins a tie. A link from
+ * outside Panel never opens a file in its app: any web page can hand the OS one. It only shows it.
+ */
+async function openFullPath(target: FileTarget, reveal: boolean, near: string | null, outside = false): Promise<void> {
+  const found = await invoke<{ path: string; folder: boolean }>("locate_path", { path: target.path });
+  const owners = reveal || found.folder
+    ? []
+    : portfolioStates().filter((here) => found.path.startsWith(`${here.project.path}/`));
+  const owner = owners.sort((a, b) =>
+    b.project.path.length - a.project.path.length || Number(b.project.id === near) - Number(a.project.id === near))[0];
+  if (!owner) {
+    await invoke("open_path", { path: found.path, revealOnly: reveal || (outside && !found.folder) });
+    return;
+  }
+  const relative = found.path.slice(owner.project.path.length + 1);
+  if (!(await review.openFiles(owner.project.id, [relative], relative))) {
+    openPlace(owner.project.id, target.line ? { to: "work", path: relative, line: target.line } : { to: "work", path: relative });
+  }
+}
+
 /** An appgeapanel:// link, from outside Panel. Unknown projects and malformed links do nothing. */
 function followAppLink(url: string): void {
   const link = parseAppLink(url);
@@ -1476,6 +1499,9 @@ function followAppLink(url: string): void {
       return;
     case "history":
       showHistory({ query: link.query, session: link.session });
+      return;
+    case "open":
+      void openFullPath(link, false, null, true).catch((error: unknown) => console.warn("[panel] link", error));
       return;
     case "project":
       // The Manager and the main folder have no project page for a link to open.
@@ -3868,6 +3894,10 @@ async function boot(): Promise<void> {
     openPlace(sessionId, place) {
       openPlace(sessionById(sessionId)?.project ?? null, place);
     },
+    openFile(sessionId, target, reveal) {
+      return openFullPath(target, reveal, sessionById(sessionId)?.project ?? null);
+    },
+    openAppLink: followAppLink,
     onExit(sessionId) {
       exited.add(sessionId);
       askTray.closeSession(sessionId);

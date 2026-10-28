@@ -54,7 +54,9 @@ needs_decision), and `flow` code refs {ref, label, detail}. Every screenshot goe
 CAPTIONED; clips in `audio`; video in `video`, shown as a link. To point the human at a place \
 in Panel, in `links` or in this terminal, write panel:review (your work in Review; \
 panel:review:<path> for one file), panel:work:<path>:<line> (the code in Work), panel:git or \
-panel:manager — paths relative to the project. Report media already gets a Review button.";
+panel:manager — paths relative to the project. Report media already gets a Review button. In \
+this terminal, a file, folder or image the human should open is named by its full path, and \
+Panel makes it clickable.";
 
 /// Which agent this is. Workers build a project and report to the Inbox. The manager is the one
 /// agent that does neither, and the worker rule told it it was a worker: it filed reports to

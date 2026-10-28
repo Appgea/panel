@@ -75,6 +75,7 @@ export function placeLabel(place: Place): { kind: string; name: string } {
  *   appgeapanel://project/<id>/review[/<path>]    its work waiting in Review
  *   appgeapanel://project/<id>/work/<path>[:line] the file in Work
  *   appgeapanel://review | appgeapanel://manager
+ *   appgeapanel://open/<full path>[:line]        any file or folder: Panel finds its project
  *
  * A link never starts anything on its own. The furthest one goes is to put a Resume button in
  * front of you, because any web page can hand the OS a link.
@@ -84,9 +85,13 @@ export type AppLink =
   | { to: "review" }
   | { to: "manager" }
   | { to: "history"; query?: string; session?: string }
-  | { to: "project"; project: string; place?: Place };
+  | { to: "project"; project: string; place?: Place }
+  | ({ to: "open" } & FileTarget);
 
 const SCHEME = "appgeapanel:";
+
+/** `appgeapanel://…` in terminal text. The scheme is unusual enough to need no prefix rule. */
+export const APP_LINK_IN_TEXT = /\bappgeapanel:\/\/[^\s'"`<>()[\]{}]*[^\s'"`<>()[\]{},.;:!?]/g;
 
 export function parseAppLink(url: string): AppLink | null {
   const text = url.trim();
@@ -108,6 +113,11 @@ export function parseAppLink(url: string): AppLink | null {
       const query = new URLSearchParams(search).get("q")?.trim();
       return query ? { to: "history", query } : { to: "history" };
     }
+    case "open": {
+      if (!id) return null;
+      const target = fileTarget(id === "~" ? `~/${rest.join("/")}` : `/${[id, ...rest].join("/")}`);
+      return target ? { to: "open", ...target } : null;
+    }
     case "session":
       return id && !rest.length ? { to: "history", session: id } : null;
     case "project": {
@@ -120,6 +130,56 @@ export function parseAppLink(url: string): AppLink | null {
     default:
       return null;
   }
+}
+
+/**
+ * Files and folders on this Mac, named by full path. Every agent can print a path, so this is
+ * the one kind of link that needs no rule an agent might forget. Three spellings reach it:
+ *
+ *   /Users/me/app/shots/home.png      plain text, underlined by the terminal
+ *   file:///Users/me/app/lib/a.dart   a real terminal link (OSC 8) a program printed
+ *   vscode://file/…/a.dart:12:4       Codex's file citations, and Cursor's and Windsurf's
+ */
+export type FileTarget = { path: string; line?: number };
+
+/** Full paths in terminal text. Only roots a real path starts from, so `/compact` and `a/b`
+ *  stay text. Spaces end a path, and so does trailing punctuation. */
+export const PATH_IN_TEXT =
+  /(?<![\w.:/~-])(?:~|\/(?:Users|Volumes|private|tmp|var|opt|Applications|Library|System|etc|home|usr))\/[^\s'"`<>()[\]{}]*[^\s'"`<>()[\]{},.;:!?]/g;
+
+const EDITOR_LINK = /^(?:vscode|vscode-insiders|cursor|windsurf):\/\/file(\/.*)$/i;
+
+/** A full path, or a link to one, with its line when it names one. Null for anything else. */
+export function fileTarget(link: string): FileTarget | null {
+  let text = link.trim();
+  let hashLine: number | undefined;
+  const editor = EDITOR_LINK.exec(text);
+  const url = editor || /^file:\/\//i.test(text);
+  if (editor) text = editor[1];
+  else if (url) {
+    let parsed: URL;
+    try {
+      parsed = new URL(text);
+    } catch {
+      return null;
+    }
+    if (parsed.host && parsed.host !== "localhost") return null;
+    const hash = /^#L?(\d+)/.exec(parsed.hash);
+    if (hash) hashLine = Number(hash[1]);
+    text = parsed.pathname;
+  } else if (/^[a-z][\w+.-]*:/i.test(text)) return null;
+  if (url) {
+    try {
+      text = decodeURIComponent(text);
+    } catch {
+      return null;
+    }
+  }
+  if (!text.startsWith("/") && !text.startsWith("~/")) return null;
+  const match = /^(.+?)(?::(\d+))?(?::\d+)?$/.exec(text);
+  if (!match) return null;
+  const line = match[2] ? Number(match[2]) : hashLine;
+  return line ? { path: match[1], line } : { path: match[1] };
 }
 
 /** The link that opens Panel on one past conversation. */

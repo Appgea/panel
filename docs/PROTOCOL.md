@@ -122,6 +122,7 @@ the furthest it goes is putting a Resume button in front of you.
 | `appgeapanel://history[?q=<words>]` | History, searching if asked |
 | `appgeapanel://session/<agent-session-id>` | History, on that session (any agent) |
 | `appgeapanel://project/<id>[/git\|/review[/<path>]\|/work/<path>[:<line>]]` | the project, or one of its places |
+| `appgeapanel://open/<full path>[:<line>]` | any file: Panel finds its project, Review for media, Work for code. A folder outside every project opens in Finder. A file there is only shown in Finder |
 
 **Who receives a link.** On macOS a small handler app, `~/Applications/Appgea Panel Links.app`, owns
 the scheme (`launcher/make-link-handler.sh`; `dev.command` and `build-app.sh` run it). It POSTs the
