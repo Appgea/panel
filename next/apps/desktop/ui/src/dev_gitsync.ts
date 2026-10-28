@@ -10,6 +10,8 @@ import { mountDashboard } from "./features/dashboard";
 
 type Args = { path: string; method?: string; body?: string };
 
+const CLEAN = new URLSearchParams(location.search).has("clean");
+
 const REPOS = [
   { name: "Wolf2048", branch: "main", behind: 2, ahead: 5, dirty: 1 },
   { name: "Payee", branch: "main", behind: 0, ahead: 0, dirty: 2 },
@@ -17,10 +19,22 @@ const REPOS = [
   { name: "panel", branch: "next", behind: 1, ahead: 12, dirty: 7 },
   { name: "SpeedRead", branch: "feature/paywall", behind: 3, ahead: 0, dirty: 0 },
   { name: "Kelime", branch: "main", behind: 0, ahead: 2, dirty: 0 },
-].map((repo) => ({ ...repo, path: `/Users/dev/projects/${repo.name}`, remote: "origin", hasUpstream: true }));
+  { name: "Sudokov", branch: "main", behind: 0, ahead: 0, dirty: 0 },
+  { name: "Memor", branch: "main", behind: 0, ahead: 0, dirty: 0 },
+  { name: "Pisti", branch: "main", behind: 0, ahead: 0, dirty: 0 },
+  { name: "Weekcut", branch: "main", behind: 0, ahead: 0, dirty: 43 },
+  { name: "CoinApp", branch: "main", behind: 0, ahead: 0, dirty: 0 },
+].map((repo) => ({
+  ...repo,
+  // ?clean renders the all-green finish: no failure, no uncommitted work left behind
+  dirty: CLEAN ? 0 : repo.dirty,
+  path: `/Users/dev/projects/${repo.name}`,
+  remote: "origin",
+  hasUpstream: true,
+}));
 
 const CONFLICT = "/Users/dev/projects/Tavla";
-const BROKEN = "/Users/dev/projects/SpeedRead";
+const BROKEN = CLEAN ? "" : "/Users/dev/projects/SpeedRead";
 
 const phases = new Map<string, { phase: string; note: string }>();
 const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
@@ -36,7 +50,11 @@ async function moduleRequest({ path, body }: Args): Promise<unknown> {
     return { pullable: REPOS };
   }
   if (route === "/pushable") return { pushable: REPOS };
-  if (route === "/pull/progress" || route === "/push/progress") {
+  if (route === "/syncable") {
+    await wait(1400);
+    return { syncable: REPOS };
+  }
+  if (route === "/pull/progress" || route === "/push/progress" || route === "/sync/progress") {
     return phases.get(params.get("repo") ?? "") ?? {};
   }
   if (route === "/pull") {
@@ -108,12 +126,19 @@ dash.setWork([]);
 
 const bar = document.createElement("div");
 bar.style.cssText = "position:fixed;right:14px;bottom:14px;display:flex;gap:8px;";
-for (const mode of ["pull", "push"] as const) {
+for (const mode of ["sync", "pull", "push"] as const) {
   const button = document.createElement("button");
   button.textContent = `${mode} all`;
   button.style.cssText =
     "padding:8px 16px;border-radius:9px;border:1px solid var(--line);background:var(--bg-sunken);color:var(--ink);";
-  button.addEventListener("click", () => void openGitSweep(mode));
+  button.addEventListener("click", () =>
+    void openGitSweep(mode, {
+      async fixWithAgent(prompt) {
+        // eslint-disable-next-line no-console
+        console.log("[dev] fix prompt:", prompt);
+      },
+    }),
+  );
   bar.append(button);
 }
 document.body.append(bar);

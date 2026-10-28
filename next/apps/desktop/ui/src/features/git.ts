@@ -1303,6 +1303,7 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
       <header class="atlas-head">
         <b>${icon("git")} Every repository</b>
         <span class="drawer-acts">
+          <button class="gbtn prim" type="button" data-sweep="sync">⇅ Sync all</button>
           <button class="gbtn" type="button" data-sweep="pull">Pull all</button>
           <button class="gbtn" type="button" data-sweep="push">Push all</button>
           <button class="gbtn mini icon-only" type="button" data-act="atlas" aria-label="Close">✕</button>
@@ -1792,7 +1793,10 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     const node = event.target as HTMLElement;
     const sweep = node.closest<HTMLElement>("[data-sweep]");
     if (sweep) {
-      void openGitSweep(sweep.dataset.sweep === "push" ? "push" : "pull").then(() => {
+      const mode = sweep.dataset.sweep;
+      void openGitSweep(mode === "push" || mode === "sync" ? mode : "pull", {
+        fixWithAgent: events.commitAllWithAgent,
+      }).then(() => {
         if (!atlas.hidden) void openAtlas();
         void refresh();
       });

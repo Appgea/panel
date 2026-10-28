@@ -546,3 +546,25 @@
   white-space: nowrap;
 }
 .home-act-when { color: var(--ink-faint); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+
+/* ------------------------------------------------------------------- away
+   Same rows as Activity. The second line is the last thing Claude said, not a report title. */
+.home-away[hidden] { display: none; }
+.home-away-all {
+  margin-left: auto;
+  padding: 2px 9px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line));
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.home-away-all:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.home-away .home-act-author {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-away-more { padding: 6px 9px 4px; color: var(--ink-faint); font-size: var(--text-xs); }

@@ -9,6 +9,7 @@
 //! it half-written would play a cut-off sound. Build output is skipped; a Flutter or Xcode build
 //! writes hundreds of icons nobody asked to review.
 
+use notify::event::ModifyKind;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -100,7 +101,13 @@ impl MadeWatch {
             loop {
                 match rx.recv_timeout(Duration::from_millis(300)) {
                     Ok(Ok(event)) => {
-                        if matches!(event.kind, EventKind::Access(_) | EventKind::Remove(_)) {
+                        // Metadata is Finder, Quick Look, Spotlight or a chmod touching a file
+                        // that is already there: nobody made anything. The UI still drops a
+                        // version it has seen, because macOS repeats "created" on those touches.
+                        if matches!(
+                            event.kind,
+                            EventKind::Access(_) | EventKind::Remove(_) | EventKind::Modify(ModifyKind::Metadata(_))
+                        ) {
                             continue;
                         }
                         for path in event.paths {

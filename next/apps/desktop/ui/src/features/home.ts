@@ -80,6 +80,8 @@ export type HomeEvents = {
   /** Open the chat rail on this post and flash it. The strip below is a table of contents, not
    *  a reader — the post itself is read where you can answer it. */
   openPost(postId: string): void;
+  /** Open History, on one session when given. */
+  openHistory(sessionId?: string): void;
   /** Whether a Panel module is installed. The analytics board follows the install, like the
    *  Support row: a card that can only ever say "unavailable" is worse than no card. */
   installed(module: string): boolean;
@@ -97,6 +99,18 @@ export type HomeActivity = {
   at: number;
 };
 
+/** One session that ended since you last opened History. From the agent's own store, so it is
+ *  there whether or not the agent ever filed a report. */
+export type HomeAway = {
+  id: string;
+  /** The agent CLI the session ran in, by engine name. */
+  agent: string;
+  projectName: string;
+  title: string;
+  lastText: string;
+  at: number;
+};
+
 export type HomeHandle = {
   /** Build the whole screen. Fire the entrance once. */
   open(projects: HomeProject[]): void;
@@ -106,6 +120,8 @@ export type HomeHandle = {
   activity(posts: HomeActivity[]): void;
   /** Unread per project, for the cards. Same numbers the sidebar rows draw. */
   unread(counts: Map<string, number>): void;
+  /** Sessions that ended since you last looked, newest first. */
+  away(rows: HomeAway[]): void;
   clear(): void;
   isOpen(): boolean;
 };
@@ -147,6 +163,8 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
    *  chat rail, which is the thing that actually receives the posts. */
   let feed: HomeActivity[] = [];
   let unreadBy = new Map<string, number>();
+  let awayRows: HomeAway[] = [];
+  let awaySection: HTMLElement | null = null;
   let activityBody: HTMLElement | null = null;
   let activityCount: HTMLElement | null = null;
   /** The project Enter would open. Kept across keystrokes while it still matches. */
@@ -657,6 +675,67 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
     return section;
   };
 
+  /* ------------------------------------------------------------------ away
+   * The other half of "what happened while I was away". Activity lists what agents REPORTED;
+   * this lists every session that ended since you last opened History, reported or not, because
+   * the session that finished at 3am and closed without a word is the one you would miss.
+   * Hidden when there is nothing new: an empty strip is one more thing to read for no news.
+   */
+  const AWAY_ROWS = 5;
+
+  const paintAway = (): void => {
+    if (!awaySection) return;
+    awaySection.hidden = awayRows.length === 0;
+    if (!awayRows.length) return;
+    const head = make("div", "home-activity-head");
+    const label = make("label", "home-label");
+    label.textContent = "Since you last looked";
+    const count = make("span", "home-activity-count is-unread");
+    count.textContent = plural(awayRows.length, "session");
+    const all = document.createElement("button");
+    all.type = "button";
+    all.className = "home-away-all";
+    all.textContent = "Open History";
+    all.addEventListener("click", () => events.openHistory());
+    head.append(label, count, all);
+    const body = make("div", "home-activity-body");
+    body.append(
+      ...awayRows.slice(0, AWAY_ROWS).map((session) => {
+        const row = make("button", "home-act");
+        (row as HTMLButtonElement).type = "button";
+        row.title = `${session.projectName}: ${session.title}. Open in History`;
+        const avatar = make("span", "home-act-ico");
+        avatar.dataset.agent = session.agent;
+        avatar.innerHTML = icon(activityGlyph(session.agent));
+        const text = make("span", "home-act-body");
+        const line = make("span", "home-act-line");
+        line.append(make("b", "home-act-project"), make("i", "home-act-author"));
+        line.querySelector("b")!.textContent = session.projectName;
+        line.querySelector("i")!.textContent = session.title;
+        const last = make("span", "home-act-title");
+        last.textContent = session.lastText || "No reply recorded.";
+        text.append(line, last);
+        const when = make("time", "home-act-when");
+        when.textContent = relative(session.at);
+        row.append(avatar, text, when);
+        row.addEventListener("click", () => events.openHistory(session.id));
+        return row;
+      }),
+    );
+    if (awayRows.length > AWAY_ROWS) {
+      const more = make("div", "home-away-more");
+      more.textContent = `${plural(awayRows.length - AWAY_ROWS, "more session")} in History`;
+      body.append(more);
+    }
+    awaySection.replaceChildren(head, body);
+  };
+
+  const buildAway = (): HTMLElement => {
+    awaySection = make("section", "home-activity home-away");
+    paintAway();
+    return awaySection;
+  };
+
   const buildProjects = (projects: HomeProject[]): HTMLElement => {
     const section = make("section", "home-projects");
     const head = make("div", "home-projects-head");
@@ -793,7 +872,7 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
 
       const inner = make("div", "home-inner is-enter");
       const analytics = events.installed("analytics");
-      inner.append(buildHead(), buildProjects(projects), buildActivity());
+      inner.append(buildHead(), buildAway(), buildProjects(projects), buildActivity());
       if (analytics) inner.append(buildBoard());
       host.replaceChildren(inner);
       updateHead(projects);
@@ -820,6 +899,11 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
       paintActivity();
     },
 
+    away(rows) {
+      awayRows = rows;
+      paintAway();
+    },
+
     unread(counts) {
       unreadBy = new Map(counts);
       paintActivity();
@@ -841,6 +925,7 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
       host.hidden = true;
       activityBody = null;
       activityCount = null;
+      awaySection = null;
       openState = false;
       picked = null;
       if (onType) {

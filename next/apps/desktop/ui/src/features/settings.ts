@@ -84,8 +84,24 @@ export const setPrefBool = (id: string, value: boolean): void => {
   window.dispatchEvent(new CustomEvent(PREFS_EVENT));
 };
 
+/** How long an agent may sit unused before it is put to sleep, as the setting's labels say it. */
+export const SLEEP_AFTER = { off: 0, "15m": 15, "30m": 30, "1h": 60, "2h": 120 } as const;
+type SleepAfter = keyof typeof SLEEP_AFTER;
+const SLEEP_DEFAULT: SleepAfter = "30m";
+
+const sleepAfter = (): SleepAfter => {
+  try {
+    const saved = localStorage.getItem(prefKey("agents.sleepAfter"));
+    return saved && saved in SLEEP_AFTER ? (saved as SleepAfter) : SLEEP_DEFAULT;
+  } catch {
+    return SLEEP_DEFAULT;
+  }
+};
+
 /** Every preference this page owns, so the defaults live in one place. */
 export const PREF = {
+  /** Minutes before an unused agent sleeps. 0 is never. */
+  sleepAfterMinutes: (): number => SLEEP_AFTER[sleepAfter()],
   /** A tab that has lost its last terminal retires itself. Off puts the × back on every tab. */
   tabAutoClose: () => prefBool("tabs.autoClose", true),
   /** Follow a terminal you moved into the tab it landed in. */
@@ -413,6 +429,17 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
           termLayout(),
           (value) => {
             setTermLayout(value as TermLayout);
+            paint();
+          },
+        ),
+        segRow(
+          "Sleep unused agents",
+          "An agent you have not typed to, and that has not worked, for this long ends its process to give the memory back. Its pane stays. Wake picks the same conversation back up. Anything it left running in the background stops too.",
+          Object.keys(SLEEP_AFTER),
+          sleepAfter(),
+          (value) => {
+            localStorage.setItem(prefKey("agents.sleepAfter"), value);
+            window.dispatchEvent(new CustomEvent(PREFS_EVENT));
             paint();
           },
         ),

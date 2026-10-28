@@ -117,6 +117,7 @@ const home = mountHome(document.getElementById("homeScreen")!, {
   isExited: () => false,
   projectGit: async () => ({ is_repo: true, branch: "main", dirty: 2 }) as never,
   openPost: (id) => chat.reveal(id),
+  openHistory: () => {},
   installed: () => false,
 });
 

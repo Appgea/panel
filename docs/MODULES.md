@@ -89,9 +89,9 @@ stays hidden even if a repo enables it (`keep_installed` filters the enabled lis
 
 ### git-manager (public, default-installed; needs `python3`, `git`)
 Branch, status, commit graph, staging, commit/undo, stash, branches, merge/rebase/cherry-pick/revert,
-push/pull/pull-all with progress, per-hunk staging. Drives the **Git tab**; the Git screen's mutating
+push/pull/pull-all/sync-all with progress, per-hunk staging. Drives the **Git tab**; the Git screen's mutating
 actions go through it (read-only snapshots use the native `git_overview`). Routes (`bin/host.py`):
-`/card /repos /pullable /pushable /pull/progress /push/progress /status /graph /commit /compare /diff
+`/card /repos /pullable /pushable /syncable /pull/progress /push/progress /sync/progress /status /graph /commit /compare /diff
 /stage-hunk /stage /unstage /discard /undo-last /stash /stash/pop /operation/continue /operation/abort
 /branch /branch/delete /branches/delete /checkout /merge /rebase /cherry-pick /revert /verb/plan /verb/run
 /undo /push /pull /pull/resolve-all /pull/resolve /pull/abort /remote`.

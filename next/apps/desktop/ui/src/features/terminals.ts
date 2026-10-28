@@ -58,7 +58,7 @@
  * Runs lend their whole element. All of it goes back on clear().
  */
 
-import type { Session } from "../types";
+import { MAIN_ID, type Session } from "../types";
 import type { LiveRun, ProjectRunView } from "./runner";
 import { icon, type IconName } from "../icons";
 import { ENGINES, type SessionKind } from "./agent-kinds";
@@ -67,6 +67,7 @@ import { prose } from "../views/dom";
 import { isLightboxOpen, showLightbox, type LightboxShot } from "../views/lightbox";
 import { IS_MAC, KEYMAP_EVENT, chordLabel, chordOf, digitOf, label as chordText, matches } from "./keymap";
 import { COLS, COLS_KEY, PREF, PREFS_EVENT, setTermLayout, termLayout } from "./settings";
+import { formatBytes } from "./terminal";
 import "./terminals.css";
 
 export type { SessionKind };
@@ -156,6 +157,18 @@ export type TerminalsEvents = {
    */
   phaseOf?(sessionId: string): TilePhase;
 
+  /* --- memory. Every agent stays alive while you look elsewhere, so a day leaves a pile. --- */
+
+  /** What a session and the processes under it hold, and whether it can be put to sleep. Null
+   *  before the first reading, and for a session with no process. */
+  memoryOf?(sessionId: string): { bytes: number | null; canSleep: boolean } | null;
+  /** Ended to free memory, and waiting to be woken. Asleep sessions are also exited. */
+  isAsleep?(sessionId: string): boolean;
+  /** Put these to sleep. */
+  sleep?(sessionIds: string[]): void;
+  /** The agents "Sleep idle" would put to sleep right now. */
+  sleepable?(): string[];
+
   /* --- the run bar. Active and failed runs remain reachable from every terminal. --- */
 
   /** ⌘R, and the bar's own Run button: build and launch this project on a simulator. */
@@ -243,6 +256,8 @@ export type TerminalsHandle = {
    *  left saying something that stopped being true. Takes the FRESH project list, because the
    *  group it must file under is the one that just changed. Works closed as well as open. */
   refile(projects: TerminalsProject[], projectId: string): void;
+  /** New memory readings arrived. Repaints the figures in place; nothing is rebuilt. */
+  paintMemory(): void;
 };
 
 /** A tab is just a named subset of sessions — its own wall, its own ＋ seat. Freely
@@ -1538,8 +1553,48 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     add.addEventListener("click", () => addTab());
     makeDropTab(add, tabs.length);
     tabsBar.append(add);
+    if (activePinned === null && events.memoryOf) {
+      tabsBar.append(memoryMeter);
+      paintMeter();
+    }
     if (activePinned === null) tabsBar.append(buildLayoutSwitch());
     paintTermBarStates();
+  };
+
+  /*
+   * What the wall costs the machine, and the one move that gives most of it back. Built once and
+   * re-attached on every strip paint, so a reading never waits for a rebuild and a rebuild never
+   * drops a reading.
+   */
+  const memoryMeter = make("span", "terms-mem");
+  const meterTotal = make("span", "terms-mem-total");
+  const meterSleep = document.createElement("button");
+  meterSleep.type = "button";
+  meterSleep.className = "terms-mem-sleep";
+  meterSleep.addEventListener("click", () => events.sleep?.(events.sleepable?.() ?? []));
+  memoryMeter.append(meterTotal, meterSleep);
+
+  const paintMeter = (): void => {
+    let total = 0;
+    let read = false;
+    for (const p of snapshot) {
+      for (const session of p.sessions) {
+        const bytes = events.memoryOf?.(session.id)?.bytes;
+        if (bytes == null) continue;
+        total += bytes;
+        read = true;
+      }
+    }
+    memoryMeter.hidden = !read;
+    meterTotal.textContent = formatBytes(total);
+    meterTotal.title = "What every terminal holds, with the servers and builds its agent started";
+    const idle = events.sleepable?.() ?? [];
+    const freed = idle.reduce((sum, id) => sum + (events.memoryOf?.(id)?.bytes ?? 0), 0);
+    meterSleep.hidden = idle.length === 0;
+    meterSleep.textContent = `Sleep ${idle.length} idle`;
+    meterSleep.title =
+      `Gives back about ${formatBytes(freed)}. Each pane stays, and Wake picks its conversation back up. ` +
+      "Agents that are working or waiting on you are left alone, and so is the one you are typing in.";
   };
 
   /* ------------------------------------------------------------ layout */
@@ -2154,6 +2209,12 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
 
   const projectIcon = (p: TerminalsProject): HTMLElement => {
     const ico = make("span", "plus-ico");
+    // The main folder is no app: it has no icon to find, and a letter would read as a project.
+    if (p.id === MAIN_ID) {
+      ico.classList.add("is-folder");
+      ico.innerHTML = icon("folder");
+      return ico;
+    }
     const glyph = make("span", "plus-glyph");
     glyph.textContent = p.name.trim().charAt(0).toUpperCase();
     ico.append(glyph);
@@ -2173,10 +2234,27 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       .map((p) => `${p.id}:${p.name}`)
       .join("|");
 
+  /** The projects proper: everything the picker offers except the main folder. */
+  const plusProjects = (): TerminalsProject[] =>
+    snapshot.filter((p) => p.exists && p.id !== MAIN_ID);
+
+  /** The main folder, when it is on offer. It answers to its name and to its path, so typing the
+   *  folder you mean finds it even when you never think of it as "main". */
+  const plusMain = (): TerminalsProject | null => {
+    const main = snapshot.find((p) => p.id === MAIN_ID && p.exists);
+    if (!main) return null;
+    const query = plusQuery.trim().toLowerCase();
+    if (!query) return main;
+    return `${main.name} ${main.path ?? ""}`.toLowerCase().includes(query) ? main : null;
+  };
+
+  /** A path as you would say it: your home is ~. */
+  const homePath = (path = ""): string => path.replace(/^\/(Users|home)\/[^/]+/, "~");
+
   /** Projects the ＋ pane is offering right now. Ranked by WHERE the query hits the name, so
    *  typing "sh" puts Shopper above Flashcards instead of listing them in portfolio order. */
   const plusMatches = (): TerminalsProject[] => {
-    const all = snapshot.filter((p) => p.exists);
+    const all = plusProjects();
     const query = plusQuery.trim().toLowerCase();
     if (!query) return all.sort((a, b) => a.name.localeCompare(b.name));
     return all
@@ -2196,7 +2274,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
   /** Where you were last: one full row of it, the first thing to offer before any reading. */
   const plusRecent = (): TerminalsProject[] => {
     if (plusQuery.trim()) return [];
-    const all = snapshot.filter((p) => p.exists);
+    const all = plusProjects();
     if (all.length <= plusColumns * 2 || plusColumns < 2) return [];
     return all
       .filter((p) => p.running || (p.lastActive ?? 0) > 0)
@@ -2209,8 +2287,12 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       .slice(0, plusColumns);
   };
 
-  /** Every pickable seat in screen order: recent cards, then the full list. ↩ takes `plusIndex`. */
-  const plusEntries = (): TerminalsProject[] => [...plusRecent(), ...plusMatches()];
+  /** Every pickable seat in screen order: the main folder, recent cards, then the full list.
+   *  ↩ takes `plusIndex`. */
+  const plusEntries = (): TerminalsProject[] => {
+    const main = plusMain();
+    return [...(main ? [main] : []), ...plusRecent(), ...plusMatches()];
+  };
 
   const since = (at?: number): string => {
     if (!at) return "";
@@ -2229,9 +2311,10 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     pick: (p: TerminalsProject, alt?: boolean) => void,
   ): void => {
     measurePlus(body);
+    const main = plusMain();
     const recent = plusRecent();
     const list = plusMatches();
-    const total = recent.length + list.length;
+    const total = (main ? 1 : 0) + recent.length + list.length;
     const scroll = body.querySelector(".plus-results")?.scrollTop ?? 0;
     body.replaceChildren();
     if (plusIndex >= total) plusIndex = Math.max(0, total - 1);
@@ -2266,6 +2349,24 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       return head;
     };
 
+    if (main) {
+      const bar = button(main, "plus-main");
+      bar.append(projectIcon(main));
+      const text = make("span", "plus-card-text");
+      const name = make("b", "plus-result-name");
+      name.textContent = main.name;
+      const where = make("small", "plus-main-path");
+      where.textContent = homePath(main.path);
+      text.append(name, where);
+      bar.append(text);
+      if (main.running) {
+        const tag = make("small", "plus-card-when is-live");
+        tag.textContent = "running";
+        bar.append(tag);
+      }
+      results.append(bar);
+    }
+
     if (recent.length) {
       section("Recent");
       const cards = make("div", "plus-cards");
@@ -2296,7 +2397,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       grid.append(row);
     }
     results.append(grid);
-    if (!list.length) {
+    if (!list.length && !main) {
       const empty = make("small", "plus-empty");
       empty.textContent = plusQuery.trim()
         ? `No project matches “${plusQuery.trim()}”`
@@ -2448,6 +2549,12 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     const label = make("b", "plus-chosen-name");
     label.textContent = p.name;
     head.append(label);
+    // The main folder is a place, not a name you know: say where the terminal will stand.
+    if (p.id === MAIN_ID) {
+      const where = make("small", "plus-main-path");
+      where.textContent = homePath(p.path);
+      head.append(where);
+    }
     const back = make("button", "plus-back");
     (back as HTMLButtonElement).type = "button";
     back.setAttribute("aria-label", "back to projects");
@@ -2622,6 +2729,26 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
 
   /** The state dot, and the tile class the wall styles from. Dead outranks everything — an
    *  exited pane is not mid-turn no matter what its last status said. */
+  /** The head's memory figure, its sleep button, and whether an ended pane is only asleep. */
+  const paintTileMemory = (tile: HTMLElement, sessionId: string, dead: boolean): void => {
+    const memory = dead ? null : (events.memoryOf?.(sessionId) ?? null);
+    const figure = tile.querySelector<HTMLElement>(".term-mem");
+    if (figure) {
+      figure.hidden = memory?.bytes == null;
+      figure.textContent = memory?.bytes == null ? "" : formatBytes(memory.bytes);
+      figure.title = "This terminal's memory, with the servers and builds it started";
+    }
+    const sleep = tile.querySelector<HTMLButtonElement>(".term-sleep");
+    if (sleep) {
+      sleep.hidden = !memory?.canSleep;
+      sleep.title =
+        `Sleep${memory?.bytes ? `, giving back ${formatBytes(memory.bytes)}` : ""}. ` +
+        "The pane stays, and Wake picks the same conversation back up.";
+    }
+    const ended = tile.querySelector<HTMLElement>(".term-ended");
+    if (ended) ended.textContent = events.isAsleep?.(sessionId) ? "asleep" : "ended";
+  };
+
   const paintPhase = (tile: HTMLElement, sessionId: string, dead: boolean): void => {
     const phase = dead ? "idle" : (events.phaseOf?.(sessionId) ?? "idle");
     tile.classList.toggle("is-work", phase === "work");
@@ -2677,7 +2804,8 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       `</span>` +
       `<b class="term-project"></b><span class="term-title"></span>` +
       `<i class="term-state" aria-hidden="true"></i>` +
-      `<span class="term-ended"${dead ? "" : " hidden"}>ended</span>`;
+      `<span class="term-ended"${dead ? "" : " hidden"}>ended</span>` +
+      `<span class="term-mem" hidden></span>`;
     const logo = head.querySelector<HTMLElement>(".term-logo")!;
     logo.querySelector<HTMLElement>(".term-logo-glyph")!.textContent =
       p.name.trim().charAt(0).toUpperCase();
@@ -2742,6 +2870,19 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       });
       head.append(skills);
     }
+    if (events.sleep) {
+      const sleep = document.createElement("button");
+      sleep.type = "button";
+      sleep.className = "term-sleep";
+      sleep.setAttribute("aria-label", "put this agent to sleep");
+      sleep.textContent = "☾";
+      sleep.hidden = true;
+      sleep.addEventListener("click", (event) => {
+        event.stopPropagation(); // the head underneath would jump into the project
+        events.sleep?.([session.id]);
+      });
+      head.append(sleep);
+    }
     const zoom = document.createElement("button");
     zoom.type = "button";
     zoom.className = "term-zoom";
@@ -2799,6 +2940,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     });
     tile.append(head);
     paintPhase(tile, session.id, dead);
+    paintTileMemory(tile, session.id, dead);
 
     const body = make("div", "term-tile-body");
     // Clicking into a pane makes it the caret's home, so Ctrl+Tab carries on from there
@@ -3072,8 +3214,10 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
         // session list, so the wall is never rebuilt for one. The dot has to be painted here or
         // it is painted never.
         paintPhase(tile, session.id, dead);
+        paintTileMemory(tile, session.id, dead);
       }
     }
+    paintMeter();
     // The icon set can change (project added/renamed) — refresh an IDLE ＋ pane only when it
     // actually did; repainting on every status tick restarts the drift and the sky twitches.
     // A pane mid-choice or mid-launch is never yanked out of the human's hands.
@@ -3277,6 +3421,15 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       reap();
       paintTabs();
       buildWall(projects);
+    },
+
+    paintMemory() {
+      if (!openState) return;
+      wall.querySelectorAll<HTMLElement>(".term-tile").forEach((tile) => {
+        const id = tile.dataset.session ?? "";
+        paintTileMemory(tile, id, events.isExited(id));
+      });
+      paintMeter();
     },
 
     select: (at) => (openState ? selectStrip(at) : false),

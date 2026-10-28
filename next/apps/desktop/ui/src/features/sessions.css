@@ -52,6 +52,7 @@
 .k-kimi     { --k: var(--k-kimi); }
 .k-glm      { --k: var(--k-glm); }
 .k-opencode { --k: var(--k-opencode); }
+.k-gemini   { --k: var(--k-gemini); }
 .k-opencode-kimi-k3 { --k: var(--k-opencode); }
 .k-opencode-deepseek-v4-flash { --k: var(--k-opencode); }
 .k-shell    { --k: var(--k-shell); }

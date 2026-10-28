@@ -44,3 +44,5 @@ rm -rf "$APP"
 cp -R "$BUNDLE" "$APP"
 touch "$APP"
 echo "installed: $APP"
+# The app itself does not own appgeapanel:// on macOS; the handler does, for dev and installed alike.
+"$ROOT/launcher/make-link-handler.sh"

@@ -412,33 +412,80 @@ fn decode_stream(carry: &mut Vec<u8>, chunk: &[u8]) -> String {
     out
 }
 
+/// One `ps` read of the whole machine: who each process's children are, and what each holds in
+/// memory. Windows has no `ps`, so it gets no table — `kill_tree` ends a tree through the OS's own
+/// parent links there, and memory reads as unknown.
+#[derive(Default)]
+struct ProcessTable {
+    children: HashMap<u32, Vec<u32>>,
+    /// Resident memory in bytes. `ps` reports kilobytes.
+    resident: HashMap<u32, u64>,
+}
+
+impl ProcessTable {
+    fn read() -> Self {
+        if cfg!(windows) {
+            return Self::default();
+        }
+        let Ok(out) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,rss="]).output() else {
+            return Self::default();
+        };
+        Self::parse(&String::from_utf8_lossy(&out.stdout))
+    }
+
+    fn parse(text: &str) -> Self {
+        let mut table = Self::default();
+        for line in text.lines() {
+            let mut fields = line.split_whitespace().map(|field| field.parse::<u64>().ok());
+            let (Some(Some(pid)), Some(Some(ppid))) = (fields.next(), fields.next()) else { continue };
+            let (pid, ppid) = (pid as u32, ppid as u32);
+            table.children.entry(ppid).or_default().push(pid);
+            if let Some(Some(kilobytes)) = fields.next() {
+                table.resident.insert(pid, kilobytes * 1024);
+            }
+        }
+        table
+    }
+
+    /// Every process below `root`, not counting `root` itself.
+    fn below(&self, root: u32) -> Vec<u32> {
+        let mut found = Vec::new();
+        let mut queue = vec![root];
+        while let Some(pid) = queue.pop() {
+            for &child in self.children.get(&pid).map(Vec::as_slice).unwrap_or_default() {
+                found.push(child);
+                queue.push(child);
+            }
+        }
+        found
+    }
+
+    /// What `root` and everything below it hold, in bytes. None when `root` is not running.
+    fn tree_bytes(&self, root: u32) -> Option<u64> {
+        let own = *self.resident.get(&root)?;
+        Some(own + self.below(root).iter().filter_map(|pid| self.resident.get(pid)).sum::<u64>())
+    }
+}
+
 /// Every process below `root`, whatever its process group. An agent runs its commands in groups
 /// of their own with no terminal, so the SIGHUP a closing PTY sends never reaches them.
 fn descendants(root: u32) -> Vec<u32> {
-    // Windows has no `ps`; `kill_tree` ends the whole tree through the OS's own parent links.
-    if cfg!(windows) {
-        let _ = root;
-        return Vec::new();
-    }
-    let Ok(out) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else {
-        return Vec::new();
-    };
-    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
-    for line in String::from_utf8_lossy(&out.stdout).lines() {
-        let mut fields = line.split_whitespace().filter_map(|field| field.parse::<u32>().ok());
-        if let (Some(pid), Some(ppid)) = (fields.next(), fields.next()) {
-            children.entry(ppid).or_default().push(pid);
-        }
-    }
-    let mut found = Vec::new();
-    let mut queue = vec![root];
-    while let Some(pid) = queue.pop() {
-        for &child in children.get(&pid).map(Vec::as_slice).unwrap_or_default() {
-            found.push(child);
-            queue.push(child);
-        }
-    }
-    found
+    ProcessTable::read().below(root)
+}
+
+/// What each root and everything below it holds in memory, in bytes, from one `ps` read for all
+/// of them. An agent's own process is half the story: its MCP servers, builds and dev servers are
+/// its children, and they go when it goes.
+///
+/// Resident memory counts a page shared by two processes in both, so a sum reads a little high.
+/// It is for telling the heavy terminals from the light ones, not for accounting. A root that is
+/// already gone, and every root on Windows, is left out rather than reported as zero.
+pub fn tree_memory(roots: &[u32]) -> HashMap<u32, u64> {
+    let table = ProcessTable::read();
+    roots
+        .iter()
+        .filter_map(|&root| Some((root, table.tree_bytes(root)?)))
+        .collect()
 }
 
 /// SIGTERM, a second's grace to shut down cleanly, then SIGKILL for whatever is left.
@@ -863,5 +910,21 @@ mod screen_tests {
         trim_to_cap(&mut tail);
         assert!(tail.len() <= SCREEN_CAP);
         assert!(tail.starts_with('x') && kept.ends_with(&tail));
+    }
+}
+
+#[cfg(test)]
+mod process_tests {
+    use super::ProcessTable;
+
+    #[test]
+    fn a_tree_sums_its_whole_family_and_nothing_beside_it() {
+        // 10 is the agent, 11 its MCP server, 12 a server's helper; 20 is a stranger.
+        let table = ProcessTable::parse("  10 1 1000\n 11 10 200\n 12 11 30\n 20 1 9999\n 13 10\n");
+        let mut below = table.below(10);
+        below.sort();
+        assert_eq!(below, vec![11, 12, 13]);
+        assert_eq!(table.tree_bytes(10), Some((1000 + 200 + 30) * 1024));
+        assert_eq!(table.tree_bytes(99), None);
     }
 }

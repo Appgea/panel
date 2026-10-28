@@ -3,46 +3,41 @@
  * session was open there, collected in one place so reviewing them is not a trip through Finder.
  *
  * Rust watches each project with an open session and sends `panel-made` once a file has
- * settled (see made.rs). Files land in batches: whatever one project produced within a few
- * minutes of itself is one piece of work, and is reviewed, revealed or dismissed as one.
+ * settled (see made.rs). The list's rules are in review_queue.ts and work like messages: a file
+ * is new until you look at it in the deck, then it is seen and sits below the new work, where you
+ * can scroll back to it. Files land in batches: whatever one project produced within half an hour
+ * of itself is one piece of work.
  *
  * Nobody approves anything: what you look at and leave alone is fine. The one verdict is a
  * change, with a note, and what you sent back is remembered so the redo can stand next to it.
  *
- * The queue is kept in localStorage: it is this window's to-do list. A file that disappears from
+ * The list is kept in localStorage: it is this window's to-do list. A file that disappears from
  * disk leaves it the next time Review opens.
  */
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { projectAssetUrl } from "../project-assets";
 import { openReviewDeck, type DeckEnd, type DeckItem } from "./review_deck";
+import {
+  arrive,
+  batches as batchesOf,
+  inOrder,
+  keep,
+  readQueue,
+  see,
+  sent,
+  writeQueue,
+  type Item,
+  type Kind,
+  type Made,
+} from "./review_queue";
 import { beforeKey, keepBefore, pruneBefore, readBefore } from "./review_store";
 import "./review.css";
-
-type Kind = "image" | "audio" | "video";
-
-type Made = {
-  project: string;
-  path: string;
-  kind: Kind;
-  size: number;
-  modified: number;
-};
-
-/** A change you sent to an agent, on the version of the file it was about. */
-type Request = { note: string; modified: number; at: number };
-
-/**
- * `at` is when Panel heard of it. A file's own mtime can be days old: a download, an unzip, a copy.
- * `note` is a change you wrote on this version; `before` is the request this version answers.
- */
-type Item = Made & { seen: boolean; at: number; note?: string; before?: Request };
 
 export type ReviewEvents = {
   projectName(id: string): string;
   projectPath(id: string): string | null;
-  openProject(id: string): void;
-  /** Batches with something unseen: a batch is one piece of work, however many files it wrote. */
+  /** New batches: a batch is one piece of work, however many files it wrote. */
   onCount(unseen: number): void;
   /** The same, per project, for the sidebar rows. */
   onProjects(counts: Map<string, number>): void;
@@ -55,11 +50,11 @@ export type ReviewEvents = {
 };
 
 export type ReviewHandle = {
-  /** Go straight into a project's oldest unseen batch, else its newest. False when it has nothing. */
+  /** Go straight into a project's newest new batch, else its newest. False when it has nothing. */
   openProject(project: string): boolean;
   /**
    * Review exactly these files — what one report pointed at — starting on `start`. Files the
-   * queue has not heard of yet join it here. False when none of them is on disk.
+   * list has not heard of yet join it here. False when none of them is on disk.
    */
   openFiles(project: string, paths: string[], start?: string): Promise<boolean>;
   open(): void;
@@ -68,13 +63,7 @@ export type ReviewHandle = {
 
 const STORE = "panel-review";
 const ASKED = "panel-review-asked";
-/** Seen files kept for looking back. Unseen files and written notes are never what gets cut. */
-const CAP = 400;
-const HARD_CAP = 2000;
-/** A request nobody answered in two weeks is not coming back. */
-const ASKED_FOR = 14 * 24 * 60 * 60_000;
-/** Files from one project this close together are one batch of work: a sitting, not a single render. */
-const BATCH_GAP = 30 * 60_000;
+const FORGOTTEN = "panel-review-forgotten";
 /** Tiles a batch shows before the rest fold into one "+N more" tile. Twelve fills 2, 3, 4 or 6 columns. */
 const SHOWN = 12;
 /** A folder that wrote this many files in one batch is a pipeline step: one tile for all of it. */
@@ -95,12 +84,6 @@ const src = (item: Made): string => `${projectAssetUrl(item.project, item.path)}
 /** Names the way Finder sorts them: shot_2 before shot_10. */
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
-const KINDS: { kind: Kind; label: string }[] = [
-  { kind: "image", label: "Images" },
-  { kind: "audio", label: "Sounds" },
-  { kind: "video", label: "Videos" },
-];
-
 function ago(at: number): string {
   const minutes = Math.round((Date.now() - at) / 60_000);
   if (minutes < 1) return "just now";
@@ -120,90 +103,64 @@ function count(items: Item[]): string {
     .join(" · ");
 }
 
-function load(): Map<string, Item> {
+function stored(key: string): unknown {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORE) ?? "[]") as Item[];
-    return new Map(saved.map((item) => [item.path, { ...item, at: item.at ?? item.modified }]));
+    return JSON.parse(localStorage.getItem(key) ?? "[]");
   } catch {
-    return new Map();
-  }
-}
-
-function loadAsked(): Map<string, Request> {
-  try {
-    const saved = JSON.parse(localStorage.getItem(ASKED) ?? "[]") as [string, Request][];
-    return new Map(saved.filter(([, request]) => Date.now() - request.at < ASKED_FOR));
-  } catch {
-    return new Map();
+    return [];
   }
 }
 
 export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHandle {
-  const items = load();
-  /** Changes sent, by path, waiting for the agent to write that file again. */
-  const asked = loadAsked();
+  const queue = readQueue({ items: stored(STORE), asked: stored(ASKED), forgotten: stored(FORGOTTEN) }, Date.now());
   let openState = false;
-  /** Unseen when this visit began, or arrived during it: marked and on top until reviewed or left. */
-  const fresh = new Set<string>();
-  const isNew = (item: Item): boolean => !item.seen || fresh.has(item.path);
-  /** What Mark reviewed has taken out in the last few seconds, kept for one Undo. */
-  let undo: { items: Item[]; timer: number } | null = null;
-  /** The Review screen's narrowing, for this run. Empty is everything. */
-  const filter: { project: string; kind: Kind | "" } = { project: "", kind: "" };
-  /** The batches as last painted, and the one the keyboard is on. */
+  /** The Review screen's narrowing to one project, for this run. Empty is everything. */
+  let only = "";
+  /** The batches as last painted, new then seen, and the one the keyboard is on. */
   let shown: Item[][] = [];
   let focus = 0;
   let checking = false;
 
   const save = (): void => {
-    const sorted = [...items.values()].sort((a, b) => b.at - a.at);
-    const keep = sorted.filter((item, at) => at < CAP || !item.seen || item.note !== undefined).slice(0, HARD_CAP);
-    items.clear();
-    for (const item of keep) items.set(item.path, item);
+    const saved = writeQueue(queue);
     try {
-      localStorage.setItem(STORE, JSON.stringify(keep));
-      localStorage.setItem(ASKED, JSON.stringify([...asked]));
+      localStorage.setItem(STORE, JSON.stringify(saved.items));
+      localStorage.setItem(ASKED, JSON.stringify(saved.asked));
+      localStorage.setItem(FORGOTTEN, JSON.stringify(saved.forgotten));
     } catch {
-      // Storage full or blocked: the queue still works for this run.
+      // Storage full or blocked: the list still works for this run.
     }
   };
 
   /** Old versions still worth having: a note not yet sent, a request not yet answered, a redo on show. */
   const keptVersions = (): Set<string> => {
-    const keep = new Set<string>();
-    for (const item of [...items.values(), ...(undo?.items ?? [])]) {
-      if (item.note !== undefined) keep.add(beforeKey(item.path, item.modified));
-      if (item.before) keep.add(beforeKey(item.path, item.before.modified));
+    const kept = new Set<string>();
+    for (const item of queue.items.values()) {
+      if (item.note !== undefined) kept.add(beforeKey(item.path, item.modified));
+      if (item.before) kept.add(beforeKey(item.path, item.before.modified));
     }
-    for (const [path, request] of asked) keep.add(beforeKey(path, request.modified));
-    return keep;
+    for (const [path, request] of queue.asked) kept.add(beforeKey(path, request.modified));
+    return kept;
   };
 
-  // Above announce(): it runs during mount, and a saved queue reaches folderOf through batches().
+  // Above announce(): it runs during mount, and a saved list reaches folderOf through batches().
   const relative = (item: Item): string => {
     const root = events.projectPath(item.project);
     return root && item.path.startsWith(`${root}/`) ? item.path.slice(root.length + 1) : item.path;
   };
   const folderOf = (item: Item): string => relative(item).split("/").slice(0, -1).join("/") || ".";
+  const batches = (): { fresh: Item[][]; seen: Item[][] } => batchesOf(queue.items.values(), folderOf);
 
   const announce = (): void => {
-    const waiting = batches().filter((batch) => batch.some((item) => !item.seen));
-    events.onCount(waiting.length);
+    const { fresh } = batches();
+    events.onCount(fresh.length);
     const counts = new Map<string, number>();
-    for (const batch of waiting) counts.set(batch[0].project, (counts.get(batch[0].project) ?? 0) + 1);
+    for (const batch of fresh) counts.set(batch[0].project, (counts.get(batch[0].project) ?? 0) + 1);
     events.onProjects(counts);
   };
 
   void listen<Made>("panel-made", ({ payload }) => {
-    // A re-render of the same file is news again: it moves up and is unseen. If you had sent it
-    // back, the new version carries what you asked, so it can be held up against the old one.
-    const request = asked.get(payload.path);
-    const answers = request && request.modified !== payload.modified ? request : undefined;
-    if (answers) asked.delete(payload.path);
-    const before = answers ?? items.get(payload.path)?.before;
-    items.set(payload.path, { ...payload, seen: openState, at: Date.now(), ...(before ? { before } : {}) });
-    // Arriving while you look: it is seen, and still marked new for this visit.
-    if (openState) fresh.add(payload.path);
+    if (!arrive(queue, payload, Date.now())) return;
     save();
     announce();
     if (openState) paint();
@@ -213,107 +170,34 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   void pruneBefore(keptVersions());
 
   /**
-   * A batch in the order it is shown and reviewed: folder by folder, in the order each folder
-   * first wrote, and by name inside a folder. Renders and takes finish out of order when made in
-   * parallel, so 01, 02, 03 is the order the agent meant, not the order the files landed.
+   * Files no longer on disk leave quietly. Rust answers for a whole project at once; a project it
+   * cannot find right now proves nothing, so its files stay.
    */
-  function inOrder(newestFirst: Item[]): Item[] {
-    const rank = new Map<string, number>();
-    for (let at = newestFirst.length - 1; at >= 0; at--) {
-      const folder = folderOf(newestFirst[at]);
-      if (!rank.has(folder)) rank.set(folder, rank.size);
-    }
-    return newestFirst.sort(
-      (a, b) => rank.get(folderOf(a))! - rank.get(folderOf(b))! || byName.compare(fileName(a.path), fileName(b.path)),
-    );
-  }
-
-  /** Newest batch first. Time decides where a batch ends; inOrder decides the order inside it. */
-  function batches(): Item[][] {
-    const sorted = [...items.values()].sort((a, b) => b.at - a.at);
-    const out: Item[][] = [];
-    const current = new Map<string, Item[]>();
-    for (const item of sorted) {
-      const batch = current.get(item.project);
-      // A new file is a new entry: it never folds into a batch that was already looked at.
-      if (batch && isNew(batch[0]) === isNew(item) && batch[batch.length - 1].at - item.at <= BATCH_GAP) {
-        batch.push(item);
-        continue;
-      }
-      const fresh = [item];
-      current.set(item.project, fresh);
-      out.push(fresh);
-    }
-    return out.map(inOrder);
-  }
-
-  function dismiss(batch: Item[]): void {
-    // Only what was looked at: a file re-rendered meanwhile is a new item under the same path.
-    batch = batch.filter((item) => items.get(item.path) === item);
-    if (!batch.length) return;
-    for (const item of batch) items.delete(item.path);
-    // A second Done inside the window joins the first, so Undo brings back both.
-    if (undo) window.clearTimeout(undo.timer);
-    undo = {
-      items: [...(undo?.items ?? []), ...batch],
-      timer: window.setTimeout(() => {
-        undo = null;
-        void pruneBefore(keptVersions());
-        paint();
-      }, 8000),
-    };
-    save();
-    announce();
-    paint();
-  }
-
-  function restore(): void {
-    if (!undo) return;
-    window.clearTimeout(undo.timer);
-    for (const item of undo.items) if (!items.has(item.path)) items.set(item.path, item);
-    undo = null;
-    save();
-    announce();
-    paint();
-  }
-
-  /** Files no longer on disk leave quietly. A check that cannot reach the file keeps it. */
   async function pruneMissing(): Promise<void> {
     if (checking) return;
     checking = true;
-    const all = [...items.values()];
-    const gone: Item[] = [];
-    let next = 0;
-    const worker = async (): Promise<void> => {
-      while (next < all.length) {
-        const item = all[next++];
-        try {
-          if ((await fetch(src(item), { method: "HEAD", cache: "no-store" })).status === 404) gone.push(item);
-        } catch {
-          // Unreachable is not gone.
-        }
+    const byProject = new Map<string, Item[]>();
+    for (const item of queue.items.values()) byProject.set(item.project, [...(byProject.get(item.project) ?? []), item]);
+    let changed = false;
+    for (const [project, listed] of byProject) {
+      const found = await invoke<Made[]>("made_entries", { project, paths: listed.map((item) => item.path) }).catch(() => null);
+      if (!found) continue;
+      // The same name can reach us in two Unicode forms: a Turkish file name from FSEvents and from the disk.
+      const there = new Set(found.map((made) => made.path.normalize("NFC")));
+      for (const item of listed) {
+        if (there.has(item.path.normalize("NFC")) || queue.items.get(item.path) !== item) continue;
+        queue.items.delete(item.path);
+        changed = true;
       }
-    };
-    await Promise.all(Array.from({ length: 6 }, worker));
+    }
     checking = false;
-    const left = gone.filter((item) => items.get(item.path) === item);
-    if (!left.length) return;
-    for (const item of left) items.delete(item.path);
+    if (!changed) return;
     save();
     announce();
     paint();
   }
 
-  /** Where the work that just arrived sits in a batch's order. */
-  const newestAt = (batch: Item[]): number => {
-    let best = 0;
-    batch.forEach((item, at) => {
-      if (item.at > batch[best].at) best = at;
-    });
-    return best;
-  };
-
-  /** The batch as the deck sees it, and a review of it from any item. */
+  /** The deck on one batch, from any item. Each piece is seen once it is on screen. */
   function review(batch: Item[], at = 0): void {
     const project = batch[0].project;
     const urls: string[] = [];
@@ -337,13 +221,8 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
           }
         : {}),
     }));
-    for (const item of batch) {
-      item.seen = true;
-      fresh.delete(item.path);
-    }
-    save();
-    announce();
-    hidePeek(project);
+    hidePeek();
+    const find = (path: string): Item | undefined => batch.find((candidate) => candidate.path === path);
     const notes = new Map<string, string>();
     for (const item of batch) if (item.note !== undefined) notes.set(item.path, item.note);
     openReviewDeck(deckItems, at, {
@@ -351,14 +230,22 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
       agentName: events.agentName(project),
       notes,
       onNote(path, note) {
-        const item = batch.find((candidate) => candidate.path === path);
+        const item = find(path);
         if (!item) return;
         const first = item.note === undefined;
         if (note === null) delete item.note;
         else item.note = note;
+        // A note on a file a report showed you, not in the list: it joins, so the note is kept.
+        if (note !== null) keep(queue, item);
         save();
         // The agent will write over this file: copy it now, while it is still the one you saw.
         if (note !== null && first) void keepBefore(beforeKey(item.path, item.modified), src(item));
+      },
+      onSeen(path) {
+        const item = find(path);
+        if (!item || !see(item)) return;
+        save();
+        announce();
       },
       send: (text) => events.send(project, text),
       copy: async (text) => {
@@ -369,16 +256,14 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
           return false;
         }
       },
+      reveal: (path) => void invoke("reveal_entry", { project, path }).catch(() => undefined),
       onClose(end: DeckEnd) {
         for (const url of urls) URL.revokeObjectURL(url);
         if (end === "sent") {
-          for (const item of batch) {
-            if (item.note !== undefined) asked.set(item.path, { note: item.note, modified: item.modified, at: Date.now() });
-          }
+          sent(queue, batch, Date.now());
+          save();
         }
-        // Walked to the end is reviewed. Left part way, it stays, notes and all.
-        if (end === "left") paint();
-        else dismiss(batch);
+        paint();
       },
     });
   }
@@ -410,7 +295,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const redone = group.filter((item) => item.before);
     if (noted.length) {
       const chip = make("span", "rv-chip is-change", noted.length > 1 ? `✎ ${noted.length}` : "✎");
-      chip.title = noted.map((item) => item.note || "needs changes").join("\n");
+      chip.title = noted.map((item) => item.note).join("\n");
       node.append(chip);
     } else if (redone.length) {
       const chip = make("span", "rv-chip is-redo", "redo");
@@ -456,8 +341,8 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
 
   function card(batch: Item[], at: number): HTMLElement {
     const project = batch[0].project;
-    const box = make("article", "rv-batch");
-    if (batch.some(isNew)) box.classList.add("is-new");
+    const fresh = !batch[0].seen;
+    const box = make("article", fresh ? "rv-batch is-new" : "rv-batch");
     box.classList.toggle("is-focus", at === focus);
     box.addEventListener("pointerdown", () => {
       focus = at;
@@ -475,7 +360,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
         [
           count(batch),
           ago(Math.max(...batch.map((item) => item.at))),
-          noted ? `${noted} to change, not sent` : "",
+          noted ? `${noted} ${noted === 1 ? "note" : "notes"} not sent` : "",
           redone ? `${redone} redone` : "",
         ]
           .filter(Boolean)
@@ -484,18 +369,11 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     );
     const groups = folderGroups(batch);
     title.append(make("code", "rv-where", groups.length === 1 ? groups[0].folder : `${groups.length} folders`));
-    const actions = make("div", "rv-actions");
-    const button = (label: string, hint: string, run: () => void, className = "rv-btn"): void => {
-      const node = make("button", className, label);
-      node.type = "button";
-      node.title = hint;
-      node.addEventListener("click", run);
-      actions.append(node);
-    };
-    button("Finder", "Show in Finder", () => reveal(batch), "rv-btn is-quiet");
-    button("Done", "Mark reviewed without going through it · D", () => dismiss(batch), "rv-btn is-quiet");
-    button("Review", "Go through it one by one · Enter · C needs changes", () => review(batch), "rv-btn is-primary");
-    head.append(title, actions);
+    const open = make("button", fresh ? "rv-btn is-primary" : "rv-btn", fresh ? "Review" : "Look again");
+    open.type = "button";
+    open.title = "Go through it one by one · Enter";
+    open.addEventListener("click", () => review(batch));
+    head.append(title, open);
     const grid = make("div", "rv-grid");
     // The deck walks the batch in the order the tiles show it, so a folded folder is one stretch.
     const tiles: { start: number; node: HTMLElement }[] = [];
@@ -519,47 +397,41 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     return box;
   }
 
-  function reveal(batch: Item[]): void {
-    void invoke("reveal_entry", { project: batch[0].project, path: relative(batch[batch.length - 1]) }).catch(() => undefined);
-  }
-
   /* ------------------------------------------------------------------ peek */
 
-  /** One card per project, stacked in the corner. A new batch never replaces another project's card. */
-  const peeks = new Map<string, { node: HTMLElement; timer: number }>();
-  const MAX_PEEKS = 4;
-  let peekStack: HTMLElement | null = null;
+  /** One card in the corner for whatever arrived last. It never stacks. */
+  let peekCard: { node: HTMLElement; timer: number } | null = null;
 
-  function hidePeek(project?: string): void {
-    for (const [id, peekCard] of [...peeks]) {
-      if (project !== undefined && id !== project) continue;
-      window.clearTimeout(peekCard.timer);
-      peekCard.node.classList.add("is-leaving");
-      window.setTimeout(() => peekCard.node.remove(), 180);
-      peeks.delete(id);
-    }
+  function hidePeek(): void {
+    if (!peekCard) return;
+    const { node, timer } = peekCard;
+    window.clearTimeout(timer);
+    node.classList.add("is-leaving");
+    window.setTimeout(() => node.remove(), 180);
+    peekCard = null;
   }
 
+  /** The project's newest batch you have not looked at. */
+  const newestFresh = (project: string): Item[] | undefined =>
+    batches().fresh.find((candidate) => candidate[0].project === project);
+
   /**
-   * New work, brought to you: a small card in the corner with the pictures themselves. Each
-   * project gets its own card and each card opens its own batch. × or a card left alone just
-   * hides it; the batch keeps waiting in Review, unseen.
+   * New work, brought to you: a small card in the corner with the pictures themselves. Tapping it
+   * opens the batch. × or a card left alone just hides it; the batch stays new in Review.
    */
   function peek(project: string): void {
     if (events.busy()) return;
-    const batch = batches().find((candidate) => candidate[0].project === project);
+    const batch = newestFresh(project);
     if (!batch) return;
-    const existing = peeks.get(project);
-    if (existing) window.clearTimeout(existing.timer);
-    const card = existing?.node ?? make("aside", "rv-peek");
-    card.setAttribute("role", "status");
-    card.classList.remove("is-leaving");
-    // Whatever is tapped opens: a face opens that file, anywhere else opens the newest file.
+    if (peekCard) window.clearTimeout(peekCard.timer);
+    const node = peekCard?.node ?? make("aside", "rv-peek");
+    node.setAttribute("role", "status");
+    node.classList.remove("is-leaving");
+    // A face opens that file; anywhere else opens the batch from its start.
     const reviewFrom = (path?: string): void => {
-      const latest = batches().find((candidate) => candidate[0].project === project);
-      if (!latest) return hidePeek(project);
-      const found = latest.findIndex((item) => item.path === path);
-      review(latest, found >= 0 ? found : newestAt(latest));
+      const latest = newestFresh(project);
+      if (!latest) return hidePeek();
+      review(latest, Math.max(0, latest.findIndex((item) => item.path === path)));
     };
     const faces = make("div", "rv-peek-faces");
     // The newest three, the ones that made this card appear.
@@ -586,133 +458,92 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     text.append(make("b", "", events.projectName(project)), make("span", "", `${redo ? "redid" : "made"} ${count(batch)}`));
     const open = make("button", "rv-btn is-primary", "Review");
     open.type = "button";
-    card.onclick = () => reviewFrom();
-    const done = make("button", "rv-peek-close", "×");
-    done.type = "button";
-    done.setAttribute("aria-label", "Hide, keep in Review");
-    done.title = "Hide — it stays in Review";
-    done.addEventListener("click", (event) => {
+    node.onclick = () => reviewFrom();
+    const close = make("button", "rv-peek-close", "×");
+    close.type = "button";
+    close.setAttribute("aria-label", "Hide, keep in Review");
+    close.title = "Hide — it stays new in Review";
+    close.addEventListener("click", (event) => {
       event.stopPropagation();
-      hidePeek(project);
+      hidePeek();
     });
-    card.replaceChildren(faces, text, open, done);
-    const arm = (): number => window.setTimeout(() => hidePeek(project), 9000);
-    if (!existing) {
-      if (!peekStack) {
-        peekStack = make("div", "rv-peeks");
-        document.body.append(peekStack);
-      }
-      // The oldest card makes room; its batch stays in Review.
-      if (peeks.size >= MAX_PEEKS) hidePeek([...peeks.keys()][0]);
-      peekStack.append(card);
-      const entry = { node: card, timer: arm() };
-      peeks.set(project, entry);
-      card.addEventListener("mouseenter", () => window.clearTimeout(entry.timer));
-      card.addEventListener("mouseleave", () => {
-        entry.timer = window.setTimeout(() => hidePeek(project), 4000);
+    node.replaceChildren(faces, text, open, close);
+    if (!node.isConnected) {
+      document.body.append(node);
+      node.addEventListener("mouseenter", () => peekCard && window.clearTimeout(peekCard.timer));
+      node.addEventListener("mouseleave", () => {
+        if (peekCard) peekCard.timer = window.setTimeout(hidePeek, 4000);
       });
-    } else {
-      existing.timer = arm();
     }
+    peekCard = { node, timer: window.setTimeout(hidePeek, 9000) };
   }
 
   /* ------------------------------------------------------------------ screen */
 
-  /** The batches the filter lets through, each cut down to the kinds it lets through. */
-  function visibleBatches(): Item[][] {
-    return batches()
-      .filter((batch) => !filter.project || batch[0].project === filter.project)
-      .map((batch) => (filter.kind ? batch.filter((item) => item.kind === filter.kind) : batch))
-      .filter((batch) => batch.length > 0)
-      // Unseen first, newest first within each.
-      .sort((a, b) => Number(b.some(isNew)) - Number(a.some(isNew)));
-  }
-
-  /** Narrowing by project and by kind, shown only when there is something to narrow. */
-  function filters(): HTMLElement | null {
-    const all = [...items.values()];
-    const projects = [...new Set(all.map((item) => item.project))];
-    const kinds = KINDS.filter(({ kind }) => all.some((item) => item.kind === kind));
-    if (projects.length < 2 && kinds.length < 2 && !filter.project && !filter.kind) return null;
-    const bar = make("div", "rv-filters");
-    if (projects.length > 1 || filter.project) {
-      const pick = make("select", "rv-pick");
-      pick.setAttribute("aria-label", "Project");
-      pick.append(new Option("All projects", ""));
-      for (const id of projects.sort((a, b) => byName.compare(events.projectName(a), events.projectName(b)))) {
-        pick.append(new Option(events.projectName(id), id));
-      }
-      pick.value = filter.project;
-      pick.addEventListener("change", () => {
-        filter.project = pick.value;
-        focus = 0;
-        paint();
-      });
-      bar.append(pick);
+  /** One project or all of them, shown only when more than one is listed. */
+  function projectPick(): HTMLElement | null {
+    const projects = [...new Set([...queue.items.values()].map((item) => item.project))];
+    if (only && !projects.includes(only)) only = "";
+    if (projects.length < 2) return null;
+    const pick = make("select", "rv-pick");
+    pick.setAttribute("aria-label", "Project");
+    pick.append(new Option("All projects", ""));
+    for (const id of projects.sort((a, b) => byName.compare(events.projectName(a), events.projectName(b)))) {
+      pick.append(new Option(events.projectName(id), id));
     }
-    if (kinds.length > 1 || filter.kind) {
-      const seg = make("div", "rv-seg");
-      for (const { kind, label } of [{ kind: "" as const, label: "All" }, ...kinds]) {
-        const option = make("button", "rv-seg-btn", label);
-        option.type = "button";
-        option.classList.toggle("is-on", filter.kind === kind);
-        option.addEventListener("click", () => {
-          filter.kind = kind;
-          focus = 0;
-          paint();
-        });
-        seg.append(option);
-      }
-      bar.append(seg);
-    }
-    return bar;
+    pick.value = only;
+    pick.addEventListener("change", () => {
+      only = pick.value;
+      focus = 0;
+      paint();
+    });
+    return pick;
   }
 
   function paint(): void {
     if (!openState) return;
-    shown = visibleBatches();
+    const pick = projectPick();
+    const mine = (batch: Item[]): boolean => !only || batch[0].project === only;
+    const all = batches();
+    const fresh = all.fresh.filter(mine);
+    const seen = all.seen.filter(mine);
+    shown = [...fresh, ...seen];
     focus = Math.min(focus, Math.max(0, shown.length - 1));
     const head = make("header", "rv-top");
     const heading = make("div", "rv-heading");
-    heading.append(
-      make("h1", "", "Review"),
-      make("p", "", "What your agents made. Flip through a batch; send back only what needs changes."),
-    );
+    heading.append(make("h1", "", "Review"), make("p", "", "What your agents made. New on top, what you've looked at below."));
     head.append(heading);
-    const bar = filters();
-    if (bar) head.append(bar);
-    if (shown.length) {
-      const narrowed = Boolean(filter.project || filter.kind);
-      const all = make("button", "rv-btn is-quiet", narrowed ? "Mark these reviewed" : "Mark all reviewed");
-      all.type = "button";
-      all.addEventListener("click", () => dismiss(shown.flat()));
-      head.append(all);
+    if (pick) head.append(pick);
+    if (fresh.length) {
+      const read = make("button", "rv-btn is-quiet", "Mark all seen");
+      read.type = "button";
+      read.title = "Move the new work below without going through it";
+      read.addEventListener("click", () => {
+        for (const item of fresh.flat()) see(item);
+        save();
+        announce();
+        paint();
+      });
+      head.append(read);
     }
     const body = make("div", "rv-body");
-    if (undo) {
-      const bar = make("div", "rv-undo");
-      bar.append(make("span", "", `Marked ${undo.items.length === 1 ? "1 file" : `${undo.items.length} files`} reviewed.`));
-      const again = make("button", "rv-btn", "Undo");
-      again.type = "button";
-      again.title = "Undo · U";
-      again.addEventListener("click", restore);
-      bar.append(again);
-      body.append(bar);
-    }
     if (!shown.length) {
       const empty = make("div", "rv-empty");
       empty.append(
-        make("b", "", items.size ? "Nothing here with this filter" : "Nothing to review"),
+        make("b", "", "Nothing to review"),
         make("p", "", "When an agent saves an image, a sound or a video in its project, it shows up here."),
       );
       body.append(empty);
     } else {
-      body.append(...shown.map(card));
+      body.append(make("h2", "rv-section", "New"));
+      if (fresh.length) body.append(...fresh.map((batch, at) => card(batch, at)));
+      else body.append(make("p", "rv-none", "Nothing new. Everything below you have looked at."));
+      if (seen.length) body.append(make("h2", "rv-section", "Seen"), ...seen.map((batch, at) => card(batch, fresh.length + at)));
     }
     screen.replaceChildren(head, body);
   }
 
-  /** J/K or ↓/↑ move between batches, Enter reviews, D marks reviewed, F shows in Finder, U undoes. */
+  /** J/K or ↓/↑ move between batches, Enter reviews. */
   function onKey(event: KeyboardEvent): void {
     if (!openState || event.metaKey || event.ctrlKey || event.altKey || event.repeat) return;
     if (document.querySelector(".rd-veil")) return;
@@ -731,34 +562,30 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     if (key === "j" || key === "arrowdown") move(1);
     else if (key === "k" || key === "arrowup") move(-1);
     else if (key === "enter" && batch && target?.tagName !== "BUTTON") review(batch);
-    else if (key === "d" && batch) dismiss(batch);
-    else if (key === "f" && batch) reveal(batch);
-    else if (key === "u" && undo) restore();
     else handled = false;
     if (handled) event.preventDefault();
   }
 
   return {
     openProject(project) {
-      const mine = batches().filter((batch) => batch[0].project === project);
-      // What you have not seen comes first, oldest of it first, so the work reads in order.
-      const target = [...mine].reverse().find((batch) => batch.some((item) => !item.seen)) ?? mine[0];
-      if (target) review(target, target.some((item) => !item.seen) ? 0 : newestAt(target));
+      const target = newestFresh(project) ?? batches().seen.find((batch) => batch[0].project === project);
+      if (target) review(target);
       return Boolean(target);
     },
     async openFiles(project, paths, start) {
       const found = await invoke<Made[]>("made_entries", { project, paths }).catch(() => [] as Made[]);
       if (!found.length) return false;
+      const now = Date.now();
+      // New versions join the list like any arrival. One the list let go of is shown, not re-added.
+      const changed = found.map((made) => arrive(queue, made, now)).some(Boolean);
       const batch = inOrder(
-        found.map((made) => {
-          const known = items.get(made.path);
-          // Same version: keep its note and its request. A newer one is news, like panel-made.
-          if (known && known.modified === made.modified) return known;
-          const item: Item = { ...made, seen: true, at: Date.now(), ...(known?.before ? { before: known.before } : {}) };
-          items.set(made.path, item);
-          return item;
-        }),
+        found.map((made) => queue.items.get(made.path) ?? { ...made, at: now, seen: true }),
+        folderOf,
       );
+      if (changed) {
+        save();
+        announce();
+      }
       const wanted = start?.replaceAll("\\", "/");
       const at = wanted
         ? batch.findIndex((item) => {
@@ -773,26 +600,12 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
       openState = true;
       focus = 0;
       hidePeek();
-      // Looking is seeing: the badge clears, the "new" marks and order stay for this visit.
-      let changed = false;
-      for (const item of items.values()) {
-        if (!item.seen) {
-          fresh.add(item.path);
-          item.seen = true;
-          changed = true;
-        }
-      }
       paint();
-      if (changed) {
-        save();
-        announce();
-      }
       document.addEventListener("keydown", onKey);
       void pruneMissing();
     },
     clear() {
       openState = false;
-      fresh.clear();
       document.removeEventListener("keydown", onKey);
       for (const player of screen.querySelectorAll<HTMLMediaElement>("audio, video")) player.pause();
       screen.replaceChildren();

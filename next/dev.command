@@ -20,6 +20,8 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 # fresh clone has nothing staged and fails to compile; an old stage runs stale host/ code.
 "$ROOT/launcher/stage-resources.sh"
 "$ROOT/launcher/prepare-ui.sh"
+# appgeapanel:// links reach a dev build only through the link handler (see that script).
+"$ROOT/launcher/make-link-handler.sh" || echo "link handler not installed; appgeapanel:// links will not open Panel"
 # Tauri runs beforeDevCommand from apps/desktop. Its own CLI starts in src-tauri.
 cd "$ROOT/apps/desktop/src-tauri"
 

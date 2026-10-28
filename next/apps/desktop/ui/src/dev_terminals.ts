@@ -5,6 +5,7 @@
  * looked at without Tauri. No IO, no invoke, no live PTYs.
  */
 import "./style.css";
+import { MAIN_ID } from "./types";
 import { mountTerminals, type TerminalsEvents, type TerminalsProject } from "./features/terminals";
 
 // ?sessions=N gives the first project N fake sessions, so the picker sits in a narrow cell
@@ -52,6 +53,17 @@ const PROJECTS: TerminalsProject[] = [
     terminal_id: `t-${i}`,
   })),
 }));
+
+// The main folder rides along like the app adds it: one more project, first in the picker.
+PROJECTS.push({
+  id: MAIN_ID,
+  name: "Main folder",
+  path: "/Users/dev/Desktop/projects",
+  exists: true,
+  group: "",
+  running: false,
+  sessions: [],
+});
 
 const host = document.querySelector<HTMLElement>("#terminalsHost")!;
 

@@ -55,6 +55,7 @@ are preserved. It is watched: edits by you, an agent, or the folder picker updat
 | `groups` | array | `{id, name, opsRoot, store}` — a "company". Order here = sidebar and terminal-strip order. `opsRoot` = the folder **containing** `ops/` for that group (empty ⇒ global). `store` is declared and read but nothing consumes it yet (store credentials still use the global account — per the source comment). |
 | `opsRoot` | string | global ops location (folder containing `ops/`). Empty ⇒ `~/.appgeapanel` so the tree is `~/.appgeapanel/ops` |
 | `devRunner` | string | absolute path of your own run script (§3, "Run") |
+| `mainFolder` | string | where the **Main folder** terminal opens (wall ＋ seat). Empty ⇒ the deepest folder every project sits under |
 | `plainView` | bool | present in the default file; **no reader found** in `src-tauri` or `ui/src` (unverified legacy) |
 | `disabledModules` | array | present in the default file; **no reader found** (the Extensions screen uses `modules.json`) |
 

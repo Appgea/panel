@@ -205,6 +205,10 @@ impl Router {
     }
 }
 
+/// Where an `appgeapanel://` link handed in over `/panel/link` goes. The desktop shell decides
+/// what it means; the ingress only checks that it is one.
+pub type LinkSink = Arc<dyn Fn(String) + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Ingress {
     port: u16,
@@ -212,6 +216,10 @@ pub struct Ingress {
     router: Arc<Mutex<Router>>,
     changes: Arc<Mutex<ChangeLog>>,
     skill_uses: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// Panel instance -> the Claude conversation it is running, as its hooks report it. History
+    /// uses this to open a live terminal instead of resuming the same conversation twice.
+    conversations: Arc<Mutex<HashMap<String, String>>>,
+    links: Arc<Mutex<Option<LinkSink>>>,
     sink: EventSink,
 }
 
@@ -236,6 +244,8 @@ impl Ingress {
             router: Arc::new(Mutex::new(Router::default())),
             changes: Arc::new(Mutex::new(ChangeLog::default())),
             skill_uses: Arc::new(Mutex::new(HashMap::new())),
+            conversations: Arc::new(Mutex::new(HashMap::new())),
+            links: Arc::new(Mutex::new(None)),
             sink,
         };
 
@@ -271,6 +281,13 @@ impl Ingress {
     pub fn unregister_agent(&self, instance: &str) {
         self.router.lock().unwrap().routes.remove(instance);
         self.skill_uses.lock().unwrap().remove(instance);
+        self.conversations.lock().unwrap().remove(instance);
+    }
+
+    /// Live Panel instances and the Claude conversation each is running. A `/clear` or a resume
+    /// inside the terminal changes it; the next hook says so.
+    pub fn conversations(&self) -> HashMap<String, String> {
+        self.conversations.lock().unwrap().clone()
     }
 
     /// Successful Skill calls, isolated by Panel instance. This is usage evidence,
@@ -321,8 +338,17 @@ impl Ingress {
         true
     }
 
+    /// Receive `appgeapanel://` links over `/panel/link`. On macOS a small handler app owns the
+    /// scheme and forwards here, so a dev build gets links exactly like the installed app.
+    pub fn on_link(&self, sink: LinkSink) {
+        *self.links.lock().unwrap() = Some(sink);
+    }
+
     fn handle(&self, mut request: Request) {
         let url = request.url().to_string();
+        let json_body = request.headers().iter().any(|header| {
+            header.field.equiv("Content-Type") && header.value.as_str().starts_with("application/json")
+        });
         let mut raw = String::new();
         let _ = std::io::Read::read_to_string(request.as_reader(), &mut raw);
         let body: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!({}));
@@ -334,6 +360,7 @@ impl Ingress {
                 "/panel/emit" => self.on_emit(&body),
                 "/panel/ask" => self.on_ask(&body),
                 "/panel/answer" => self.on_answer(&body),
+                "/panel/link" => self.on_link_request(&body, json_body),
                 _ => json!({"error": "unknown endpoint"}),
             }
         };
@@ -342,6 +369,24 @@ impl Ingress {
             .expect("static header");
         let payload = serde_json::to_string(&reply).unwrap_or_else(|_| "{}".into());
         let _ = request.respond(Response::from_string(payload).with_header(json_header));
+    }
+
+    /// A web page can POST to loopback, but only as a "simple" request, which cannot carry a JSON
+    /// content type without a preflight this server never answers. Requiring the header keeps
+    /// links to local processes; anything else gets nothing.
+    fn on_link_request(&self, body: &Value, json_body: bool) -> Value {
+        if !json_body {
+            return json!({"error": "content type must be application/json"});
+        }
+        let url = body["url"].as_str().unwrap_or_default().trim();
+        if !url.starts_with("appgeapanel:") || url.len() > 4096 || url.chars().any(char::is_control) {
+            return json!({"error": "not an appgeapanel link"});
+        }
+        let Some(sink) = self.links.lock().unwrap().clone() else {
+            return json!({"error": "Panel is still starting"});
+        };
+        sink(url.to_string());
+        json!({"ok": true})
     }
 
     /// Claude session hooks -> deterministic panel events.
@@ -368,6 +413,10 @@ impl Ingress {
             return json!({});
         };
         let project = project.as_str();
+        let conversation = body["session_id"].as_str().unwrap_or_default();
+        if !conversation.is_empty() && self.router.lock().unwrap().routes.contains_key(instance) {
+            self.conversations.lock().unwrap().insert(instance.to_string(), conversation.to_string());
+        }
 
         match event {
             "PreToolUse" => {
@@ -959,6 +1008,42 @@ mod tests {
         assert_eq!(steps[0].after, "retry = 3;\n");
         assert_eq!(steps[0].tool, "Edit");
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// Only a JSON POST of an appgeapanel link reaches the shell.
+    #[test]
+    fn a_link_arrives_only_as_json_and_only_for_the_scheme() {
+        let (ingress, _rx) = ingress();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let seen = got.clone();
+        assert!(ingress.on_link_request(&json!({"url": "appgeapanel://home"}), true)["error"].is_string(),
+            "before a handler is set the sender must hear that it failed");
+        ingress.on_link(Arc::new(move |url| seen.lock().unwrap().push(url)));
+        assert_eq!(ingress.on_link_request(&json!({"url": "appgeapanel://history?q=x"}), true)["ok"], true);
+        for (body, json_body) in [
+            (json!({"url": "appgeapanel://home"}), false),
+            (json!({"url": "https://example.com"}), true),
+            (json!({"url": "appgeapanel://home\nopen -a Calculator"}), true),
+        ] {
+            assert!(ingress.on_link_request(&body, json_body)["error"].is_string(), "{body}");
+        }
+        assert_eq!(*got.lock().unwrap(), vec!["appgeapanel://history?q=x".to_string()]);
+    }
+
+    /// History must know which conversation a live terminal holds, so it never resumes it twice.
+    #[test]
+    fn a_hook_names_the_conversation_its_instance_runs() {
+        let (ingress, _rx) = ingress();
+        let hook = |instance: &str, conversation: &str| {
+            ingress.on_hook("Stop", &json!({"instance": instance, "session_id": conversation, "cwd": TAVLA}));
+        };
+        hook("s1", "first");
+        hook("s1", "after-clear");
+        // An instance Panel did not launch is routed by cwd, but holds no seat to record.
+        hook("stranger", "theirs");
+        assert_eq!(ingress.conversations(), HashMap::from([("s1".to_string(), "after-clear".to_string())]));
+        ingress.unregister_agent("s1");
+        assert!(ingress.conversations().is_empty());
     }
 
     /// A hook carries Claude's own session id, never ours — so it is placed by `cwd`.

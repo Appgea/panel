@@ -42,6 +42,10 @@ export type PanelEvent =
 export type Payload = Record<string, unknown>;
 
 /** One app in the portfolio. This is the app's main navigation. */
+/** The main folder's project id: the folder the portfolio lives in, for a terminal that belongs
+ *  to no single project. Wall only, like the manager. Mirrors MAIN_ID in main.rs. */
+export const MAIN_ID = "main-folder";
+
 export type Project = {
   id: string;
   name: string;

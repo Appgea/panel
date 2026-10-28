@@ -19,6 +19,7 @@ import { withViewTransition } from "./motion";
 import { renderView } from "./registry";
 import { str } from "./views/dom";
 import { isLightboxOpen } from "./views/lightbox";
+import { MAIN_ID } from "./types";
 import type {
   ChangeStep,
   PanelModule,
@@ -34,7 +35,7 @@ import type {
   SimStart,
   WorkFile,
 } from "./types";
-import type { Place } from "./deeplink";
+import { parseAppLink, type Place } from "./deeplink";
 import { TerminalDeck } from "./features/terminal";
 import { mountSessionStrip, type SessionStripHandle } from "./features/sessions";
 import { openSkills } from "./features/skills";
@@ -46,11 +47,13 @@ import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
 import type { SupportHandle } from "./features/support";
 import { mountReview } from "./features/review";
+import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import { moduleGet } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
 import {
   EXTENSIONS_EVENT,
+  PREF,
   isRecording,
   mountSettings,
   type SettingsHandle,
@@ -197,6 +200,22 @@ const working = new Set<string>();
 const sessionPhase = new Map<string, "work" | "ask">();
 /** When each session began waiting on you. ⌘⇧A visits the longest wait first. */
 const askSince = new Map<string, number>();
+/**
+ * Agents put to sleep, and what each gave back (null when there was no reading). Asleep is a
+ * kind of exited: no process, the scrollback kept. The difference is that Wake resumes the same
+ * conversation in the same pane, where Restart starts a new one.
+ */
+const asleep = new Map<string, number | null>();
+/** The latest reading per live session, from session_memory. */
+let memory = new Map<string, { bytes: number | null; canSleep: boolean }>();
+/** When a person or the agent last did anything in each session. A session never touched
+ *  counts from launch, so a restored wall is not put to sleep on its first tick. */
+const touched = new Map<string, number>();
+const launchedAt = Date.now();
+/** When a sleep was last refused, per session. Most refusals are an agent with no conversation
+ *  yet, so auto-sleep waits a while before it asks that one again. */
+const refused = new Map<string, number>();
+const RETRY_REFUSED = 15 * 60_000;
 /** The only writer of sessionPhase, so a wait's start time can never outlive the wait. */
 function setPhase(sessionId: string, phase: "work" | "ask" | null): void {
   if (phase !== "ask") askSince.delete(sessionId);
@@ -320,6 +339,9 @@ let supportLoading: Promise<SupportHandle> | null = null;
 let supportActive = false;
 let reviewActive = false;
 let review: ReturnType<typeof mountReview>;
+/** Every agent session, reported or not, read from each agent's own store. */
+let history: HistoryHandle;
+let historyActive = false;
 let terminals: TerminalsHandle;
 /** The workspace screen is up — Runs, or one of the terminal tabs. Every portfolio-level WORK
  *  surface is a tab of this one screen; Home, Settings and a project each replace it. */
@@ -362,9 +384,25 @@ let shutdownPromptOpen = false;
  *  host resolves it against the ops tree. Mirrors CPO_ID in main.rs. */
 const CPO_ID = "appgea";
 
-/** Every project state except the manager's — what the portfolio surfaces iterate. */
+/** Project states that are not in the portfolio. */
+const offPortfolio = (id: string): boolean => id === CPO_ID || id === MAIN_ID;
+
+/** Every project state except the manager's and the main folder's — what the portfolio surfaces iterate. */
 function portfolioStates(): ProjectState[] {
-  return [...states.values()].filter((here) => here.project.id !== CPO_ID);
+  return [...states.values()].filter((here) => !offPortfolio(here.project.id));
+}
+
+/** The main folder can move when the portfolio does: with no `mainFolder` set it is derived. */
+async function refreshMainFolder(): Promise<void> {
+  const main = await invoke<Project>("main_folder_project").catch(() => null);
+  if (!main) return;
+  const known = states.get(MAIN_ID);
+  if (!known) {
+    states.set(MAIN_ID, makeState(main));
+    return;
+  }
+  known.project.path = main.path;
+  known.project.exists = main.exists;
 }
 
 /** The manager's live session, newest first. Null when it is not running. */
@@ -466,8 +504,8 @@ function openPlace(project: string | null, place: Place, alongside: string[] = [
     chat.showCpo();
     return;
   }
-  // The Manager's own folder is not a project: it has no Review queue, Work tab or Git to open.
-  if (!project || project === CPO_ID) return;
+  // The Manager and the main folder are not projects: no Review queue, Work tab or Git to open.
+  if (!project || offPortfolio(project)) return;
   if (place.to === "work") {
     projectCtx(project).openRef(place.line ? `${place.path}:${place.line}` : place.path);
   } else if (place.to === "git") {
@@ -643,6 +681,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropNotebook();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   exitTerminals();
   // Whatever took the glass has handed it back — the project chrome is the screen again. Said
@@ -720,7 +759,7 @@ function showSessions(): void {
     here.activeSession = here.sessions[here.sessions.length - 1].id;
   }
 
-  strip.paint(here.sessions, here.activeSession, exited);
+  strip.paint(here.sessions, here.activeSession, exited, asleep);
   // Empty, the strip would be a bar holding only Skills; the empty state below speaks instead.
   el("terminalEmpty").hidden = here.sessions.length > 0;
   el("sessionStrip").hidden = here.sessions.length === 0;
@@ -756,6 +795,8 @@ async function openSessionFor(
   kind: SessionKind,
   /** Fork here instead of the project root — ⌘T on the wall passes the focused shell's own cwd. */
   cwd?: string,
+  /** Pick a past session of this kind back up (History) instead of starting fresh. */
+  resume?: string,
 ): Promise<Session | null> {
   const here = state(projectId);
   if (!here) {
@@ -770,18 +811,28 @@ async function openSessionFor(
   try {
     lastStartError = "";
     const size = deck.proposeSize();
-    const session = await invoke<Session>("start_session", {
-      project: projectId,
-      kind,
-      cols: size.cols,
-      rows: size.rows,
-      cwd: cwd ?? null,
-    });
+    const session = resume
+      ? await invoke<Session>("resume_history", {
+        project: projectId,
+        agent: kind,
+        conversation: resume,
+        cwd: cwd ?? here.project.path,
+        cols: size.cols,
+        rows: size.rows,
+      })
+      : await invoke<Session>("start_session", {
+        project: projectId,
+        kind,
+        cols: size.cols,
+        rows: size.rows,
+        cwd: cwd ?? null,
+      });
     // The PTY now exists on the Rust side. From here on, a throw must reap it — otherwise a
     // failure building the xterm pane leaves a live, invisible process behind.
     started = session;
     here.sessions.push(session);
     here.activeSession = session.id;
+    touched.set(session.id, Date.now());
     touchProject(projectId); // Feeds the Recent order only — the rail never reorders itself.
     deck.add(session.id, session.terminal_id);
     if (isAgentKind(kind)) setStatus(projectId, "ready", here.project.name);
@@ -807,6 +858,7 @@ async function openSessionFor(
 /** An ended session, started again: same project, same kind. The ended one goes first, so the
  *  new terminal takes its seat rather than queuing behind a corpse. */
 async function restartSession(sessionId: string): Promise<void> {
+  if (asleep.has(sessionId)) return wakeSession(sessionId);
   const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
   const session = owner?.sessions.find((s) => s.id === sessionId);
   if (!owner || !session || !exited.has(sessionId)) return;
@@ -821,6 +873,104 @@ async function restartSession(sessionId: string): Promise<void> {
   }
   // On the wall the new tile appears in place; anywhere else, show it.
   if (!terminalsActive) jumpToSession(next.project, next.id);
+}
+
+/* ------------------------------------------------------------------ sleep
+ * Nothing is torn down to look elsewhere, so by evening the wall is a pile of agents that all
+ * still run, each half a gigabyte or more with its MCP servers. Sleep ends an agent's process
+ * and keeps its pane. Wake resumes the same conversation there. main.rs has the long version. */
+
+/** The terminal the keyboard is in, if the window has it. Never put to sleep under your hands. */
+function typingIn(): string | null {
+  if (!document.hasFocus()) return null;
+  if (terminalsActive) return terminals?.focusedSession() ?? null;
+  return active && !offProject() ? (state(active)?.activeSession ?? null) : null;
+}
+
+/** Agents that could sleep now and have been left alone for at least `quietFor` ms. Working,
+ *  waiting on you, or under the caret: never. */
+function quietAgents(quietFor: number): string[] {
+  const now = Date.now();
+  const here = typingIn();
+  const out: string[] = [];
+  for (const owner of states.values()) {
+    for (const { id } of owner.sessions) {
+      if (id === here || exited.has(id) || closing.has(id) || working.has(id) || sessionPhase.has(id)) continue;
+      if (!memory.get(id)?.canSleep) continue;
+      if (now - (touched.get(id) ?? launchedAt) < quietFor) continue;
+      if (now - (refused.get(id) ?? 0) < RETRY_REFUSED) continue;
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+/** Read what every live session holds. One `ps` on the Rust side, so cheap enough to poll. */
+async function refreshMemory(): Promise<void> {
+  const read = await invoke<Record<string, { bytes: number | null; canSleep: boolean }>>("session_memory")
+    .catch(() => null);
+  if (!read) return;
+  memory = new Map(Object.entries(read));
+  terminals?.paintMemory();
+}
+
+/** `asked`: you pressed it, so a refusal is said out loud. Auto-sleep only notes it. */
+async function sleepSessions(ids: string[], asked: boolean): Promise<void> {
+  const awake: string[] = [];
+  await Promise.all(ids.map(async (id) => {
+    if (asleep.has(id) || exited.has(id) || closing.has(id)) return;
+    // Filed before the call: the PTY's closing chunk can beat the reply, and the pane must
+    // already know to say "asleep" rather than "ended".
+    asleep.set(id, memory.get(id)?.bytes ?? null);
+    try {
+      await invoke("sleep_session", { session: id });
+      refused.delete(id);
+      deck.ended(id);
+    } catch (error) {
+      asleep.delete(id);
+      refused.set(id, Date.now());
+      awake.push(`${sessionById(id)?.title ?? "agent"}: ${String(error)}`);
+    }
+  }));
+  void refreshMemory();
+  if (!awake.length) return;
+  if (asked) await alertDialog(`${awake.length === 1 ? "It stayed" : `${awake.length} stayed`} awake.\n\n${awake.join("\n\n")}`);
+  else console.warn("[panel] left awake", awake);
+}
+
+/** The setting's answer to "how long is too long". Checked once a minute. */
+function sleepUnused(): void {
+  const minutes = PREF.sleepAfterMinutes();
+  if (!minutes) return;
+  const due = quietAgents(minutes * 60_000);
+  if (due.length) void sleepSessions(due, false);
+}
+
+/** Fork a sleeping agent again, on its own conversation, in its own pane. */
+async function wakeSession(sessionId: string): Promise<void> {
+  const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
+  const session = owner?.sessions.find((s) => s.id === sessionId);
+  if (!owner || !session || !asleep.has(sessionId)) return;
+  const size = deck.proposeSize();
+  let woke: Session;
+  try {
+    woke = await invoke<Session>("wake_session", { session: sessionId, cols: size.cols, rows: size.rows });
+  } catch (error) {
+    await alertDialog(`${session.title} did not wake.\n\n${String(error)}`);
+    return;
+  }
+  asleep.delete(sessionId);
+  exited.delete(sessionId);
+  touched.set(sessionId, Date.now());
+  // Same id, new PTY. Everything keyed by the id (its tab, its name, its seat) stays put.
+  owner.sessions = owner.sessions.map((s) => (s.id === sessionId ? woke : s));
+  deck.wake(sessionId, woke.terminal_id);
+  owner.running = true;
+  setStatus(owner.project.id, "ready", owner.project.name);
+  if (active === owner.project.id) showSessions();
+  paintProjects();
+  void refreshProject(owner.project.id);
+  void refreshMemory();
 }
 
 /** Who a review's feedback goes to: the agent you were last in on that project, else its newest
@@ -898,6 +1048,10 @@ async function closeSession(sessionId: string): Promise<void> {
     await invoke("stop_session", { session: sessionId }).catch(() => undefined);
     here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
     exited.delete(sessionId);
+    asleep.delete(sessionId);
+    memory.delete(sessionId);
+    touched.delete(sessionId);
+    refused.delete(sessionId);
     working.delete(sessionId);
     setPhase(sessionId, null);
     here.workBySession.delete(sessionId);
@@ -989,6 +1143,7 @@ function showSettings(): void {
   dropNotebook();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   settingsActive = true;
   mainZone().hidden = true;
@@ -1032,6 +1187,7 @@ function showTerminals(at?: number): void {
   dropNotebook();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   if (terminalsActive) {
     if (at !== undefined) terminals.select(at);
@@ -1056,6 +1212,7 @@ function showHome(): void {
   dropNotebook();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   // The workspace comes down properly — the deck takes its panes back before Home takes the glass.
   if (terminalsActive) exitTerminals();
@@ -1088,6 +1245,7 @@ function showNotebook(): void {
   dropHome();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   if (notebookActive) return;
   notebookActive = true;
@@ -1123,6 +1281,7 @@ function dropNotebook(): void {
 
 /** Project desk reads release evidence and project memory directly. */
 function showSprint(): void {
+  dropHistory();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1164,6 +1323,7 @@ function dropSprint(): void {
  *  support form, but the person reading them is one person, so this is one list and not a tab
  *  that appears eleven times. */
 function showSupport(): void {
+  dropHistory();
   dropReview();
   dropSettings();
   dropChat();
@@ -1208,6 +1368,7 @@ function dropSupport(): void {
 function showReview(projectId?: string): void {
   if (projectId && review.openProject(projectId)) return;
   dropSupport();
+  dropHistory();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1228,6 +1389,104 @@ function dropReview(): void {
   review.clear();
   reviewActive = false;
   el("reviewScreen").hidden = true;
+}
+
+/** History: every agent session across the portfolio, reported or not. A screen like Support —
+ *  one list for one person — opened from its row, from Home, or from an appgeapanel:// link. */
+function showHistory(focus?: { query?: string; session?: string }): void {
+  dropSupport();
+  dropReview();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  historyActive = true;
+  mainZone().hidden = true;
+  history.open(focus);
+  paintNav();
+  paintProjects();
+}
+
+function dropHistory(): void {
+  if (!historyActive) return;
+  historyActive = false;
+  history.clear();
+}
+
+function historyProjectName(id: string): string {
+  return state(id)?.project.name ?? id;
+}
+
+/** The nav badge and Home's strip: sessions that ended since you last opened History. One read
+ *  of the transcripts, which after the first is only the bytes added since. */
+function refreshHistorySignals(): void {
+  void fetchHistory().then((data) => {
+    const fresh = sinceSeen(data);
+    const badge = el("historyBadge");
+    badge.textContent = fresh.length > 99 ? "99+" : String(fresh.length);
+    badge.hidden = fresh.length === 0;
+    home.away(fresh.map((session) => ({
+      id: session.id,
+      agent: session.agent,
+      projectName: historyProjectName(session.project),
+      title: session.title,
+      lastText: session.lastText,
+      at: Date.parse(session.endedAt),
+    })));
+  }).catch((error: unknown) => console.warn("[panel] history unavailable", error));
+}
+
+/** Resume from History. Same seat bookkeeping as any new terminal; Rust refuses a conversation a
+ *  live terminal already holds. */
+async function resumeConversation(session: HistorySession): Promise<string> {
+  // History only offers Resume for agents Panel can run, so the agent is an engine kind.
+  const started = await openSessionFor(session.project, session.agent as SessionKind, session.cwd, session.id);
+  if (!started) throw new Error(lastStartError || "The conversation could not resume.");
+  jumpToSession(started.project, started.id);
+  return started.id;
+}
+
+/** A file History lists is relative to the folder the session ran in, which may sit below the
+ *  project root. Work wants it relative to the root. */
+function openHistoryFile(projectId: string, cwd: string, path: string): void {
+  const root = state(projectId)?.project.path;
+  const absolute = path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) ? path : `${cwd}/${path}`;
+  const relative = root && absolute.startsWith(`${root}/`) ? absolute.slice(root.length + 1) : absolute;
+  openPlace(projectId, { to: "work", path: relative });
+}
+
+/** An appgeapanel:// link, from outside Panel. Unknown projects and malformed links do nothing. */
+function followAppLink(url: string): void {
+  const link = parseAppLink(url);
+  if (!link) {
+    console.warn("[panel] ignored link", url);
+    return;
+  }
+  switch (link.to) {
+    case "home":
+      showHome();
+      return;
+    case "review":
+      showReview();
+      return;
+    case "manager":
+      chat.showCpo();
+      return;
+    case "history":
+      showHistory({ query: link.query, session: link.session });
+      return;
+    case "project":
+      // The Manager and the main folder have no project page for a link to open.
+      if (!state(link.project) || offPortfolio(link.project)) return;
+      if (link.place) openPlace(link.project, link.place);
+      else void select(link.project);
+  }
+}
+
+function takeAppLinks(): void {
+  void invoke<string[]>("take_links").then((urls) => urls.forEach(followAppLink)).catch(() => undefined);
 }
 
 /** The count of messages nobody has read yet. Same badge language as Inbox. */
@@ -1262,6 +1521,7 @@ function showChat(): void {
   dropNotebook();
   dropSprint();
   dropSupport();
+  dropHistory();
   dropReview();
   chatActive = true;
   mainZone().hidden = true;
@@ -1327,7 +1587,8 @@ const offProject = (): boolean =>
   notebookActive ||
   sprintActive ||
   supportActive ||
-  reviewActive;
+  reviewActive ||
+  historyActive;
 
 /** Navigation and run actions share the project selected on the visible surface. */
 function focusedProjectId(): string | null {
@@ -1587,6 +1848,12 @@ function jumpToSession(projectId: string, sessionId: string): void {
     chat.showCpo();
     return;
   }
+  // The main folder has no project page: its terminals live on the wall.
+  if (projectId === MAIN_ID) {
+    showTerminals();
+    terminals.reveal(sessionId);
+    return;
+  }
   void select(projectId, "terminals").then(() => {
     if (active === projectId && projectTerminalVisible()) deck.focus();
   });
@@ -1602,7 +1869,8 @@ function paintNav(): void {
   el("workspaceNav").classList.toggle("is-active", terminalsActive);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
   // and only the row you are actually on carries the accent.
-  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive);
+  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || historyActive);
+  el("historyButton").classList.toggle("is-on", historyActive);
   el("reviewButton").classList.toggle("is-on", reviewActive);
   el("planNav").classList.toggle("is-active", notebookActive || sprintActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
@@ -3304,6 +3572,7 @@ function onEvent(event: ProjectEvent): void {
       break;
 
     case "agent_status":
+      touched.set(event.session_id, Date.now());
       setStatus(id, event.status, event.detail);
       // "waiting"/"asking" is still mid-turn — the agent has not handed control back yet.
       if (/^(idle|done|complete|error|failed)$/.test(event.status)) {
@@ -3477,6 +3746,7 @@ function onEvent(event: ProjectEvent): void {
       break;
 
     case "turn_finished":
+      touched.set(event.session_id, Date.now());
       working.delete(event.session_id);
       setPhase(event.session_id, null);
       setStatus(id, "idle", event.summary);
@@ -3516,7 +3786,10 @@ function onEvent(event: ProjectEvent): void {
  * conversation is there; a build that was running is not. The banner in each pane says so.
  */
 async function restoreWall(): Promise<void> {
-  type RestoredWall = { savedAt: number; sessions: Array<{ session: Session; screen: string }> };
+  type RestoredWall = {
+    savedAt: number;
+    sessions: Array<{ session: Session; screen: string; asleep: boolean }>;
+  };
   const wall = await invoke<RestoredWall>("restore_wall", { cols: 120, rows: 34 }).catch(
     (error) => {
       console.warn("[panel] the wall could not be restored", error);
@@ -3525,7 +3798,7 @@ async function restoreWall(): Promise<void> {
   );
   if (!wall.sessions.length) return;
   const savedAt = wall.savedAt;
-  for (const { session, screen } of wall.sessions) {
+  for (const { session, screen, asleep: slept } of wall.sessions) {
     const here = state(session.project);
     // The project was removed from config while Panel was closed. Rust forked the terminal
     // before it could know that, so close it rather than leaking a PTY with no owner.
@@ -3535,8 +3808,13 @@ async function restoreWall(): Promise<void> {
     }
     here.sessions.push(session);
     here.activeSession ??= session.id;
+    // Asleep before the pane exists, so it opens on its Wake bar and never counts as running.
+    if (slept) {
+      asleep.set(session.id, null);
+      exited.add(session.id);
+    }
     here.running = here.sessions.some((s) => isAgentKind(s.kind) && !exited.has(s.id));
-    deck.add(session.id, session.terminal_id, { screen, savedAt });
+    deck.add(session.id, session.terminal_id, { screen, savedAt, asleep: slept });
   }
 }
 
@@ -3580,6 +3858,7 @@ async function boot(): Promise<void> {
 
   deck = new TerminalDeck(el("terminalHost"), {
     onInput(sessionId, data) {
+      touched.set(sessionId, Date.now());
       // A permission prompt is answered with Enter, Esc, or its number key. Arrows only move the
       // highlight, and focus reports are the terminal talking, not you.
       if (!/^(\r|\x1b|[0-9])$/.test(data)) return;
@@ -3612,18 +3891,20 @@ async function boot(): Promise<void> {
       paintProjects();
     },
     onRestart(sessionId) {
-      void restartSession(sessionId);
+      return restartSession(sessionId);
     },
     canRestart(sessionId) {
       const kind = sessionById(sessionId)?.kind;
       return Boolean(kind) && kind !== "sim" && kind !== "task";
+    },
+    asleep(sessionId) {
+      return asleep.has(sessionId) ? { freed: asleep.get(sessionId) ?? null } : null;
     },
   });
 
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
     projectPath: (id) => state(id)?.project.path ?? null,
-    openProject: (id) => void select(id),
     agentName: (id) => reviewAgent(id)?.title ?? null,
     async send(id, text) {
       const target = reviewAgent(id);
@@ -3667,7 +3948,19 @@ async function boot(): Promise<void> {
     // Home lists what was said; Chat is where it is read and answered. Clicking a line opens
     // Chat on that post — Esc brings Home straight back.
     openPost: (postId) => chat.reveal(postId),
+    openHistory: (sessionId) => showHistory(sessionId ? { session: sessionId } : undefined),
     installed: moduleInstalled,
+  });
+
+  history = mountHistory(el("historyScreen"), {
+    projectName: historyProjectName,
+    openTerminal: (panelSession) => {
+      const session = sessionById(panelSession);
+      if (session) jumpToSession(session.project, session.id);
+    },
+    resume: resumeConversation,
+    openFile: (session, path) => openHistoryFile(session.project, session.cwd, path),
+    seen: refreshHistorySignals,
   });
 
   chat = mountChat(el("chatRail"), {
@@ -3827,6 +4120,10 @@ async function boot(): Promise<void> {
     close: (_projectId, sessionId) => void closeSession(sessionId),
     isExited: (sessionId) => exited.has(sessionId),
     phaseOf: (sessionId) => sessionPhase.get(sessionId) ?? "idle",
+    memoryOf: (sessionId) => memory.get(sessionId) ?? null,
+    isAsleep: (sessionId) => asleep.has(sessionId),
+    sleep: (sessionIds) => void sleepSessions(sessionIds, true),
+    sleepable: () => quietAgents(0),
     runApp: (projectId) => void runner.rerunProject(projectId),
     runView: (projectId) => runner.projectRun(projectId),
     runTargetPicker: (projectId) => runner.targetPicker(projectId),
@@ -3862,6 +4159,7 @@ async function boot(): Promise<void> {
   el("sprintButton").addEventListener("click", () => showSprint());
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
+  el("historyButton").addEventListener("click", () => showHistory());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.
   el("supportButton").hidden = true;
@@ -4220,6 +4518,7 @@ async function boot(): Promise<void> {
   // No ops tree means no manager; the pane then says why when you try to start it.
   const manager = await invoke<Project>("manager_project").catch(() => null);
   if (manager && !states.has(CPO_ID)) states.set(CPO_ID, makeState({ ...manager, name: "Manager" }));
+  await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
   paintProjects();
@@ -4239,6 +4538,17 @@ async function boot(): Promise<void> {
   // The plan is written by agents in their own terminals. The screen follows the file rather
   // than waiting to be told, so an agent's plan lands without anyone pressing refresh.
   await listen("panel-sprints-changed", () => sprint?.sync());
+  // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.
+  await listen("panel-link", takeAppLinks);
+  takeAppLinks();
+  refreshHistorySignals();
+  // Transcripts grow without telling anyone; a rescan after the first is milliseconds.
+  window.setInterval(refreshHistorySignals, 3 * 60_000);
+  // Memory moves without an event to say so. Read it often enough for the wall to stay honest,
+  // and look for agents left unused once a minute.
+  void refreshMemory();
+  window.setInterval(() => void refreshMemory(), 20_000);
+  window.setInterval(sleepUnused, 60_000);
 
   // Every module is a segment of the same rail now, so every one is wired the same way. Product Spine
   // used to be special-cased here as a toggle — which is exactly why it never read as a module.
@@ -4622,8 +4932,9 @@ async function refreshPortfolio(): Promise<void> {
   const live = new Set(list.map((project) => project.id));
   for (const id of [...states.keys()]) {
     // The open project is never yanked out from under the human, even if the file dropped it.
-    if (!live.has(id) && id !== active) states.delete(id);
+    if (!live.has(id) && id !== active && !offPortfolio(id)) states.delete(id);
   }
+  await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   paintProjects();
 }

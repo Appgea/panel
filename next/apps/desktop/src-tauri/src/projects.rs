@@ -655,6 +655,39 @@ pub fn load() -> Vec<Project> {
         .unwrap_or_default()
 }
 
+/// The folder the portfolio lives in, for a terminal that belongs to no one project.
+///
+/// `mainFolder` in `config.json` wins. Without it, the deepest folder every project sits under.
+/// A portfolio spread across the whole disk would make that `/`, which is no one's main folder,
+/// so a root-level answer counts as none.
+pub fn main_folder() -> Option<PathBuf> {
+    let raw = std::fs::read_to_string(config_path()).ok()?;
+    let config = serde_json::from_str::<Value>(&raw).ok()?;
+    if let Some(set) = config["mainFolder"].as_str().map(str::trim).filter(|s| !s.is_empty()) {
+        return Some(PathBuf::from(set));
+    }
+    let paths: Vec<PathBuf> = config["projects"]
+        .as_array()?
+        .iter()
+        .filter_map(project_from)
+        .filter(|project| project.role == ProjectRole::Leaf)
+        .map(|project| project.path)
+        .collect();
+    common_parent(&paths).filter(|path| path.components().count() > 1)
+}
+
+/// The deepest folder that holds every path. One project's main folder is the folder it sits in.
+fn common_parent(paths: &[PathBuf]) -> Option<PathBuf> {
+    let (first, rest) = paths.split_first()?;
+    let mut shared: PathBuf = first.parent()?.to_path_buf();
+    for path in rest {
+        while !path.starts_with(&shared) {
+            shared = shared.parent()?.to_path_buf();
+        }
+    }
+    Some(shared)
+}
+
 fn project_from(entry: &Value) -> Option<Project> {
     let path = PathBuf::from(entry["path"].as_str()?);
     let fallback_id = path.file_name()?.to_string_lossy().into_owned();
@@ -1709,6 +1742,22 @@ pub(crate) fn git(path: &Path, args: &[&str]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_folder_is_the_deepest_shared_parent() {
+        let paths = |list: &[&str]| list.iter().map(PathBuf::from).collect::<Vec<_>>();
+        assert_eq!(
+            common_parent(&paths(&["/u/projects/apps/a", "/u/projects/apps/b", "/u/projects/c"])),
+            Some(PathBuf::from("/u/projects"))
+        );
+        // Sharing a prefix of a NAME is not sharing a folder.
+        assert_eq!(
+            common_parent(&paths(&["/u/app", "/u/apple/x"])),
+            Some(PathBuf::from("/u"))
+        );
+        assert_eq!(common_parent(&paths(&["/u/projects/a"])), Some(PathBuf::from("/u/projects")));
+        assert_eq!(common_parent(&[]), None);
+    }
 
     fn all_installed() -> HashSet<String> {
         [

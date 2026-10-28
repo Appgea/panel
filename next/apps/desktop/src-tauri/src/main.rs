@@ -10,6 +10,7 @@
 mod android;
 mod code_nav;
 mod debug;
+mod history;
 mod launch;
 mod leases;
 mod made;
@@ -39,6 +40,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_notification::NotificationExt;
 
@@ -77,6 +79,14 @@ struct Session {
     /// nothing to say to the panel.
     #[serde(skip)]
     instance: String,
+    /// When the PTY was forked, in ms. An agent's conversation that has not moved since is not
+    /// this terminal's (see history::live_conversation).
+    #[serde(skip)]
+    launched_ms: i64,
+    /// The conversation this terminal was started on, when Panel chose it: a wake, an exact
+    /// restore, a resume from History.
+    #[serde(skip)]
+    resumed: Option<String>,
 }
 
 struct DesktopState {
@@ -87,6 +97,10 @@ struct DesktopState {
     /// is the whole point of a portfolio panel, so nothing is ever torn down just to look
     /// elsewhere. Keyed by session, NOT by project — one project holds many.
     sessions: Mutex<HashMap<String, Session>>,
+    /// session id -> an agent put to sleep. Its process is gone and its conversation is not, so
+    /// waking it is a resume in the same pane. Kept apart from `sessions` on purpose: everything
+    /// that reads `sessions` may assume a live PTY behind each entry.
+    sleeping: Mutex<HashMap<String, Sleeper>>,
     /// Live simulator runs, session id -> what device it holds and when it was last active. An Arc
     /// so the PTY reader thread (which stamps activity on reload and cleans up on exit) shares it
     /// with the command layer (which reads it to enforce the booted-sim cap).
@@ -100,6 +114,14 @@ struct DesktopState {
     shutdown_approved: AtomicBool,
     /// Projects with a session open, watched for the media their agents make.
     made: made::MadeWatch,
+}
+
+/// An agent asleep: what it was, which conversation wakes it, and the screen it last showed.
+#[derive(Clone)]
+struct Sleeper {
+    session: Session,
+    conversation: String,
+    screen: String,
 }
 
 /// The manager's identity.
@@ -129,6 +151,32 @@ fn cpo_root() -> Result<Project, String> {
         parent_id: String::new(),
         extension_id: String::new(),
     })
+}
+
+/// The main folder's identity: the folder the portfolio lives in, for a terminal that belongs to
+/// no single project. Like the manager it borrows a project id rather than a second addressing
+/// scheme, and like the manager it is not in the portfolio.
+const MAIN_ID: &str = "main-folder";
+
+fn main_root() -> Result<Project, String> {
+    let path = projects::main_folder().ok_or("no main folder — set mainFolder in config.json")?;
+    Ok(Project {
+        id: MAIN_ID.to_string(),
+        name: "Main folder".to_string(),
+        exists: path.is_dir(),
+        path,
+        group: String::new(),
+        role: ProjectRole::Leaf,
+        project_type: "generic".into(),
+        parent_id: String::new(),
+        extension_id: String::new(),
+    })
+}
+
+/// Disk work, so off the main thread: it reads config.json.
+#[tauri::command]
+async fn main_folder_project() -> Result<Project, String> {
+    off_main(main_root).await
 }
 
 /// The live preprompt, and the shipped one it resets to.
@@ -646,6 +694,9 @@ fn find_project(id: &str) -> Result<Project, String> {
     if id == CPO_ID {
         return cpo_root();
     }
+    if id == MAIN_ID {
+        return main_root();
+    }
     all_projects()
         .into_iter()
         .find(|project| project.id == id)
@@ -1131,6 +1182,7 @@ async fn skills_session_restart(app: AppHandle, state: State<'_, DesktopState>,
         cols, rows, Some(found.cwd.to_string_lossy().into_owned()), Reopen {
             id: Some(session.clone()), title: Some(found.title.clone()),
             resume: vec![if found.kind == "claude" { "--resume" } else { "resume" }.into()],
+            conversation: None,
         }).await;
     if result.is_err() {
         // Keep the ended seat addressable so the user can retry the launch.
@@ -1213,6 +1265,146 @@ async fn start_session(
     .await
 }
 
+/* ------------------------------------------------------------------ history
+
+What every agent session did, read from each agent's own store (history/). Reports only
+cover what an agent chose to file; this covers the rest, including sessions started outside Panel
+in a project folder. */
+
+/// Every project folder, collections and the manager's ops tree included, for sorting sessions by
+/// where they ran.
+fn history_roots() -> Vec<(String, PathBuf)> {
+    let mut roots: Vec<(String, PathBuf)> = all_projects()
+        .into_iter()
+        .map(|project| (project.id, project.path))
+        .collect();
+    if let Ok(manager) = cpo_root() {
+        roots.push((manager.id, manager.path));
+    }
+    roots
+}
+
+#[derive(serde::Serialize)]
+struct SessionHistory {
+    #[serde(flatten)]
+    history: history::History,
+    /// Claude conversation id -> the live Panel session holding it. Only Claude reports its id
+    /// back through hooks, so other agents' sessions are never marked open. Opening one of these jumps to
+    /// its terminal; resuming it would put the same conversation in two terminals.
+    open: HashMap<String, String>,
+}
+
+/// Reads gigabytes the first time and only new bytes after, so it runs off the window thread.
+#[tauri::command]
+async fn session_history(state: State<'_, DesktopState>, days: Option<u64>) -> Result<SessionHistory, String> {
+    let days = days.unwrap_or(history::DAYS).clamp(1, 90);
+    let mut open: HashMap<String, String> = state
+        .ingress
+        .conversations()
+        .into_iter()
+        .map(|(instance, conversation)| (conversation, instance))
+        .collect();
+    // A sleeping terminal still holds its conversation: opening it goes to that pane to wake it.
+    for (id, sleeper) in state.sleeping.lock().unwrap().iter() {
+        open.insert(sleeper.conversation.clone(), id.clone());
+    }
+    let history = off_main(move || Ok(history::history(days, &history_roots()))).await?;
+    Ok(SessionHistory { history, open })
+}
+
+#[tauri::command]
+async fn search_history(query: String, days: Option<u64>) -> Result<Vec<history::Hit>, String> {
+    let days = days.unwrap_or(history::DAYS).clamp(1, 90);
+    // More than the screen shows: it filters by agent and hides headless runs after this.
+    off_main(move || Ok(history::search(&query, days, &history_roots(), 200))).await
+}
+
+/// Pick a past session back up in a new terminal, in the folder it ran in. Agents file sessions
+/// by folder, so another folder would not find it. Which flag does it is `history::resume_args`.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn resume_history(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    project: String,
+    agent: String,
+    conversation: String,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> Result<Session, String> {
+    let Some((kind, resume)) = history::resume_args(&agent, &conversation) else {
+        return Err(format!("Panel cannot resume a {agent} session."));
+    };
+    if let Some(open) = state.ingress.conversations().into_iter().find(|(_, held)| *held == conversation) {
+        return Err(format!("That conversation is already open in terminal {}.", open.0));
+    }
+    if let Some((id, _)) = state.sleeping.lock().unwrap().iter().find(|(_, sleeper)| sleeper.conversation == conversation) {
+        return Err(format!("That conversation is asleep in terminal {id}. Wake it there."));
+    }
+    if !Path::new(&cwd).is_dir() {
+        return Err(format!("The folder it ran in is gone: {cwd}"));
+    }
+    open_session(app, state, project, kind.into(), cols, rows, Some(cwd), Reopen {
+        resume,
+        conversation: Some(conversation),
+        ..Reopen::default()
+    })
+    .await
+}
+
+/* ------------------------------------------------------------------ appgeapanel:// links
+
+A link from outside — a notification, a note, Shortcuts, Raycast, a chat message — opens Panel on
+a place. It reaches this process one of two ways:
+
+- macOS: a small handler app owns the scheme (launcher/make-link-handler.sh) and POSTs the link to
+  whichever Panel is running, over the ingress (`/panel/link`). A dev build is not an app bundle
+  and could never own a scheme itself; this way dev and installed get links the same way. With no
+  Panel running the handler appends the link to `pending-links` and starts the installed app.
+- Windows and Linux: the deep-link plugin, with single-instance forwarding a second launch.
+
+Either way it waits here until the UI takes it, so a link that launched Panel is not lost while
+the window is still loading. The UI decides what the link means (ui/src/deeplink.ts). */
+
+static PENDING_LINKS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+const LINK_EVENT: &str = "panel-link";
+
+fn queue_links(app: &AppHandle, urls: impl IntoIterator<Item = String>) {
+    let urls: Vec<String> = urls
+        .into_iter()
+        .filter(|url| url.starts_with("appgeapanel:"))
+        .collect();
+    if urls.is_empty() {
+        return;
+    }
+    PENDING_LINKS.lock().unwrap().extend(urls);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    let _ = app.emit(LINK_EVENT, ());
+}
+
+/// Links the macOS handler kept while no Panel was running. Read once and removed.
+fn pending_links_file() -> PathBuf {
+    paths::user_root().join("pending-links")
+}
+
+/// One small file read, at most once per launch in practice. Sync like the in-memory queue.
+#[tauri::command]
+fn take_links() -> Vec<String> {
+    let mut links = std::mem::take(&mut *PENDING_LINKS.lock().unwrap());
+    let file = pending_links_file();
+    if let Ok(text) = std::fs::read_to_string(&file) {
+        let _ = std::fs::remove_file(&file);
+        let kept = text.lines().map(str::trim).filter(|url| url.starts_with("appgeapanel:"));
+        links.splice(0..0, kept.map(String::from));
+    }
+    links
+}
+
 /// What a RESTORED session needs that a fresh one does not.
 ///
 /// A restore is the same launch with two things pinned. The id, because everything the UI
@@ -1228,6 +1420,8 @@ struct Reopen {
     resume: Vec<String>,
     /// Use this title rather than numbering a fresh seat.
     title: Option<String>,
+    /// The conversation `resume` reopens, when it names one.
+    conversation: Option<String>,
 }
 
 /// The executable a kind execs, plus fixed args. Kinds name the binary directly — except the
@@ -1376,13 +1570,16 @@ async fn open_session(
         terminal_id,
         cwd: start_in,
         instance,
+        launched_ms: history::now_ms(),
+        resumed: reopen.conversation,
     };
     state
         .sessions
         .lock()
         .unwrap()
         .insert(session.id.clone(), session.clone());
-    if session.project != CPO_ID {
+    // The main folder holds every project: watching it would watch the whole portfolio twice.
+    if session.project != CPO_ID && session.project != MAIN_ID {
         state.made.watch(&app, &session.project, &found.path);
     }
     if let Err(error) = skill_sessions::mark_applied(&session.id) {
@@ -1419,6 +1616,14 @@ struct SavedSession {
     cwd: PathBuf,
     /// Raw PTY tail, escape sequences and all — see TerminalManager::screen.
     screen: String,
+    /// The conversation it held, when Panel knows it. A restore resumes exactly that one rather
+    /// than the folder's latest, which may belong to a sleeping neighbour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    conversation: Option<String>,
+    /// It was asleep, and it comes back asleep: no process until someone wakes it. Otherwise a
+    /// restart would fork every agent that was put to sleep to free memory.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    asleep: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -1434,6 +1639,8 @@ struct SavedWall {
 struct RestoredSession {
     session: Session,
     screen: String,
+    /// No process behind it. The UI shows the screen with a Wake button instead of a prompt.
+    asleep: bool,
 }
 
 /// Everything the UI needs to put the wall back. `saved_at` rides along because the banner each
@@ -1481,14 +1688,26 @@ fn save_wall(app: &AppHandle, state: &DesktopState) {
         return;
     };
     let sessions: Vec<Session> = state.sessions.lock().unwrap().values().cloned().collect();
-    let saved: Vec<SavedSession> = {
+    let screens: Vec<(Session, String)> = {
         let terminals = state.terminals.lock().unwrap();
         sessions
             .into_iter()
             .filter(|session| session.kind != "sim" && session.kind != "task")
             .filter(|session| session.cwd.is_dir())
-            .map(|session| SavedSession {
-                screen: terminals.screen(&session.terminal_id).unwrap_or_default(),
+            .map(|session| {
+                let screen = terminals.screen(&session.terminal_id).unwrap_or_default();
+                (session, screen)
+            })
+            .collect()
+    };
+    // Outside the lock: for most agents this reads their store, and every keystroke waits on it.
+    let saved: Vec<SavedSession> = {
+        screens
+            .into_iter()
+            .map(|(session, screen)| SavedSession {
+                screen,
+                conversation: sleep_conversation(state, &session),
+                asleep: false,
                 id: session.id,
                 project: session.project,
                 kind: session.kind,
@@ -1497,6 +1716,22 @@ fn save_wall(app: &AppHandle, state: &DesktopState) {
             })
             .collect()
     };
+    let sleepers: Vec<Sleeper> = state.sleeping.lock().unwrap().values().cloned().collect();
+    let saved: Vec<SavedSession> = saved
+        .into_iter()
+        .chain(sleepers.into_iter().filter(|sleeper| sleeper.session.cwd.is_dir()).map(|sleeper| {
+            SavedSession {
+                screen: sleeper.screen,
+                conversation: Some(sleeper.conversation),
+                asleep: true,
+                id: sleeper.session.id,
+                project: sleeper.session.project,
+                kind: sleeper.session.kind,
+                title: sleeper.session.title,
+                cwd: sleeper.session.cwd,
+            }
+        }))
+        .collect();
     let wall = SavedWall {
         saved_at: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1555,20 +1790,69 @@ async fn restore_wall(
     // `claude --continue` resumes the most recent conversation IN A FOLDER. Two claudes on one
     // folder would therefore both resume the same one — the same transcript open twice, each
     // unaware of the other. So the flag goes to the first of each (kind, cwd) only; the rest
-    // come back as fresh prompts in the right place, which is honest.
-    let mut resumed: HashSet<(String, PathBuf)> = HashSet::new();
+    // come back as fresh prompts in the right place, which is honest. A session that knows its
+    // conversation, awake or asleep, holds its folder too: that folder's latest may be its own.
+    let mut resumed: HashSet<(String, PathBuf)> = wall
+        .sessions
+        .iter()
+        .filter(|saved| {
+            saved
+                .conversation
+                .as_deref()
+                .is_some_and(|conversation| resume_into(&saved.kind, conversation).is_some())
+        })
+        .map(|saved| (saved.kind.clone(), saved.cwd.clone()))
+        .collect();
     let mut out = Vec::new();
     for saved in wall.sessions {
+        let exact = saved
+            .conversation
+            .clone()
+            .and_then(|conversation| Some((resume_into(&saved.kind, &conversation)?, conversation)));
+        if saved.asleep {
+            // Back as it left: filed to wake, nothing forked. One whose conversation cannot be
+            // resumed any more has nothing to wake into, and is dropped.
+            if let Some((_, conversation)) = exact {
+                let session = Session {
+                    id: saved.id.clone(),
+                    project: saved.project,
+                    kind: saved.kind,
+                    title: saved.title,
+                    // No PTY has this id, so no output ever reaches the pane until it wakes.
+                    terminal_id: uuid_v4(),
+                    cwd: saved.cwd,
+                    instance: saved.id,
+                    launched_ms: history::now_ms(),
+                    resumed: Some(conversation.clone()),
+                };
+                state.sleeping.lock().unwrap().insert(
+                    session.id.clone(),
+                    Sleeper {
+                        session: session.clone(),
+                        conversation,
+                        screen: saved.screen.clone(),
+                    },
+                );
+                out.push(RestoredSession {
+                    session,
+                    screen: saved.screen,
+                    asleep: true,
+                });
+            }
+            continue;
+        }
         let key = (saved.kind.clone(), saved.cwd.clone());
-        let resume = if resumed.insert(key) {
-            resume_args(&saved.kind)
-        } else {
-            Vec::new()
+        let first = resumed.insert(key);
+        let (resume, conversation) = match exact {
+            Some((args, conversation)) => (args, Some(conversation)),
+            None if first => (resume_args(&saved.kind), None),
+            None => (Vec::new(), None),
         };
         let reopen = Reopen {
             id: Some(saved.id.clone()),
             resume,
             title: Some(saved.title.clone()),
+            conversation,
         };
         match open_session(
             app.clone(),
@@ -1585,6 +1869,7 @@ async fn restore_wall(
             Ok(session) => out.push(RestoredSession {
                 session,
                 screen: saved.screen,
+                asleep: false,
             }),
             // One terminal that cannot come back (its folder moved, its engine is gone from PATH)
             // must not take the other five with it.
@@ -1706,11 +1991,19 @@ fn process_cwd(_pid: u32) -> Result<Option<String>, String> {
 }
 
 /// Close ONE session. Killing a PTY reaps a child process — off the main thread with the rest.
+/// A sleeping session has no process left; closing it only forgets how to wake it.
 #[tauri::command]
 async fn stop_session(state: State<'_, DesktopState>, session: String) -> Result<(), String> {
+    state.sleeping.lock().unwrap().remove(&session);
     let Some(found) = state.sessions.lock().unwrap().remove(&session) else {
         return Ok(());
     };
+    end_session(&state, found).await
+}
+
+/// Everything a session held, let go: its routing, the watch on its project, its process tree.
+/// The caller has already taken it out of `sessions`.
+async fn end_session(state: &DesktopState, found: Session) -> Result<(), String> {
     if !found.instance.is_empty() {
         state.ingress.unregister_agent(&found.instance);
     }
@@ -1725,6 +2018,224 @@ async fn stop_session(state: State<'_, DesktopState>, session: String) -> Result
         off_main(move || Ok(closing.end())).await?;
     }
     Ok(())
+}
+
+/* ------------------------------------------------------------------ sleep
+
+Nothing is torn down to look elsewhere, so a day of work leaves a wall of agents that are all
+still running. Each one is a CLI of half a gigabyte or more, plus the MCP servers it started,
+and none of that comes back until the terminal is closed. Closing throws the conversation away.
+
+Sleep is the middle path. The process tree ends and the memory goes back to the machine, but
+the pane keeps its scrollback and Panel keeps the conversation id. Waking forks the agent again
+in the same folder, resuming that exact conversation, under the same session id, so its tab, its
+name and its seat on the wall are all still its own.
+
+Only an agent whose conversation Panel can find can sleep. Anything else would wake into a fresh
+prompt, and that is not sleep. Claude reports its id through hooks. Codex, Grok, opencode and
+DeepSeek Harness are found in their own stores (history::live_conversation). Kimi and GLM keep
+no conversation Panel can reopen, so they stay awake. */
+
+/// How much each session holds right now, and whether it could be put to sleep.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionMemory {
+    /// The session's process and everything below it. Absent when the OS cannot say.
+    bytes: Option<u64>,
+    can_sleep: bool,
+}
+
+/// The argv that reopens `conversation` in an engine of `kind`. Variants of one engine share
+/// its sessions: `opencode-kimi-k3` resumes as opencode, and keeps its model from the kind.
+fn resume_into(kind: &str, conversation: &str) -> Option<Vec<String>> {
+    history::resume_args(kind_program(kind).0, conversation).map(|(_, args)| args)
+}
+
+/// Could this session sleep and wake into the same conversation? Reads no store, so a poll can
+/// ask it of every terminal.
+///
+/// Claude says which conversation it runs, through hooks. Every other engine is found in its own
+/// store by folder and time, and two of one engine in one folder cannot be told apart: those
+/// stay awake. So does an engine Panel cannot resume by id (Kimi, GLM).
+fn can_sleep(state: &DesktopState, session: &Session, awake: &[Session]) -> bool {
+    // The manager's pane is shown by Chat, which marks it ended on exit and has no wake. It is
+    // one agent, and the one you talk to most.
+    if session.instance.is_empty() || session.project == CPO_ID {
+        return false;
+    }
+    let engine = kind_program(&session.kind).0;
+    if engine == "claude" {
+        return state.ingress.conversations().contains_key(&session.instance);
+    }
+    history::can_resume(engine)
+        && !awake.iter().any(|other| {
+            other.id != session.id && kind_program(&other.kind).0 == engine && other.cwd == session.cwd
+        })
+}
+
+/// How to find the conversation a session would wake into, gathered under the locks. Running it
+/// may read an engine's store, which is slow, so that half owns its data and can leave the thread.
+enum Lookup {
+    Nothing,
+    Known(String),
+    Store {
+        engine: String,
+        cwd: PathBuf,
+        since_ms: i64,
+        resumed: Option<String>,
+        taken: HashSet<String>,
+    },
+}
+
+impl Lookup {
+    fn of(state: &DesktopState, session: &Session) -> Self {
+        let awake: Vec<Session> = state.sessions.lock().unwrap().values().cloned().collect();
+        if !can_sleep(state, session, &awake) {
+            return Lookup::Nothing;
+        }
+        let engine = kind_program(&session.kind).0;
+        if engine == "claude" {
+            return state
+                .ingress
+                .conversations()
+                .remove(&session.instance)
+                .filter(|conversation| resume_into(&session.kind, conversation).is_some())
+                .map_or(Lookup::Nothing, Lookup::Known);
+        }
+        // A sleeping neighbour in the same folder already holds its own.
+        let taken = state.sleeping.lock().unwrap().values().map(|sleeper| sleeper.conversation.clone()).collect();
+        Lookup::Store {
+            engine: engine.to_string(),
+            cwd: session.cwd.clone(),
+            since_ms: session.launched_ms,
+            resumed: session.resumed.clone(),
+            taken,
+        }
+    }
+
+    fn run(self) -> Option<String> {
+        match self {
+            Lookup::Nothing => None,
+            Lookup::Known(conversation) => Some(conversation),
+            Lookup::Store { engine, cwd, since_ms, resumed, taken } => {
+                history::live_conversation(&engine, &cwd, since_ms, resumed.as_deref(), &taken)
+            }
+        }
+    }
+}
+
+/// The conversation to wake this session into, or None when there is nothing Panel could resume.
+/// For a save on the way out; a sleep runs the lookup off the main thread instead.
+fn sleep_conversation(state: &DesktopState, session: &Session) -> Option<String> {
+    Lookup::of(state, session).run()
+}
+
+/// Memory per live session. One `ps` for all of them, off the main thread.
+#[tauri::command]
+async fn session_memory(state: State<'_, DesktopState>) -> Result<HashMap<String, SessionMemory>, String> {
+    // Sessions first, terminals second, never both held: see live_sessions.
+    let sessions: Vec<Session> = state.sessions.lock().unwrap().values().cloned().collect();
+    let roots: Vec<(Session, Option<u32>)> = {
+        let terminals = state.terminals.lock().unwrap();
+        sessions
+            .into_iter()
+            .map(|session| {
+                let pid = terminals.pid(&session.terminal_id);
+                (session, pid)
+            })
+            .collect()
+    };
+    let awake: Vec<Session> = roots.iter().map(|(session, _)| session.clone()).collect();
+    let sleepable: HashSet<String> = awake
+        .iter()
+        .filter(|session| can_sleep(&state, session, &awake))
+        .map(|session| session.id.clone())
+        .collect();
+    off_main(move || {
+        let pids: Vec<u32> = roots.iter().filter_map(|(_, pid)| *pid).collect();
+        let bytes = panel_terminal::tree_memory(&pids);
+        Ok(roots
+            .into_iter()
+            .map(|(session, pid)| {
+                let memory = SessionMemory {
+                    bytes: pid.and_then(|pid| bytes.get(&pid).copied()),
+                    can_sleep: sleepable.contains(&session.id),
+                };
+                (session.id, memory)
+            })
+            .collect())
+    })
+    .await
+}
+
+/// End an agent's process tree and keep what it takes to wake it.
+#[tauri::command]
+async fn sleep_session(state: State<'_, DesktopState>, session: String) -> Result<(), String> {
+    let Some(found) = state.sessions.lock().unwrap().get(&session).cloned() else {
+        return Err("That terminal is already closed.".into());
+    };
+    let lookup = Lookup::of(&state, &found);
+    let Some(conversation) = off_main(move || Ok(lookup.run())).await? else {
+        return Err(format!(
+            "Panel cannot find which {} conversation this is, so it stays awake. A fresh one with \
+             no prompt yet has nothing to resume.",
+            found.kind
+        ));
+    };
+    let screen = state.terminals.lock().unwrap().screen(&found.terminal_id).unwrap_or_default();
+    // Out of `sessions` before the sleeper is filed, so no reader ever sees one session twice.
+    if state.sessions.lock().unwrap().remove(&session).is_none() {
+        return Ok(()); // closed while we looked
+    }
+    state.sleeping.lock().unwrap().insert(
+        session,
+        Sleeper {
+            session: found.clone(),
+            conversation,
+            screen,
+        },
+    );
+    end_session(&state, found).await
+}
+
+/// Fork a sleeping agent again, resuming its conversation, under the session id it slept with.
+#[tauri::command]
+async fn wake_session(
+    app: AppHandle,
+    state: State<'_, DesktopState>,
+    session: String,
+    cols: u16,
+    rows: u16,
+) -> Result<Session, String> {
+    let Some(sleeper) = state.sleeping.lock().unwrap().get(&session).cloned() else {
+        return Err("That terminal is not asleep.".into());
+    };
+    let Some(resume) = resume_into(&sleeper.session.kind, &sleeper.conversation) else {
+        return Err(format!("Panel cannot resume a {} session.", sleeper.session.kind));
+    };
+    // History may have opened the same conversation while this one slept.
+    if let Some(open) = state.ingress.conversations().into_iter().find(|(_, held)| *held == sleeper.conversation) {
+        return Err(format!("That conversation is already open in terminal {}.", open.0));
+    }
+    let Sleeper { session: slept, conversation: sleeper_conversation, .. } = sleeper;
+    let woke = open_session(
+        app,
+        state.clone(),
+        slept.project,
+        slept.kind,
+        cols,
+        rows,
+        Some(slept.cwd.to_string_lossy().into_owned()),
+        Reopen {
+            id: Some(session.clone()),
+            resume,
+            title: Some(slept.title),
+            conversation: Some(sleeper_conversation),
+        },
+    )
+    .await?;
+    state.sleeping.lock().unwrap().remove(&session);
+    Ok(woke)
 }
 
 /// IN-MEMORY (a write to the PTY master fd, which a reader thread is always draining). Sync on
@@ -2276,6 +2787,8 @@ async fn start_sim(
         terminal_id,
         cwd: run.cwd.clone(),
         instance: String::new(),
+        launched_ms: history::now_ms(),
+        resumed: None,
     };
     state
         .sessions
@@ -3591,7 +4104,17 @@ fn main() {
         std::process::exit(selftest());
     }
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // Must be the first plugin: a second launch carrying a link hands it to this process and exits.
+    #[cfg(any(windows, target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+    }));
+    builder
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         // Restore the app artwork from the old Panel sidebar. The scheme resolves only project
@@ -3642,6 +4165,8 @@ fn main() {
             // one starts with the few that need no credential and no toolchain.
             modules::seed_installed(&panel_home, upgraded);
             let ingress = Ingress::serve(event_sink(&app.handle().clone()))?;
+            let links = app.handle().clone();
+            ingress.on_link(Arc::new(move |url| queue_links(&links, [url])));
             for project in all_projects().into_iter().filter(|project| project.exists) {
                 ingress.register_project(&project.id, &project.path);
             }
@@ -3654,6 +4179,7 @@ fn main() {
                 debugger: Arc::new(debug::DebugManager::default()),
                 ingress,
                 sessions: Mutex::new(HashMap::new()),
+                sleeping: Mutex::new(HashMap::new()),
                 sims: Arc::new(Mutex::new(HashMap::new())),
                 panel_home,
                 shutdown_prompt_pending: AtomicBool::new(false),
@@ -3662,11 +4188,22 @@ fn main() {
             });
             watch_portfolio(app.handle().clone());
             watch_sprints(app.handle().clone());
+            // Installers register the scheme on Windows and Linux; a dev build has to ask.
+            #[cfg(any(windows, target_os = "linux"))]
+            let _ = app.deep_link().register_all();
+            let links = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                queue_links(&links, event.urls().into_iter().map(String::from));
+            });
+            if let Ok(Some(urls)) = app.deep_link().get_current() {
+                queue_links(app.handle(), urls.into_iter().map(String::from));
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             launch_context,
             manager_project,
+            main_folder_project,
             cpo_preprompt,
             set_cpo_preprompt,
             reset_cpo_preprompt,
@@ -3719,7 +4256,14 @@ fn main() {
             skills_usage,
             restore_wall,
             start_session,
+            session_history,
+            search_history,
+            resume_history,
+            take_links,
             stop_session,
+            session_memory,
+            sleep_session,
+            wake_session,
             session_cwd,
             session_busy,
             write_terminal,
@@ -3823,5 +4367,21 @@ mod link_tests {
         ] {
             assert!(!web_link(bad), "{bad}");
         }
+    }
+}
+
+#[cfg(test)]
+mod wall_tests {
+    use super::SavedWall;
+
+    /// restore_wall deletes the file before it parses it, so a wall written before sleep existed
+    /// must still read, or the update would quietly lose it.
+    #[test]
+    fn a_wall_saved_before_sleep_still_restores_awake() {
+        let old = r#"{"saved_at":1,"sessions":[{"id":"a","project":"p","kind":"claude",
+            "title":"claude","cwd":"/tmp","screen":"$ "}]}"#;
+        let wall: SavedWall = serde_json::from_str(old).unwrap();
+        assert!(!wall.sessions[0].asleep);
+        assert!(wall.sessions[0].conversation.is_none());
     }
 }

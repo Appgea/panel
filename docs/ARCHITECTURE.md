@@ -161,11 +161,13 @@ Everything degrades: a missing shim omits its flag and the agent launches plain.
 | Breakpoints | Panel user state (not the repo) | |
 | Device leases | `~/.panel/leases.json` (+ `.lock`) | shared with `common/lease.py` |
 | Notebook | `~/.appgea/notes.md` | outside the user root on purpose |
-| Review queue | webview `localStorage` | this window's to-do list |
+| Review list | webview `localStorage` (`panel-review`, `-asked`, `-forgotten`) | this window's to-do list; rules in `ui/src/features/review_queue.ts`: new until shown in the deck, then seen and listed below; a version already listed is not news again |
+| Session history | each agent's own store: Claude `~/.claude/projects/*/*.jsonl` (+ `subagents/`), Codex `~/.codex/state_*.sqlite`, Grok `~/.grok/sessions`, opencode `opencode.db`, Gemini `~/.gemini/tmp/*/chats`, DeepSeek Harness `~/.dsh/sessions` | the agents' files, read-only; one reader per agent in `src-tauri/src/history/`. Claude transcripts are scanned once, then only appended bytes; file stores are re-read when size or time changes; SQLite is queried each scan. "Last looked" stamp in `localStorage` (`panel-history-seen`) |
 | Review old versions | webview IndexedDB | files you sent back, kept so the redo can be compared |
 | Keymap, preferences | webview `localStorage` (`panel-keymap`, `panel-prefs`) | only overrides stored |
 | Edit replay | memory only | bounded (see ingress) |
 | Ingress port | `~/.appgeapanel/ingress-port` | removed on clean exit |
+| Pending links | `~/.appgeapanel/pending-links` | `appgeapanel://` links the macOS handler kept while no Panel ran; one per line, read and removed at startup |
 
 **Wall restore:** per terminal three things are saved — what it was (project/kind/cwd), its title, and its screen tail. On launch each is re-forked in the same folder with the screen replayed under a dated banner; agents that can resume get resume args: `claude --continue`, `codex resume --last`, `dshline --resume`; any other engine opens fresh (opt-in list: a wrong guessed flag would fail the whole terminal). Processes do **not** survive the app — a running build or in-flight turn is gone.
 

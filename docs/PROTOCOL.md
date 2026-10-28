@@ -112,6 +112,27 @@ project-relative. The same text printed in an agent terminal is ⌘/Ctrl-clickab
 | `panel:git` | the project's Git tab |
 | `panel:manager` | the Manager |
 
+**`appgeapanel://` links** (same file, `parseAppLink`). The same places from OUTSIDE Panel — a
+notification, a note, Shortcuts, Raycast — so they name the project. A link never starts anything;
+the furthest it goes is putting a Resume button in front of you.
+
+| link | opens |
+|---|---|
+| `appgeapanel://home` · `appgeapanel://review` · `appgeapanel://manager` | that screen |
+| `appgeapanel://history[?q=<words>]` | History, searching if asked |
+| `appgeapanel://session/<agent-session-id>` | History, on that session (any agent) |
+| `appgeapanel://project/<id>[/git\|/review[/<path>]\|/work/<path>[:<line>]]` | the project, or one of its places |
+
+**Who receives a link.** On macOS a small handler app, `~/Applications/Appgea Panel Links.app`, owns
+the scheme (`launcher/make-link-handler.sh`; `dev.command` and `build-app.sh` run it). It POSTs the
+link to whichever Panel is running, dev build or installed, at `POST /panel/link` on the ingress
+(`{"url": "appgeapanel://…"}`, `Content-Type: application/json` required, so a web page cannot fire it
+without a preflight the ingress never answers). With no Panel running it appends the link to
+`~/.appgeapanel/pending-links` and opens the installed app, which drains that file on startup. The
+Panel bundle itself does not claim the scheme on macOS (`tauri.macos.conf.json`), so LaunchServices
+has one owner. Windows and Linux register the scheme at runtime and forward a link to the running
+Panel (single-instance plugin) instead of opening a second one.
+
 A report with media gets a **Review** button without any link. Anything that is neither a web URL
 nor a place renders as a struck-out chip, so a wrong link is visible.
 

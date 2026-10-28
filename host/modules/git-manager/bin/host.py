@@ -92,7 +92,10 @@ def main():
             # knowledge, so the push list opens instantly.
             return _respond(200, {"pushable": gitops.pushable_repos(
                 qs("fetch") in ("1", "true"))})
-        if path in ("/pull/progress", "/push/progress"):
+        if path == "/syncable":
+            # 'Sync all' needs both directions at once, measured against a live remote.
+            return _respond(200, {"syncable": gitops.pushable_repos(True)})
+        if path in ("/pull/progress", "/push/progress", "/sync/progress"):
             return _respond(200, gitops.sync_progress(qs("repo")))
         if path == "/status":
             return _respond(200, gitops.git_status(qs("repo")))

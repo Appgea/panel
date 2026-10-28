@@ -1095,6 +1095,10 @@
 .term-zoom { margin-left: auto; }
 .term-ended:not([hidden]) { margin-left: auto; }
 .term-ended:not([hidden]) ~ .term-zoom { margin-left: 0; }
+/* A live terminal's memory figure leads the controls. An ended one has none, so the two never
+   both claim the slack. */
+.term-mem:not([hidden]) { margin-left: auto; }
+.term-mem:not([hidden]) ~ .term-zoom { margin-left: 0; }
 
 /*
  * Three low-contrast glyphs parked in the corner read as specks, not as controls. They rest at
@@ -1113,6 +1117,32 @@
 
 .term-ended { flex: none; font-size: var(--text-xs); font-style: italic; color: var(--ink-dim); }
 .term-ended[hidden] { display: none; }
+
+.term-mem {
+  flex: none;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-faint);
+}
+.term-mem[hidden] { display: none; }
+
+/* Sleep: same quiet family as zoom and move. It is undone by one click on Wake. */
+.term-sleep {
+  flex: none;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 3px;
+  font-size: var(--text-sm);
+  line-height: 1;
+  color: var(--ink-dim);
+}
+.term-sleep[hidden] { display: none; }
+.term-sleep:hover {
+  transform: none;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 14%, transparent);
+}
 
 .term-zoom {
   flex: none;
@@ -1693,6 +1723,30 @@
 .terms-tab.has-work .terms-tab-dot { display: block; background: var(--m-work); animation: term-state-pulse 1.4s var(--ease) infinite; }
 .terms-tab.has-ask .terms-tab-dot { display: block; background: var(--warn); }
 
+/* The wall's memory, and the button that gives most of it back. Sits left of the layout switch
+   and takes the slack from it. */
+.terms-mem {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  font-size: var(--text-xs);
+}
+.terms-mem[hidden] { display: none; }
+.terms-mem:not([hidden]) ~ .terms-layout { margin-left: 0; }
+.terms-mem-total { font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+.terms-mem-sleep {
+  padding: 3px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+.terms-mem-sleep[hidden] { display: none; }
+.terms-mem-sleep:hover { color: var(--accent); border-color: var(--accent); transform: none; }
+
 /* The layout switch: two flush segments at the far right, separated by a hairline. */
 .terms-layout {
   margin-left: auto;
@@ -1956,3 +2010,40 @@
 @media (prefers-reduced-motion: reduce) {
   .term-ttab.is-work .term-ttab-dot { animation: none; }
 }
+
+/* The main folder: one wide seat above the projects. It is a place, not an app, so it gets a
+   folder and its path instead of an icon and a name. */
+.plus-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  margin: 4px 0 6px;
+  padding: 10px 14px 10px 12px;
+  border: 1px dashed color-mix(in oklab, var(--accent) 34%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--accent) 4%, var(--bg-raised));
+  text-align: left;
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.plus-main .plus-card-text { flex: 1; }
+.plus-main .plus-ico { flex: none; width: 36px; height: 36px; border-radius: 10px; }
+.plus-main:hover { transform: none; }
+.plus-main.is-on {
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--accent) 60%, transparent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-raised));
+}
+.plus-main.is-on .plus-result-name { color: var(--ink); }
+.plus-main-path {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plus-chosen .plus-main-path { margin-left: 2px; }
+.plus-ico.is-folder { color: var(--accent); }
+.plus-ico.is-folder svg { width: 55%; height: 55%; }

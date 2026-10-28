@@ -356,7 +356,7 @@ export function mountDashboard(
   const work = makeCard(grid, "work", "work", "Work", "Open work", () => open("files"));
   const gitCard = makeCard(grid, "git", "git", "Git", "Open git", () => open("git"));
 
-  // The Git card is the only card that also DOES something in place. Two of the three actions are
+  // The Git card is the only card that also DOES something in place. Three of the four actions are
   // portfolio-wide on purpose — "is everything pushed?" is never a question about one app — and
   // the third hands this project's whole commit to an agent. Built once, so the paint below only
   // ever rewrites the chips and a poll can never make these buttons move under the cursor.
@@ -365,6 +365,9 @@ export function mountDashboard(
   const gitSync = document.createElement("div");
   gitSync.className = "dash-sync";
   gitSync.innerHTML = `
+    <button class="dash-act is-primary" type="button" data-sweep="sync"
+      title="Pull then push every tracked repository. An agent fixes what code cannot.">
+      <span class="dash-act-arrow" aria-hidden="true">⇅</span><span>Sync all</span></button>
     <button class="dash-act" type="button" data-sweep="pull" title="Pull every tracked repository">
       <span class="dash-act-arrow" aria-hidden="true">↓</span><span>Pull all</span></button>
     <button class="dash-act" type="button" data-sweep="push" title="Push every tracked repository">
@@ -379,7 +382,10 @@ export function mountDashboard(
     const button = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-sweep]");
     if (!button) return;
     if (button.dataset.sweep === "agent") return void handToAgent();
-    void openGitSweep(button.dataset.sweep === "push" ? "push" : "pull");
+    const mode = button.dataset.sweep;
+    void openGitSweep(mode === "push" || mode === "sync" ? mode : "pull", {
+      fixWithAgent: events.runWithAgent,
+    });
   });
 
   async function handToAgent(): Promise<void> {

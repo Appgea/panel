@@ -330,6 +330,13 @@
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z"/><path d="m3 7 9 6 9-6"/></svg></span>
             Support <span id="supportBadge" class="nav-badge" hidden>0</span>
           </button>
+          <!-- Every agent session, reported or not, read from each agent's own store. Reports
+               are what an agent chose to say; this is everything it did, including the session
+               that finished at 3am without a word. -->
+          <button id="historyButton" class="nav-row" type="button" title="History: every agent session">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
+            History <span id="historyBadge" class="nav-badge" hidden>0</span>
+          </button>
           <!-- What the agents made: renders, screenshots, sounds. Files an agent saves without
                sending a report land here too, so reviewing never starts in Finder. -->
           <button id="reviewButton" class="nav-row" type="button" title="Review what agents made">
@@ -419,6 +426,8 @@
            the queue is one queue, and splitting it per project would make eleven of it. -->
       <section id="supportScreen" class="support" hidden></section>
       <section id="reviewScreen" class="review" hidden></section>
+      <!-- HISTORY: every agent session across the portfolio, from each agent's own store. -->
+      <section id="historyScreen" class="history" hidden></section>
 
       <!-- RUN: the simulator system. Runs are processes with verbs (run / r / R / stop), not
            terminals — their PTYs never join the deck or the wall. Parks here and is moved into

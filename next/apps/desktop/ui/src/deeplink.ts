@@ -61,3 +61,68 @@ export function placeLabel(place: Place): { kind: string; name: string } {
       return { kind: "Manager", name: "open" };
   }
 }
+
+/**
+ * `appgeapanel://` links — the same idea from OUTSIDE Panel: a notification, a note, a chat
+ * message, Shortcuts or Raycast. Outside there is no post or terminal to supply the project, so
+ * these name it.
+ *
+ *   appgeapanel://home
+ *   appgeapanel://history[?q=<search>]           History, searching if asked
+ *   appgeapanel://session/<agent-session-id>      History, on that conversation
+ *   appgeapanel://project/<id>                    the project
+ *   appgeapanel://project/<id>/git                its Git tab
+ *   appgeapanel://project/<id>/review[/<path>]    its work waiting in Review
+ *   appgeapanel://project/<id>/work/<path>[:line] the file in Work
+ *   appgeapanel://review | appgeapanel://manager
+ *
+ * A link never starts anything on its own. The furthest one goes is to put a Resume button in
+ * front of you, because any web page can hand the OS a link.
+ */
+export type AppLink =
+  | { to: "home" }
+  | { to: "review" }
+  | { to: "manager" }
+  | { to: "history"; query?: string; session?: string }
+  | { to: "project"; project: string; place?: Place };
+
+const SCHEME = "appgeapanel:";
+
+export function parseAppLink(url: string): AppLink | null {
+  const text = url.trim();
+  if (!text.toLowerCase().startsWith(SCHEME)) return null;
+  const [path, search = ""] = text.slice(SCHEME.length).replace(/^\/\//, "").split("?", 2);
+  let parts: string[];
+  try {
+    parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+  } catch {
+    return null;
+  }
+  const [verb = "home", id, ...rest] = parts;
+  switch (verb) {
+    case "home":
+    case "review":
+    case "manager":
+      return id ? null : { to: verb };
+    case "history": {
+      const query = new URLSearchParams(search).get("q")?.trim();
+      return query ? { to: "history", query } : { to: "history" };
+    }
+    case "session":
+      return id && !rest.length ? { to: "history", session: id } : null;
+    case "project": {
+      if (!id) return null;
+      if (!rest.length) return { to: "project", project: id };
+      const [place, ...file] = rest;
+      const parsed = parsePlace(file.length ? `${place}:${file.join("/")}` : place);
+      return parsed && parsed.to !== "manager" ? { to: "project", project: id, place: parsed } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** The link that opens Panel on one past conversation. */
+export function sessionLink(conversation: string): string {
+  return `appgeapanel://session/${encodeURIComponent(conversation)}`;
+}

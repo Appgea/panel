@@ -21,3 +21,14 @@ tauri-plugin-dialog = "2"
 notify = "8"
 toml = "0.9"
 tauri-plugin-notification = "2"
+tauri-plugin-deep-link = "2"
+# Session history reads other agents' own stores: Codex and opencode keep SQLite databases,
+# DeepSeek Harness writes zstd-compressed logs, Gemini names folders by a SHA-256 of the path.
+rusqlite = { version = "0.40", features = ["bundled"] }
+ruzstd = "0.9"
+sha2 = "0.10"
+
+# Windows and Linux hand a clicked appgeapanel:// link to a NEW process. This forwards it to the
+# running Panel instead, so a link never opens a second window.
+[target.'cfg(any(windows, target_os = "linux"))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

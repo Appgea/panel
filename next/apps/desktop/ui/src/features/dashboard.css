@@ -587,6 +587,19 @@
   color: var(--ink);
 }
 .dash-act:disabled { opacity: 0.5; }
+/* Sync all is the one button that answers the whole question, so it is the solid one. */
+.dash-act.is-primary {
+  color: var(--bg-sunken);
+  background: var(--m);
+  border-color: color-mix(in oklab, var(--m) 70%, black);
+  font-weight: 650;
+}
+:root[data-theme="light"] .dash-act.is-primary { color: #fff; }
+.dash-act.is-primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--m) 88%, white);
+  color: var(--bg-sunken);
+}
+:root[data-theme="light"] .dash-act.is-primary:hover:not(:disabled) { color: #fff; }
 .dash-act.is-agent {
   border-color: var(--line);
   background: var(--bg-sunken);

@@ -270,19 +270,27 @@ def pushable_repos(fetch=False):
     remote and a checked-out branch, carrying its unsent commit count and how much uncommitted
     work would be LEFT BEHIND by a push. A branch that was never pushed has no @{upstream}, so
     `ahead` is measured against the remote's copy of the branch when it knows it and reported as
-    -1 (unknown, first push) when it does not. Read-only: never pushes."""
-    out = []
-    for p in _tracked_projects():
-        path = os.path.realpath(os.path.expanduser(p["path"]))
+    -1 (unknown, first push) when it does not. Read-only: never pushes. It also carries `behind`,
+    so with fetch=True it is the scan for the two-way 'sync all' sweep."""
+    projects = []
+    seen = set()
+    for project in _tracked_projects():
+        path = os.path.realpath(os.path.expanduser(project["path"]))
+        if path not in seen:
+            seen.add(path)
+            projects.append((project, path))
+
+    def inspect(item):
+        p, path = item
         if not os.path.isdir(path) or not _is_repo(path):
-            continue
+            return None
         okr, remotes_out, _ = _git(path, "remote")
         remotes = [r for r in remotes_out.split() if r] if okr else []
         if not remotes:
-            continue
+            return None
         branch = _current_branch(path)
         if not branch:
-            continue
+            return None
         oku, ups, _ = _git(path, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
         upstream = ups.strip() if oku else ""
         remote = (upstream.split("/", 1)[0] if upstream
@@ -294,10 +302,12 @@ def pushable_repos(fetch=False):
             okc, cnt, _ = _git(path, "rev-list", "--count", "HEAD",
                                "^%s/%s" % (remote, branch))
             ahead = int(cnt.strip()) if okc and cnt.strip().isdigit() else -1
-        out.append({"path": path, "name": p.get("name") or os.path.basename(path.rstrip("/")),
-                    "branch": branch, "remote": remote, "ahead": ahead, "behind": behind,
-                    "dirty": _dirty_count(path), "hasUpstream": bool(upstream)})
-    return out
+        return {"path": path, "name": p.get("name") or os.path.basename(path.rstrip("/")),
+                "branch": branch, "remote": remote, "ahead": ahead, "behind": behind,
+                "dirty": _dirty_count(path), "hasUpstream": bool(upstream)}
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(projects) or 1)) as pool:
+        return [result for result in pool.map(inspect, projects) if result is not None]
 
 
 def git_status(repo):

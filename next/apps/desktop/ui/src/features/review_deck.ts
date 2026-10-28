@@ -6,9 +6,12 @@
  * leave alone is fine; only a change has a key. At the end the changes become one message the
  * agent can act on, sent straight into its terminal.
  *
+ * A piece is seen once it is on screen here. Closing part way keeps the rest new, and notes are
+ * kept as they are written: nothing is lost by leaving.
+ *
  *   ← →    previous / next          Space   play / pause
  *   C      needs changes (a note)   B       before / after, for a redo
- *   Esc    close
+ *   F      show in Finder           Esc     close, nothing changes
  */
 export type DeckItem = {
   project: string;
@@ -22,8 +25,8 @@ export type DeckItem = {
   before?: { note: string; src: Promise<string | null> };
 };
 
-/** How the deck ended: walked to the end and closed, sent, or left part way. */
-export type DeckEnd = "done" | "sent" | "left";
+/** How the deck ended: the notes sent (or copied) from the end card, or closed any other way. */
+export type DeckEnd = "sent" | "left";
 
 export type DeckOptions = {
   title: string;
@@ -32,8 +35,12 @@ export type DeckOptions = {
   /** Change notes already written on this batch, by path. A note is kept as soon as it is written. */
   notes: Map<string, string>;
   onNote(path: string, note: string | null): void;
+  /** A piece was on screen: it is seen now. */
+  onSeen(path: string): void;
   send(text: string): Promise<boolean>;
   copy(text: string): Promise<boolean>;
+  /** Show this file in Finder. */
+  reveal(path: string): void;
   onClose(end: DeckEnd): void;
 };
 
@@ -53,7 +60,7 @@ const clock = (seconds: number): string => {
 /** The feedback as the agent will read it: plain lines, file names it can find. */
 export function feedbackText(items: DeckItem[], notes: Map<string, string>): string {
   const changed = items.filter((item) => notes.has(item.path));
-  const lines = changed.map((item) => `- ${item.label}${notes.get(item.path) ? ` — ${notes.get(item.path)}` : ""}`);
+  const lines = changed.map((item) => `- ${item.label} — ${notes.get(item.path)}`);
   const head = `I reviewed what you made. ${changed.length === 1 ? "One needs" : `${changed.length} need`} changes:`;
   const rest = items.length > changed.length ? ["The rest is fine as it is."] : [];
   return [head, ...lines, ...rest].join("\n");
@@ -137,11 +144,14 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
   const top = make("header", "rd-top");
   const where = make("div", "rd-where");
   const counter = make("span", "rd-count");
+  const finder = make("button", "rd-btn is-small", "Finder");
+  finder.type = "button";
+  finder.title = "Show this file in Finder · F";
   const close = make("button", "rd-close", "×");
   close.type = "button";
   close.setAttribute("aria-label", "Close review");
-  close.title = "Close · Esc";
-  top.append(where, counter, close);
+  close.title = "Close · Esc · nothing changes";
+  top.append(where, counter, finder, close);
 
   const stage = make("div", "rd-stage");
   const prev = make("button", "rd-nav is-prev", "‹");
@@ -164,7 +174,7 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
   const note = make("form", "rd-note");
   const noteInput = make("input");
   noteInput.type = "text";
-  noteInput.placeholder = "What should change? Enter saves · empty Enter clears it";
+  noteInput.placeholder = "What should change? Enter saves · empty removes the note";
   noteInput.setAttribute("aria-label", "What should change");
   note.append(noteInput);
   note.hidden = true;
@@ -301,29 +311,26 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     const after = items[index + 1];
     if (after?.kind === "image") new Image().src = after.src;
     paintStrip();
+    options.onSeen(item.path);
   }
 
   function paintSummary(): void {
     stopPlayer();
     summary = true;
-    counter.textContent = "Done";
+    counter.textContent = "End";
     caption.textContent = "";
     const changed = items.filter((item) => notes.has(item.path)).length;
     const box = make("div", "rd-summary");
-    box.append(make("b", "rd-summary-title", changed ? "A few notes to send." : "That was everything."));
-    box.append(
-      make(
-        "p",
-        "",
-        changed ? `${changed} to change · the rest is fine` : "Closing this marks the batch reviewed.",
-      ),
-    );
+    box.append(make("b", "rd-summary-title", changed ? `${changed} to change` : "That's everything"));
+    box.append(make("p", "", changed ? "Close keeps the notes here, unsent." : "It moves under the new work in Review."));
     const text = feedbackText(items, notes);
     if (changed) box.append(make("pre", "rd-feedback", text));
     const row = make("div", "rd-summary-actions");
-    const done = make("button", "rd-btn", changed ? "Done without sending" : "Done");
-    done.type = "button";
-    done.addEventListener("click", () => finish("done"));
+    const shut = make("button", changed ? "rd-btn" : "rd-btn is-primary", "Close");
+    shut.type = "button";
+    shut.addEventListener("click", () => finish("left"));
+    row.append(shut);
+    let first: HTMLButtonElement = shut;
     if (changed) {
       const send = make("button", "rd-btn is-primary", options.agentName ? `Send to ${options.agentName}` : "Copy feedback");
       send.type = "button";
@@ -334,12 +341,10 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
         if (ok) window.setTimeout(() => finish("sent"), 650);
         else send.disabled = false;
       });
-      row.append(done, send);
-      window.setTimeout(() => send.focus(), 0);
-    } else {
-      row.append(done);
-      window.setTimeout(() => done.focus(), 0);
+      row.append(send);
+      first = send;
     }
+    window.setTimeout(() => first.focus(), 0);
     box.append(row);
     frame.classList.remove("is-missing");
     frame.classList.remove("is-before");
@@ -352,8 +357,9 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
   }
 
   function go(at: number): void {
+    // Moving on keeps what you typed: words are never lost to a click.
+    closeNote(true);
     window.clearTimeout(advance);
-    closeNote(false);
     showingBefore = false;
     if (at >= items.length) {
       paintSummary();
@@ -400,11 +406,13 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     veil.focus();
     if (!save) return;
     const text = noteInput.value.trim();
-    // Empty on a piece already sent back takes it back; empty on a fresh one still sends it back.
-    mark(text || !notes.has(items[index].path) ? text : null);
+    // The box is the note: empty means there is none.
+    if (!text && !notes.has(items[index].path)) return;
+    mark(text || null);
   }
 
   function finish(end: DeckEnd): void {
+    closeNote(true);
     window.clearTimeout(advance);
     stopPlayer();
     document.removeEventListener("keydown", onKey, true);
@@ -436,8 +444,9 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
       event.stopPropagation();
     };
     if (event.metaKey || event.ctrlKey || event.altKey) return;
-    if (key === "escape") return handled(), finish(summary ? "done" : "left");
-    if (key === "arrowright" || key === "l") return handled(), go(summary ? index : index + 1);
+    if (key === "escape") return handled(), finish("left");
+    // The end card is the end: → there stays put instead of flipping back to the last piece.
+    if (key === "arrowright" || key === "l") return handled(), void (summary || go(index + 1));
     if (key === "arrowleft" || key === "h") return handled(), go(summary ? items.length - 1 : index - 1);
     if (summary) return;
     if (key === " ") {
@@ -447,6 +456,7 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     }
     if (key === "c" || key === "n") return handled(), openNote();
     if (key === "b") return handled(), toggleBefore();
+    if (key === "f") return handled(), options.reveal(items[index].path);
   }
 
   note.addEventListener("submit", (event) => {
@@ -457,9 +467,10 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
   change.addEventListener("click", openNote);
   prev.addEventListener("click", () => go(summary ? items.length - 1 : index - 1));
   next.addEventListener("click", () => go(index + 1));
-  close.addEventListener("click", () => finish(summary ? "done" : "left"));
+  finder.addEventListener("click", () => options.reveal(items[Math.min(index, items.length - 1)].path));
+  close.addEventListener("click", () => finish("left"));
   veil.addEventListener("click", (event) => {
-    if (event.target === veil || event.target === stage) finish(summary ? "done" : "left");
+    if (event.target === veil || event.target === stage) finish("left");
   });
   document.addEventListener("keydown", onKey, true);
   document.body.append(veil);

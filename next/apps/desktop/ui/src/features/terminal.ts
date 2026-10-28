@@ -115,6 +115,12 @@ export function tidyCopy(text: string): string {
     .replace(/^\n+|\n+$/g, "");
 }
 
+/** Memory as people read it: "640 MB", "1.4 GB". */
+export function formatBytes(bytes: number): string {
+  const mb = bytes / (1024 * 1024);
+  return mb < 1000 ? `${Math.max(1, Math.round(mb))} MB` : `${(mb / 1024).toFixed(1)} GB`;
+}
+
 const isLight = (): boolean => document.documentElement.getAttribute("data-theme") === "light";
 const termTheme = () => (isLight() ? lightTheme : darkTheme);
 
@@ -192,11 +198,15 @@ export type DeckEvents = {
   onExit(sessionId: string): void;
   /** Something you typed reached this session's PTY. */
   onInput?(sessionId: string, data: string): void;
-  /** Start the same kind of session again. Given, an ended pane offers a Restart button. */
-  onRestart?(sessionId: string): void;
+  /** Start the same kind of session again. Given, an ended pane offers a Restart button. A
+   *  sleeping pane offers Wake on the same path. Settled, the button can be pressed again. */
+  onRestart?(sessionId: string): void | Promise<void>;
   canRestart?(sessionId: string): boolean;
   /** A `panel:` link this session printed was clicked (deeplink.ts). */
   openPlace?(sessionId: string, place: Place): void;
+  /** Put to sleep rather than ended: its bar offers Wake, and says what sleeping gave back when
+   *  that is known. Null for a session that is not asleep. */
+  asleep?(sessionId: string): { freed: number | null } | null;
 };
 
 export class TerminalDeck {
@@ -366,17 +376,26 @@ export class TerminalDeck {
     const restart = this.events.onRestart;
     if (!restart || pane.mount.querySelector(".term-ended-bar")) return;
     if (this.events.canRestart && !this.events.canRestart(sessionId)) return;
+    const asleep = this.events.asleep?.(sessionId) ?? null;
     const bar = make("div", "term-ended-bar mo-rise");
     const label = make("span", "");
-    label.textContent = "Session ended";
+    label.textContent = !asleep
+      ? "Session ended"
+      : asleep.freed
+        ? `Asleep · freed ${formatBytes(asleep.freed)}`
+        : "Asleep";
+    if (asleep) label.title = "Its process ended to give the memory back. Wake picks the same conversation back up.";
     bar.append(label);
     const again = make("button", "") as HTMLButtonElement;
     again.type = "button";
-    again.textContent = "Restart";
+    again.textContent = asleep ? "Wake" : "Restart";
     again.addEventListener("click", (event) => {
       event.stopPropagation();
       again.disabled = true;
-      restart(sessionId);
+      // A wake that failed leaves the bar up, and it must still work for a second try.
+      void Promise.resolve(restart(sessionId)).finally(() => {
+        again.disabled = false;
+      });
     });
     bar.append(again);
     pane.mount.append(bar);
@@ -450,11 +469,54 @@ export class TerminalDeck {
 
   private writeChunk(sessionId: string, pane: Pane, chunk: TerminalChunk): void {
     if (chunk.data) pane.term.write(chunk.data);
-    if (!chunk.closed) return;
-    pane.term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n");
+    // Ended once is ended: a late closing chunk after ended() must not say it twice.
+    if (!chunk.closed || pane.dead) return;
+    const word = this.events.asleep?.(sessionId) ? "asleep" : "session ended";
+    pane.term.write(`\r\n\x1b[90m[${word}]\x1b[0m\r\n`);
     pane.dead = true;
     this.paintEnded(sessionId, pane);
     this.events.onExit(sessionId);
+  }
+
+  /** The PTY is known to be gone. Say so now rather than when its closing chunk arrives. */
+  ended(sessionId: string): void {
+    const pane = this.panes.get(sessionId);
+    if (pane) this.writeChunk(sessionId, pane, { terminalId: pane.terminalId, data: "", closed: true });
+  }
+
+  /** Hand a pane the output its PTY made before the pane was listening. See `pending`. */
+  private flushPending(sessionId: string, pane: Pane): void {
+    const startup = this.pending.get(pane.terminalId);
+    if (!startup) return;
+    window.clearTimeout(startup.timer);
+    this.pending.delete(pane.terminalId);
+    this.writeChunk(sessionId, pane, {
+      terminalId: pane.terminalId,
+      data: startup.data,
+      closed: startup.closed,
+    });
+  }
+
+  /**
+   * A sleeping pane, woken: the same pane and scrollback, with a new PTY under it. A fresh pane
+   * would cost the transcript above, and the wall would see a session it already has and not
+   * re-seat it.
+   */
+  wake(sessionId: string, terminalId: string): void {
+    const pane = this.panes.get(sessionId);
+    if (!pane) return;
+    claimed.delete(pane.terminalId);
+    pane.terminalId = terminalId;
+    claimed.add(terminalId);
+    pane.dead = false;
+    // Modes belong to the process that set them, and that process is gone.
+    pane.themeNotify = false;
+    pane.mount.querySelector(".term-ended-bar")?.remove();
+    pane.term.write("\x1b[2m── woken · picking the conversation back up ──\x1b[0m\r\n");
+    if (pane.term.cols && pane.term.rows) {
+      void invoke("resize_terminal", { terminalId, cols: pane.term.cols, rows: pane.term.rows });
+    }
+    this.flushPending(sessionId, pane);
   }
 
   /** Size to open a NEW pty with, measured off the host before any pane for it exists. */
@@ -489,7 +551,7 @@ export class TerminalDeck {
   add(
     sessionId: string,
     terminalId: string,
-    restore?: { screen: string; savedAt: number },
+    restore?: { screen: string; savedAt: number; asleep?: boolean },
   ): void {
     const mount = document.createElement("div");
     mount.className = "terminal-mount";
@@ -733,16 +795,13 @@ export class TerminalDeck {
         `\x1b[2m── restored from ${when} · everything above is last session ──\x1b[0m\r\n`,
       );
     }
-    const startup = this.pending.get(terminalId);
-    if (startup) {
-      window.clearTimeout(startup.timer);
-      this.pending.delete(terminalId);
-      this.writeChunk(sessionId, pane, {
-        terminalId,
-        data: startup.data,
-        closed: startup.closed,
-      });
+    // Restored asleep: there is no PTY under it and no closing chunk will ever come to say so.
+    if (restore?.asleep) {
+      pane.dead = true;
+      this.paintEnded(sessionId, pane);
+      return;
     }
+    this.flushPending(sessionId, pane);
   }
 
   /**

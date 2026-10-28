@@ -68,6 +68,7 @@
   --k-dshline: #8299ff;
   --k-glm: #ffb84d;
   --k-opencode: #5fd97a;
+  --k-gemini: #e48ad0;  /* Gemini — History only; Panel has no Gemini engine */
   --k-shell: #63d5c8;
   --k-task: #e0a94a;
 
@@ -170,6 +171,7 @@
   --k-kimi: #2f6fd1;         /* Kimi — blue deepened to read on white */
   --k-glm: #ad7010;          /* GLM — amber-orange deepened to read on white */
   --k-opencode: #2f9e52;     /* opencode — green deepened to read on white */
+  --k-gemini: #a8448f;       /* Gemini — orchid deepened to read on white */
   --k-shell: #0e7a87;        /* Shell — the same deep teal family as dark's mint */
   --k-task: #9c6d05;         /* Task — golden ochre */
 

@@ -20,8 +20,14 @@ export type SessionStripEvents = {
 };
 
 export type SessionStripHandle = {
-  /** Redraw for one project. `active` is the session whose screen is showing. */
-  paint(sessions: Session[], active: string | null, exited: ReadonlySet<string>): void;
+  /** Redraw for one project. `active` is the session whose screen is showing. An exited session
+   *  that is only `asleep` says so, since Wake brings it back. */
+  paint(
+    sessions: Session[],
+    active: string | null,
+    exited: ReadonlySet<string>,
+    asleep?: { has(id: string): boolean },
+  ): void;
 };
 
 export function mountSessionStrip(host: HTMLElement, events: SessionStripEvents): SessionStripHandle {
@@ -39,7 +45,7 @@ export function mountSessionStrip(host: HTMLElement, events: SessionStripEvents)
   if (events.skills) news.append(skills);
 
   return {
-    paint(sessions, active, exited) {
+    paint(sessions, active, exited, asleep) {
       selected = active && !exited.has(active) ? active : null;
       // No sessions: the terminal area itself says so and offers the start (#terminalEmpty), so
       // the strip stays quiet rather than saying it a second time.
@@ -59,7 +65,7 @@ export function mountSessionStrip(host: HTMLElement, events: SessionStripEvents)
           tab.innerHTML = `
             <i class="sess-dot"></i>
             <span class="sess-name"></span>
-            ${dead ? `<span class="sess-ended">ended</span>` : ""}
+            ${dead ? `<span class="sess-ended">${asleep?.has(session.id) ? "asleep" : "ended"}</span>` : ""}
             <button class="sess-x" type="button" aria-label="close session">×</button>`;
           tab.querySelector(".sess-name")!.textContent = session.title;
 
