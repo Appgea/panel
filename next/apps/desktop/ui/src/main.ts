@@ -42,6 +42,7 @@ import { openSkills } from "./features/skills";
 import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
+import type { OpsMapHandle } from "./features/ops_map";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -332,6 +333,12 @@ let sprintLoading: Promise<ProjectDeskHandle> | null = null;
 let sprintActive = false;
 let settingsFromSprint = false;
 let chatFromSprint = false;
+/** The ops network. Lazy: a screen you go to. */
+let opsMap: OpsMapHandle | null = null;
+let opsMapLoading: Promise<OpsMapHandle> | null = null;
+let opsMapActive = false;
+let settingsFromOpsMap = false;
+let chatFromOpsMap = false;
 /** The support queue. Lazy for the same reason as the plan: it is a screen you go to, not one
  *  you land on, and mounting it costs a read of the module's stored log. */
 let support: SupportHandle | null = null;
@@ -680,6 +687,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1136,12 +1144,14 @@ function showSettings(): void {
   settingsFromHome = homeActive;
   settingsFromNotebook = notebookActive;
   settingsFromSprint = sprintActive;
+  settingsFromOpsMap = opsMapActive;
   // The workspace comes down properly — its pinned tabs go home and the deck takes its panes
   // back. Reopening rebuilds it on the same tabs; nothing about the PTYs is disturbed.
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1173,6 +1183,8 @@ function exitSettings(): void {
     showNotebook();
   } else if (settingsFromSprint) {
     showSprint();
+  } else if (settingsFromOpsMap) {
+    showOpsMap();
   } else {
     mainZone().hidden = false;
   }
@@ -1186,6 +1198,7 @@ function showTerminals(at?: number): void {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1211,6 +1224,7 @@ function showHome(): void {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1244,6 +1258,7 @@ function showNotebook(): void {
   if (terminalsActive) exitTerminals();
   dropHome();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1287,6 +1302,7 @@ function showSprint(): void {
   dropNotebook();
   if (terminalsActive) exitTerminals();
   dropHome();
+  dropOpsMap();
   if (sprintActive) return;
   sprintActive = true;
   mainZone().hidden = true;
@@ -1319,6 +1335,54 @@ function dropSprint(): void {
   el("sprintScreen").hidden = true;
 }
 
+/** The ops tree as a network: what finished lately, what is stuck. See features/ops_map.ts. */
+function showOpsMap(): void {
+  dropHistory();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  dropSupport();
+  dropReview();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  if (opsMapActive) return;
+  opsMapActive = true;
+  mainZone().hidden = true;
+  const screen = el("opsMapScreen");
+  screen.hidden = false;
+  if (!opsMap) screen.textContent = "Reading the ops tree…";
+  const loading = opsMapLoading ?? import("./features/ops_map").then(({ mountOpsMap }) => {
+    opsMap = mountOpsMap(screen, {
+      openProject: (project) => void select(project),
+      openFile: (path, line) =>
+        void openFullPath(line ? { path, line } : { path }, false, null).catch((error: unknown) => console.warn("[panel] ops map", error)),
+      activity: (project) => pulse.activity(project),
+    });
+    return opsMap;
+  });
+  opsMapLoading = loading;
+  void loading
+    .then((handle) => {
+      if (opsMapActive) handle.open();
+    })
+    .catch((error: unknown) => {
+      opsMapLoading = null;
+      if (opsMapActive) {
+        screen.replaceChildren(errorNote("Ops map could not open.", error, () => { dropOpsMap(); showOpsMap(); }));
+      }
+    });
+  paintNav();
+  paintProjects();
+}
+
+function dropOpsMap(): void {
+  if (!opsMapActive) return;
+  opsMap?.clear();
+  opsMapActive = false;
+  el("opsMapScreen").hidden = true;
+}
+
 /** Support is a screen like Home: one queue for the whole portfolio. Every app publishes its own
  *  support form, but the person reading them is one person, so this is one list and not a tab
  *  that appears eleven times. */
@@ -1329,6 +1393,7 @@ function showSupport(): void {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (supportActive) return;
@@ -1373,6 +1438,7 @@ function showReview(projectId?: string): void {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (reviewActive) return;
@@ -1400,6 +1466,7 @@ function showHistory(focus?: { query?: string; session?: string }): void {
   dropChat();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   if (terminalsActive) exitTerminals();
   dropHome();
   historyActive = true;
@@ -1540,12 +1607,14 @@ function showChat(): void {
   chatFromHome = homeActive;
   chatFromNotebook = notebookActive;
   chatFromSprint = sprintActive;
+  chatFromOpsMap = opsMapActive;
   dropSettings();
   // The workspace comes down properly — the deck takes its panes back before Chat takes the glass.
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
   dropSprint();
+  dropOpsMap();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1575,6 +1644,8 @@ function exitChat(): void {
     showNotebook();
   } else if (chatFromSprint) {
     showSprint();
+  } else if (chatFromOpsMap) {
+    showOpsMap();
   } else {
     mainZone().hidden = false;
   }
@@ -1612,6 +1683,7 @@ const offProject = (): boolean =>
   chatActive ||
   notebookActive ||
   sprintActive ||
+  opsMapActive ||
   supportActive ||
   reviewActive ||
   historyActive;
@@ -1898,8 +1970,9 @@ function paintNav(): void {
   el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || historyActive);
   el("historyButton").classList.toggle("is-on", historyActive);
   el("reviewButton").classList.toggle("is-on", reviewActive);
-  el("planNav").classList.toggle("is-active", notebookActive || sprintActive);
+  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
+  el("opsMapButton").classList.toggle("is-on", opsMapActive);
   el("supportButton").classList.toggle("is-on", supportActive);
   el("notebookButton").classList.toggle("is-on", notebookActive);
   // The gear is a door like any other row: lit while its screen is the one on the glass.
@@ -4187,6 +4260,7 @@ async function boot(): Promise<void> {
   });
   el("notebookButton").addEventListener("click", () => showNotebook());
   el("sprintButton").addEventListener("click", () => showSprint());
+  el("opsMapButton").addEventListener("click", () => showOpsMap());
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
   el("historyButton").addEventListener("click", () => showHistory());
@@ -4568,6 +4642,8 @@ async function boot(): Promise<void> {
   // The plan is written by agents in their own terminals. The screen follows the file rather
   // than waiting to be told, so an agent's plan lands without anyone pressing refresh.
   await listen("panel-sprints-changed", () => sprint?.sync());
+  // now.md, the log and the rollouts are written by agents too. The map follows the files.
+  await listen("panel-ops-changed", () => opsMap?.sync());
   // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.
   await listen("panel-link", takeAppLinks);
   takeAppLinks();

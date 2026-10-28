@@ -38,6 +38,8 @@ export type PulseHandle = {
   git(id: string): Promise<GitState | null>;
   peekGit(id: string): GitState | null;
   peekActivity(id: string): Activity | null;
+  /** Two weeks of commits, from the cache when it is fresh. */
+  activity(id: string): Promise<Activity | null>;
   standing(id: string): Standing | null;
   verdict(id: string): Verdict | null;
   /** Ask for whatever is stale for these projects. Cheap to call on every repaint. */
@@ -135,6 +137,7 @@ export function mountPulse(events: {
     git,
     peekGit: (id) => gits.get(id)?.value ?? null,
     peekActivity: (id) => activities.get(id)?.value ?? null,
+    activity,
     standing: (id) => standings.get(id) ?? null,
     verdict: (id) => verdicts.get(id) ?? null,
     warm(ids) {

@@ -31,6 +31,11 @@ Nothing fits? Say so and stop. A brain that files everything is a landfill.
 One line per thing. `now.md` caps at 40 lines. Never write a status you did not observe.
 Close with the outcome, not the story. Never restate what he just told you.
 
+Every `now.md` line opens with a headline: one short sentence in everyday words, the action or
+the news. No ids, file names, code or dates in it. Details follow in the same line. Panel's Ops
+map shows the headline alone. A line's age is when its text last changed, so a wording-only
+change is committed on its own and its hash added to `.git-blame-ignore-revs`.
+
 ## Sprints
 
 `sprints/<id>.md` holds a ranked `focus:` list and at most 8 goals. `_template.md` is the shape.

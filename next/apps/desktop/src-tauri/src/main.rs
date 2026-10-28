@@ -17,6 +17,7 @@ mod made;
 mod modules;
 mod notebook;
 mod ops;
+mod ops_map;
 mod paths;
 mod platform;
 mod projects;
@@ -53,6 +54,8 @@ const PORTFOLIO_EVENT: &str = "panel-portfolio-changed";
 /// screen itself. The plan is agent-written by design, so the screen must never be the last to
 /// know what the plan says.
 const SPRINTS_EVENT: &str = "panel-sprints-changed";
+/// `now.md`, the log, a rollout, a decision or the portfolio changed. The Ops map repaints.
+const OPS_EVENT: &str = "panel-ops-changed";
 
 /// One live terminal on a project — any coding agent (`claude`, `codex`, `grok`, `kimi`, `glm`,
 /// `opencode`, ...), or a plain shell.
@@ -910,6 +913,43 @@ fn watch_sprints(app: AppHandle) {
     });
 }
 
+/// The files the Ops map reads. Only the ops root and three folders: the rest of the tree is
+/// prose the map never draws, and an agent writing a runbook should not repaint it.
+fn watch_ops(app: AppHandle) {
+    let Some(ops) = ops::ops_dir() else {
+        return;
+    };
+    std::thread::spawn(move || {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let Ok(mut watcher) = notify::recommended_watcher(tx) else {
+            return;
+        };
+        let watched = [ops.clone(), ops.join("log"), ops.join("rollouts"), ops.join("decisions")];
+        for dir in watched.iter().filter(|dir| dir.is_dir()) {
+            let _ = notify::Watcher::watch(&mut watcher, dir, notify::RecursiveMode::NonRecursive);
+        }
+        let read = |path: &Path| {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            match path.parent() {
+                Some(parent) if parent == ops => name == "now.md" || name == "portfolio.yaml",
+                Some(_) => name.ends_with(".md"),
+                None => false,
+            }
+        };
+        while let Ok(event) = rx.recv() {
+            let Ok(event) = event else { continue };
+            if !event.paths.iter().any(|path| read(path)) {
+                continue;
+            }
+            while rx
+                .recv_timeout(std::time::Duration::from_millis(200))
+                .is_ok()
+            {}
+            let _ = app.emit(OPS_EVENT, ());
+        }
+    });
+}
+
 /// Open a project-owned directory in the platform file manager. `path = null` means the project
 /// root; feature workspaces may pass a relative child folder. The same
 /// canonical confinement used by the editor prevents the webview from opening arbitrary paths.
@@ -987,6 +1027,12 @@ fn open_revenuecat_setup(project_id: Option<String>) -> Result<(), String> {
 #[tauri::command]
 async fn project_dashboard(project: String) -> Result<GitState, String> {
     off_main(move || Ok(projects::git_state(&find_project(&project)?.path))).await
+}
+
+/// The ops tree as one packet: what is open, what finished, what spans apps. See ops_map.rs.
+#[tauri::command]
+async fn ops_map() -> Result<ops_map::OpsMap, String> {
+    off_main(ops_map::read).await
 }
 
 /// Each project's row in its company's `portfolio.yaml`, for the sidebar's lanes.
@@ -4258,6 +4304,7 @@ fn main() {
             });
             watch_portfolio(app.handle().clone());
             watch_sprints(app.handle().clone());
+            watch_ops(app.handle().clone());
             // Installers register the scheme on Windows and Linux; a dev build has to ask.
             #[cfg(any(windows, target_os = "linux"))]
             let _ = app.deep_link().register_all();
@@ -4300,6 +4347,7 @@ fn main() {
             open_revenuecat_setup,
             project_dashboard,
             project_standings,
+            ops_map,
             project_activity,
             git_overview,
             debug_profiles,

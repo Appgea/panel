@@ -136,6 +136,11 @@ pub(crate) struct PortfolioApp {
     /// idea | building | review | releasing | live | paused | archived | unknown.
     pub status: String,
     pub notes: String,
+    /// flutter-app | ios-native | server | tool | …, as written.
+    pub kind: String,
+    /// Keys of the shared services this app needs, and of the apps a service backs.
+    pub depends_on: Vec<String>,
+    pub serves: Vec<String>,
 }
 
 impl PortfolioApp {
@@ -145,6 +150,9 @@ impl PortfolioApp {
             "dir" => self.dir = value,
             "status" => self.status = value,
             "notes" => self.notes = value,
+            "kind" => self.kind = value,
+            "depends_on" => self.depends_on = list_field(&value),
+            "serves" => self.serves = list_field(&value),
             _ => {}
         }
     }
@@ -200,18 +208,28 @@ pub(crate) fn portfolio(ops: &Path) -> Vec<PortfolioApp> {
     apps
 }
 
-/// `name: X, notes: "a, b", dir: Y` → pairs. A comma inside quotes belongs to the value.
+/// `name: X, notes: "a, b", serves: [a, b], dir: Y` → pairs. A comma inside quotes, a list or a
+/// nested map belongs to the value.
 fn inline_fields(body: &str) -> Vec<(String, String)> {
     let mut parts = Vec::new();
     let mut part = String::new();
     let mut quoted = false;
+    let mut depth = 0usize;
     for ch in body.chars() {
         match ch {
             '"' => {
                 quoted = !quoted;
                 part.push(ch);
             }
-            ',' if !quoted => parts.push(std::mem::take(&mut part)),
+            '[' | '{' if !quoted => {
+                depth += 1;
+                part.push(ch);
+            }
+            ']' | '}' if !quoted => {
+                depth = depth.saturating_sub(1);
+                part.push(ch);
+            }
+            ',' if !quoted && depth == 0 => parts.push(std::mem::take(&mut part)),
             _ => part.push(ch),
         }
     }
@@ -232,7 +250,7 @@ fn strip_comment(value: &str) -> &str {
 
 /// Which portfolio project holds an app's folder. `dir` is relative to the folder that holds the
 /// ops tree (the company root), and a project path that ends with those components is the one.
-fn resolve_apps(ops: &Path) -> Vec<AppRef> {
+pub(crate) fn resolve_apps(ops: &Path) -> Vec<AppRef> {
     let root = ops.parent().map(Path::to_path_buf);
     let projects = crate::projects::load();
     portfolio(ops)
@@ -810,7 +828,7 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("portfolio.yaml"),
-            "focus: []\n\napps:\n  notes_app:\n    name: Notes App\n    dir: apps/notes_app   # moved\n    kind: social\n    status: live\n\n  # --- Flutter apps ---\n  tavla:          { name: Tavla,              dir: Tavla,              kind: flutter-app, status: review, notes: \"a, b\" }\n  flame_server:   { name: Flame Appgea Server, dir: flame-appgea-server, kind: server }\n",
+            "focus: []\n\napps:\n  notes_app:\n    name: Notes App\n    dir: apps/notes_app   # moved\n    kind: social\n    status: live\n\n  # --- Flutter apps ---\n  tavla:          { name: Tavla,              dir: Tavla,              kind: flutter-app, status: review, revenuecat: { project: \"p\", offerings: [default] }, depends_on: [flame_server], notes: \"a, b\" }\n  flame_server:   { name: Flame Appgea Server, dir: flame-appgea-server, kind: server, serves: [tavla, pisti] }\n",
         )
         .unwrap();
         let apps: Vec<(String, String, String, String, String)> = portfolio(&dir)
@@ -828,8 +846,10 @@ mod tests {
                 row("flame_server", "Flame Appgea Server", "flame-appgea-server", "", ""),
             ]
         );
+        let apps = portfolio(&dir);
+        assert_eq!(apps[1].depends_on, vec!["flame_server".to_string()]);
+        assert_eq!(apps[2].serves, vec!["tavla".to_string(), "pisti".to_string()]);
+        assert_eq!((apps[0].kind.as_str(), apps[2].kind.as_str()), ("social", "server"));
         let _ = fs::remove_dir_all(dir);
     }
-
-
 }

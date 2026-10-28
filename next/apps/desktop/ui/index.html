@@ -351,6 +351,10 @@
           <button id="sprintButton" class="nav-row" type="button" title="Project desk">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h6"/><path d="m14 16 2.5 2.5L21 14"/></svg></span> Project desk
           </button>
+          <!-- The ops tree as a network: who holds what, what finished, what is stuck. -->
+          <button id="opsMapButton" class="nav-row" type="button" title="Ops map: what is done and what is stuck">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.6"/><circle cx="5" cy="6" r="1.8"/><circle cx="19" cy="6.5" r="1.8"/><circle cx="6" cy="18.5" r="1.8"/><circle cx="18.5" cy="18" r="1.8"/><path d="m6.5 7.3 3.6 3M17.5 7.7l-3.5 2.8M7.4 17.4l2.8-3.3M16.9 16.7l-2.9-3"/></svg></span> Ops map
+          </button>
           <button id="notebookButton" class="nav-row" type="button" title="Notebook">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M6 3.5h11.5A1.5 1.5 0 0 1 19 5v15.5H6A2 2 0 0 1 4 18.5v-13a2 2 0 0 1 2-2Z"/><path d="M7 3.5v17M10 8h6M10 12h6"/></svg></span>
             Notebook
@@ -421,6 +425,8 @@
            the project chrome the same way Settings does — it is not a tab of anything. -->
       <section id="homeScreen" class="home" hidden></section>
       <section id="sprintScreen" class="sprint" hidden></section>
+      <!-- OPS MAP: the company brain as a network. Portfolio-wide, like Home. -->
+      <section id="opsMapScreen" class="ops-map" hidden tabindex="-1"></section>
 
       <!-- SUPPORT: every app's support form, read into one queue. Portfolio-wide like Home —
            the queue is one queue, and splitting it per project would make eleven of it. -->
