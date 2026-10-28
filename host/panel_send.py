@@ -23,7 +23,7 @@ def main():
         metavar="REF|LABEL|DETAIL",
         help="repeatable code-backed flow step",
     )
-    parser.add_argument("--image", action="append", default=[])
+    parser.add_argument("--image", action="append", default=[], metavar="PATH[|CAPTION]")
     parser.add_argument("--audio", action="append", default=[])
     parser.add_argument("--video", action="append", default=[])
     parser.add_argument("--file", action="append", default=[])
@@ -50,7 +50,11 @@ def main():
         "flow": flow,
     }
     if args.image:
-        payload["images"] = args.image
+        # PATH|CAPTION, so a report's screenshots can say what they show.
+        payload["images"] = [
+            {"path": p, "caption": c} if c else p
+            for p, _, c in (raw.partition("|") for raw in args.image)
+        ]
     if args.audio:
         payload["audio"] = args.audio
     if args.video:
@@ -64,7 +68,15 @@ def main():
     if args.link:
         payload["links"] = args.link
 
-    port = os.environ.get("PANEL_PORT", "7391")
+    # A session Panel did not launch has no PANEL_PORT. Panel writes its live port to this file,
+    # and the old fixed default sent those reports nowhere.
+    port = os.environ.get("PANEL_PORT")
+    if not port:
+        try:
+            with open(os.path.expanduser("~/.appgeapanel/ingress-port")) as f:
+                port = f.read().strip()
+        except OSError:
+            port = "7391"
     body = json.dumps({
         "instance": os.environ.get("PANEL_INSTANCE", ""),
         # Second way home. An engine that never got PANEL_INSTANCE (a plain shell, a CLI with no
