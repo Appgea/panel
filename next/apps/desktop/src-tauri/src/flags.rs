@@ -36,11 +36,13 @@ pub fn flags_read() -> Result<Value, String> {
     read_raw().map(|(_, doc)| doc)
 }
 
-/// One change, read-modify-written, so a script or agent editing another flag is not overwritten.
+/// One change, read-modify-written, so a script or agent editing another flag is kept.
 /// No `repo` sets the default. A `repo` with no `on` drops that repo's override.
 ///
 /// Just before the rename it reads the file again. Changed since the first read: someone else
-/// wrote it, so it starts over from their version rather than drop their edit.
+/// wrote it, so it starts over from their version rather than drop their edit. Best effort: an
+/// edit landing in the instant between that check and the rename is still lost. The other
+/// writers are a person and an agent editing by hand, so a lock both sides honour is not worth it.
 #[tauri::command]
 pub fn flags_set(name: String, repo: Option<String>, on: Option<bool>) -> Result<Value, String> {
     for _ in 0..5 {

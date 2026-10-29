@@ -247,8 +247,6 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
   /* null until flags_read answers. Repo names come from the registered projects' folders. */
   let flags: FlagDoc | null = null;
   let flagError = "";
-  /* Bumped by every set, so a read that left before it cannot paint the older document over it. */
-  let flagWrites = 0;
   let repoNames: string[] = [];
 
   /* ------------------------------------------------------------------- rows */
@@ -406,7 +404,6 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
    *  Quick clicks queue: each set starts after the last one answered, so the newest doc paints last. */
   let flagQueue: Promise<void> = Promise.resolve();
   const setFlag = (name: string, repo: string | null, on: boolean | null): void => {
-    flagWrites += 1;
     flagQueue = flagQueue.then(() => invoke<FlagDoc>("flags_set", { name, repo, on })
       .then((doc) => {
         flags = doc;
@@ -723,15 +720,16 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
           if (openState && section === "extensions") paint();
         });
 
-      // Read on every open: an agent may have added a flag since the last look.
-      const writes = flagWrites;
+      // Read on every open: an agent may have added a flag since the last look. Until it answers the
+      // section says "Reading", so no click can be sent against an older document.
+      flags = null;
+      flagError = "";
       void Promise.all([
         invoke<FlagDoc>("flags_read"),
         invoke<{ path: string }[]>("list_projects").catch(() => []),
       ])
         .then(([doc, projects]) => {
-          if (writes === flagWrites) flags = doc;
-          flagError = "";
+          flags = doc;
           const names = projects.map((project) => project.path.split(/[\\/]/).filter(Boolean).pop() ?? "");
           repoNames = [...new Set(names.filter(Boolean))].sort();
         })
