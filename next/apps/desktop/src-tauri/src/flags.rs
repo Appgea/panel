@@ -63,10 +63,11 @@ pub fn flags_set(name: String, repo: Option<String>, on: Option<bool>) -> Result
         .map_or(0, |time| time.subsec_nanos());
     let temp = path.with_extension(format!("json.{}.{nanos}.tmp", std::process::id()));
     let bytes = serde_json::to_vec_pretty(&doc).map_err(|error| error.to_string())?;
-    std::fs::write(&temp, bytes).map_err(|error| error.to_string())?;
-    std::fs::rename(&temp, &path).map_err(|error| {
-        let _ = std::fs::remove_file(&temp);
-        error.to_string()
-    })?;
+    std::fs::write(&temp, bytes)
+        .and_then(|()| std::fs::rename(&temp, &path))
+        .map_err(|error| {
+            let _ = std::fs::remove_file(&temp);
+            error.to_string()
+        })?;
     Ok(doc)
 }

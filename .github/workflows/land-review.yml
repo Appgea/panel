@@ -26,21 +26,35 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
-      # The key sits in this step's env. The reviewer gets read tools only, no shell and no web, so a
-      # prompt cannot send it anywhere. The comment is the only thing that leaves.
-      - name: Review
+          # No token left in .git/config for the reviewer to read.
+          persist-credentials: false
+      - name: Prompt
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ github.event.pull_request.base.sha }}
           HEAD: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr view "$PR" --json body --jq .body > "$RUNNER_TEMP/prompt"
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/prompt"
           printf '\n=== THE DIFF ===\n' >> "$RUNNER_TEMP/prompt"
           git diff "$BASE...$HEAD" >> "$RUNNER_TEMP/prompt"
+      # The API key is in this step only, with no GitHub token beside it. The reviewer gets read tools,
+      # no shell and no web. Its text is checked for the key before anything is posted.
+      - name: Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
           npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet \
             --allowedTools "Read,Grep,Glob" \
             --disallowedTools "Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
+          # land takes any marked comment as the finished review, so an empty one must never be posted.
+          [ -s "$RUNNER_TEMP/review" ] || { echo "empty review"; exit 1; }
+          if grep -qF "$ANTHROPIC_API_KEY" "$RUNNER_TEMP/review"; then echo "review text holds the key, not posting"; exit 1; fi
+      - name: Comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
           { echo "<!-- land-review sha=$HEAD -->"; cat "$RUNNER_TEMP/review"; } > "$RUNNER_TEMP/comment"
-          gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment"
+          gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment"

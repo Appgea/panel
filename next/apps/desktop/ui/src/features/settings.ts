@@ -402,10 +402,12 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
     return row;
   };
 
-  /** One change at a time, so the Rust side can read-modify-write and keep a script's edit. */
+  /** One change at a time, so the Rust side can read-modify-write and keep a script's edit.
+   *  Quick clicks queue: each set starts after the last one answered, so the newest doc paints last. */
+  let flagQueue: Promise<void> = Promise.resolve();
   const setFlag = (name: string, repo: string | null, on: boolean | null): void => {
     flagWrites += 1;
-    void invoke<FlagDoc>("flags_set", { name, repo, on })
+    flagQueue = flagQueue.then(() => invoke<FlagDoc>("flags_set", { name, repo, on })
       .then((doc) => {
         flags = doc;
         flagError = "";
@@ -413,7 +415,7 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
       .catch((error) => {
         flagError = `Could not change the flag. ${error}`;
       })
-      .finally(paint);
+      .finally(paint));
   };
 
   /* --------------------------------------------------------------- sections */
