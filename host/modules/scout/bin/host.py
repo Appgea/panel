@@ -262,6 +262,52 @@ def board(fresh):
         return {"error": str(error)}
 
 
+BUILD_COLUMNS = ["date", "builder", "effort", "repo", "minutes", "exit", "session", "kind", "verdict", "task"]
+
+
+def builds_dir():
+    return Path(os.environ.get("SCOUT_BUILDS") or
+                Path(os.environ.get("PANEL_USER_HOME") or Path.home() / ".appgeapanel") / "state/builds")
+
+
+def pid_alive(pid):
+    if type(pid) is not int or pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def builds():
+    """Builder runs: live markers (oldest first) and the last 12 finished rows (newest first)."""
+    running = []
+    for path in builds_dir().glob("*.json"):
+        try:
+            marker = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(marker, dict) and pid_alive(marker.get("pid")):
+            running.append(marker)
+    running.sort(key=lambda m: str(m.get("started", "")))
+    recent = []
+    try:
+        lines = (ops_path() / "reviews/builds.tsv").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        lines = []
+    for line in lines[1:]:
+        if not line.strip():
+            continue
+        cells = line.split("\t")
+        # Old rows stop at 7 columns. A missing cell reads as "-".
+        cells += ["-"] * (len(BUILD_COLUMNS) - len(cells))
+        recent.append(dict(zip(BUILD_COLUMNS, cells[:len(BUILD_COLUMNS)])))
+    return {"running": running, "recent": recent[-12:][::-1], "at": now().isoformat()}
+
+
 def _respond(status, body, ctype="application/json"):
     payload = json.dumps(body, ensure_ascii=False).encode()
     sys.stdout.buffer.write(("%d\n%s\n\n" % (status, ctype)).encode())
@@ -293,6 +339,8 @@ def main():
         return _respond(200, listing())
     if method == "GET" and path == "/board":
         return _respond(200, board(qs("fresh") == "1"))
+    if method == "GET" and path == "/builds":
+        return _respond(200, builds())
     if method == "GET" and path == "/prompt":
         scout = next((s for s in scouts() if s["id"] == qs("id")), None)
         if not scout:

@@ -53,11 +53,36 @@ export type BoardData = {
   next?: BoardCard[];
   error?: string;
 };
+export type RunningBuild = {
+  pid: number;
+  builder: string;
+  effort: string;
+  kind: string;
+  repo: string;
+  task: string;
+  session: string;
+  started: string;
+};
+/** A finished row of builds.tsv. Every cell is text; "-" means not known yet. */
+export type BuildRow = {
+  date: string;
+  builder: string;
+  effort: string;
+  repo: string;
+  minutes: string;
+  exit: string;
+  session: string;
+  kind: string;
+  verdict: string;
+  task: string;
+};
+export type BuildList = { running: RunningBuild[]; recent: BuildRow[]; at?: string; error?: string };
 
 /** The extension's routes, behind one seam so the dev harness can stand in for it. */
 export type BoardApi = {
   scouts(): Promise<ScoutList>;
   board(fresh: boolean): Promise<BoardData>;
+  builds(): Promise<BuildList>;
   run(id: string): Promise<ScoutRun>;
   prompt(id: string): Promise<string>;
   start(id: string, session: string): Promise<ScoutRun>;
@@ -127,10 +152,20 @@ const scoutState = (scout: Scout, live: boolean): { tone: string; word: string }
   return { tone: "t-quiet", word: "not run" };
 };
 
+/** Tone and verdict word for a finished build. A bad exit or a wrong verdict outranks a good one. */
+const buildState = (row: BuildRow): { tone: string; word: string } => {
+  if (row.verdict === "wrong") return { tone: "t-risk", word: "wrong" };
+  if (row.exit !== "0" && row.exit !== "-") return { tone: "t-risk", word: row.verdict === "-" ? `exit ${row.exit}` : row.verdict };
+  if (row.verdict === "ship") return { tone: "t-ok", word: "ship" };
+  if (row.verdict === "fix") return { tone: "t-warn", word: "fix" };
+  return { tone: "t-quiet", word: "no verdict yet" };
+};
+
 export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: BoardEvents): BoardHandle {
   const { api } = events;
   let list: ScoutList | null = null;
   let board: BoardData | null = null;
+  let builds: BuildList = { running: [], recent: [] };
   let failure = "";
   let busy = false;
   let again = false;
@@ -158,11 +193,14 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
     if (fresh) lastFresh = Date.now();
     busy = true;
     try {
-      const [scouts, read] = await Promise.all([
+      const [scouts, read, builtList] = await Promise.all([
         api.scouts(),
         api.board(fresh).catch((error: unknown): BoardData => ({ error: errorText(error, "the scout extension did not answer") })),
+        // Builds are extra. A failure here shows in their section and never breaks the board.
+        api.builds().catch((error: unknown): BuildList => ({ running: [], recent: [], error: errorText(error, "builds could not be read") })),
       ]);
       list = scouts;
+      builds = builtList;
       board = read;
       failure = "";
       paint();
@@ -241,6 +279,12 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
       });
       items.append(item);
     }
+    for (const build of builds.running) {
+      const item = button("bs-item bs-scout t-work", "", `Build (${build.builder}): ${build.task}`);
+      item.append(h("i", "bs-dot mo-pulse"), h("span", "bs-title", build.task), h("small", "", `${build.builder} build`));
+      item.addEventListener("click", () => events.openBoard());
+      items.append(item);
+    }
     if (!items.childElementCount) {
       const quiet = failure || board?.error ? "The board could not be read" : "Nobody is on an issue";
       items.append(h("span", "bs-quiet", quiet));
@@ -282,6 +326,32 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
     return box;
   }
 
+  function buildRow(build: RunningBuild | BuildRow): HTMLElement {
+    const running = "pid" in build;
+    const state = running ? { tone: "t-work", word: "" } : buildState(build);
+    const row = h("div", `bd-build ${state.tone}`);
+    // core:pulse — alive. Only a running build's dot moves.
+    row.append(h("i", running ? "bd-dot mo-pulse" : "bd-dot"));
+    // The builder sits where an issue's number sits, so titles line up down the screen.
+    const who = h("b", "bd-num", build.builder);
+    who.title = build.builder;
+    row.append(who);
+    const text = h("div", "bd-text");
+    const title = h("span", "bd-title", build.task && build.task !== "-" ? build.task : "(no title)");
+    title.title = title.textContent ?? "";
+    text.append(title);
+    const facts = running
+      ? [build.effort, build.kind, build.repo]
+      : [build.effort, state.word, build.exit === "4" ? "out of scope" : "", build.repo];
+    const line = h("small", "", facts.filter((f) => f && f !== "-").join(" · "));
+    line.title = line.textContent ?? "";
+    text.append(line);
+    row.append(text);
+    const took = running ? held(build.started) : build.minutes !== "-" ? `${build.minutes}m` : "";
+    row.append(h("span", "bd-kind", took));
+    return row;
+  }
+
   function scoutRow(scout: Scout): HTMLElement {
     const isLive = live(scout);
     const state = scoutState(scout, isLive);
@@ -319,6 +389,14 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
       row.append(run);
     }
     return row;
+  }
+
+  function buildsSection(): HTMLElement {
+    const rows = [...builds.running.map(buildRow), ...builds.recent.map(buildRow)];
+    const empty = builds.error ? `Builds could not be read: ${builds.error}` : "No builds yet. Say orchestrate in a terminal.";
+    const box = section("Builds", builds.running.length, rows, empty);
+    if (builds.error) box.querySelector(".bd-empty")?.classList.add("bd-error-line");
+    return box;
   }
 
   function paintScreen(): void {
@@ -360,6 +438,7 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
         section("Now", board?.now?.length ?? 0,
           (board?.now ?? []).map((c) => cardRow(c, "t-work", [c.holder ?? "", held(c.claimed_at)])),
           "Nobody is on an issue. Type work in a terminal to start one."),
+        buildsSection(),
         section("Needs you", board?.you?.length ?? 0, (board?.you ?? []).map((c) => cardRow(c, "t-warn", [])),
           "Nothing waits on you."),
         section("Next up", null, (board?.next ?? []).map((c) => cardRow(c, "t-quiet", [`P${c.priority}`])),

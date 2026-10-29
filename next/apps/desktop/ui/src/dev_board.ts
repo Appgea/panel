@@ -6,7 +6,7 @@
  */
 import "./style.css";
 import "./motion.css";
-import { mountBoard, type BoardApi, type BoardData, type Scout, type ScoutList } from "./features/board";
+import { mountBoard, type BoardApi, type BoardData, type BuildList, type Scout, type ScoutList } from "./features/board";
 
 const params = new URLSearchParams(location.search);
 const ago = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -61,10 +61,29 @@ const SCOUTS: ScoutList = {
   ],
 };
 
+const row = (builder: string, effort: string, minutes: number, exit: number, kind: string, verdict: string, task: string, repo = "panel") =>
+  ({ date: "2026-10-29", builder, effort, repo, minutes: String(minutes), exit: String(exit), session: "s", kind, verdict, task });
+const BUILDS: BuildList = params.get("empty")
+  ? { running: [], recent: [] }
+  : {
+    running: [
+      { pid: 101, builder: "sol", effort: "medium", kind: "ui", repo: "panel", task: "Panel's Board screen shows issues and scouts, but not the builder runs that orchestrated work starts, and this title keeps going to test the ellipsis", session: "s1", started: ago(14) },
+      { pid: 102, builder: "luna", effort: "low", kind: "mechanical", repo: "tavla", task: "Rename the bear-off helper", session: "s2", started: ago(3) },
+    ],
+    recent: [
+      row("sol", "medium", 22, 0, "edit", "ship", "Add the /builds route to the scout host"),
+      row("luna", "low", 6, 0, "text", "fix", "Fix the empty-state copy on Home"),
+      row("sol", "high", 31, 0, "logic", "wrong", "Move the terminal restore into its own module", "panel"),
+      row("luna", "low", 4, 4, "edit", "-", "Trim unused imports across the scout files", "ops"),
+      row("sol", "medium", 12, 0, "ui", "-", "Round the board stat chips"),
+    ],
+  };
+
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const api: BoardApi = {
   scouts: async () => structuredClone(SCOUTS),
   board: async () => structuredClone(BOARD),
+  builds: async () => structuredClone(BUILDS),
   run: async (id) => {
     await wait(900);
     return { at: new Date().toISOString(), status: "done", found: 0, note: `${id} ran`, session: null };

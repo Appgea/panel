@@ -43,7 +43,7 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
-import type { BoardData, BoardHandle, Scout, ScoutList, ScoutRun } from "./features/board";
+import type { BoardData, BoardHandle, BuildList, Scout, ScoutList, ScoutRun } from "./features/board";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -1469,6 +1469,7 @@ function setupBoard(on: boolean): void {
       api: {
         scouts: () => moduleGet<ScoutList>("/m/scout/scouts"),
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
+        builds: () => moduleGet<BuildList>("/m/scout/builds"),
         run: (id) => modulePost<ScoutRun>("/m/scout/run", { id }),
         prompt: (id) =>
           moduleGet<{ prompt: string }>(`/m/scout/prompt?id=${encodeURIComponent(id)}`).then((answer) => answer.prompt),

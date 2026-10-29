@@ -201,6 +201,37 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(result["error"])
 
+    def test_builds(self):
+        os.environ["SCOUT_BUILDS"] = str(self.root / "builds")
+        status, result = self.call("GET", "/builds")
+        self.assertEqual((status, result["running"], result["recent"]), (200, [], []))
+        reviews = self.ops / "reviews"
+        reviews.mkdir()
+        header = "\t".join(host.BUILD_COLUMNS)
+        old = "2026-10-01\tsol\tmedium\tpanel\t9\t0\tabc"
+        rows = [header, old] + ["2026-10-%02d\tluna\tlow\tpanel\t%d\t4\ts\tedit\tfix\ttask %d" % (d, d, d)
+                                 for d in range(2, 16)]
+        (reviews / "builds.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
+        marker_dir = self.root / "builds"
+        marker_dir.mkdir()
+        mine = {"pid": os.getpid(), "builder": "sol", "started": "2026-10-29T12:00:00+02:00"}
+        (marker_dir / "1.json").write_text(json.dumps(mine))
+        (marker_dir / "2.json").write_text(json.dumps(dict(mine, pid=os.getpid(), started="2026-10-29T11:00:00+02:00")))
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        (marker_dir / "3.json").write_text(json.dumps(dict(mine, pid=dead.pid)))
+        (marker_dir / "4.json").write_text("not json")
+        status, result = self.call("GET", "/builds")
+        self.assertEqual([m["started"] for m in result["running"]],
+                         ["2026-10-29T11:00:00+02:00", "2026-10-29T12:00:00+02:00"])
+        self.assertEqual(len(result["recent"]), 12)
+        self.assertEqual(result["recent"][0]["task"], "task 15")
+        self.assertEqual(result["recent"][0]["exit"], "4")
+        (reviews / "builds.tsv").write_text(header + "\n" + old + "\n", encoding="utf-8")
+        status, result = self.call("GET", "/builds")
+        self.assertEqual(result["recent"], [dict(zip(host.BUILD_COLUMNS,
+                         ["2026-10-01", "sol", "medium", "panel", "9", "0", "abc", "-", "-", "-"]))])
+
     def test_no_route(self):
         self.assertEqual(self.call("GET", "/missing"), (404, {"error": "no route"}))
 
