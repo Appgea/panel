@@ -59,9 +59,17 @@ pub fn flags_set(name: String, repo: Option<String>, on: Option<bool>) -> Result
             let _ = std::fs::remove_file(&temp);
             error.to_string()
         })?;
-        if read_raw()?.0 != before {
-            let _ = std::fs::remove_file(&temp);
-            continue;
+        // Unreadable now, or changed: either way this temp is not the file to keep.
+        match read_raw() {
+            Ok((now, _)) if now == before => {}
+            Ok(_) => {
+                let _ = std::fs::remove_file(&temp);
+                continue;
+            }
+            Err(error) => {
+                let _ = std::fs::remove_file(&temp);
+                return Err(error);
+            }
         }
         std::fs::rename(&temp, &path).map_err(|error| {
             let _ = std::fs::remove_file(&temp);

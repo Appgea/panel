@@ -38,18 +38,16 @@ jobs:
           gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/prompt"
           printf '\n=== THE DIFF ===\n' >> "$RUNNER_TEMP/prompt"
           git diff "$BASE...$HEAD" >> "$RUNNER_TEMP/prompt"
-      # The API key is in this step only, with no GitHub token beside it. The reviewer gets read tools,
-      # no shell and no web. Its text is checked for the key before anything is posted.
+      # The API key is in this step only, with no GitHub token beside it. The reviewer gets no tools at
+      # all, so nothing it is told can reach the key: it judges the diff in the prompt and nothing else.
       - name: Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet \
-            --allowedTools "Read,Grep,Glob" \
-            --disallowedTools "Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,Read(/proc/**),Read(/sys/**),Grep(/proc/**),Grep(/sys/**),Glob(/proc/**),Glob(/sys/**)" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
+          [ -n "$ANTHROPIC_API_KEY" ] || { echo "ANTHROPIC_API_KEY is not set on this repo"; exit 1; }
+          npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet --tools "" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
           # land takes any marked comment as the finished review, so an empty one must never be posted.
           [ -s "$RUNNER_TEMP/review" ] || { echo "empty review"; exit 1; }
-          if grep -qF "$ANTHROPIC_API_KEY" "$RUNNER_TEMP/review"; then echo "review text holds the key, not posting"; exit 1; fi
       - name: Comment
         env:
           GH_TOKEN: ${{ github.token }}

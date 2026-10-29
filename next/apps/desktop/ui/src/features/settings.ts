@@ -726,7 +726,11 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
       flagError = "";
       void Promise.all([
         invoke<FlagDoc>("flags_read"),
-        invoke<{ path: string }[]>("list_projects").catch(() => []),
+        // Without the project list the flags still work. Only the repo picker goes.
+        invoke<{ path: string }[]>("list_projects").catch((error) => {
+          console.warn("flags: no project list for the repo picker", error);
+          return [];
+        }),
       ])
         .then(([doc, projects]) => {
           flags = doc;
