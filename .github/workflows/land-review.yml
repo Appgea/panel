@@ -1,0 +1,43 @@
+# The cloud half of `land` (Appgea ops runbooks/land.py). A session with the pr_flow flag on pushes a
+# land/<sha> branch and opens a PR whose body is the review prompt plus the ask. This job adds the diff,
+# runs Claude Code on API credits, and comments. land waits for the comment that carries its head sha.
+name: land review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: land-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    # pull_request from a fork gets no secrets, and its body is not ours to run as a prompt.
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'land/')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - name: Review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr view "$PR" --json body --jq .body > "$RUNNER_TEMP/prompt"
+          printf '\n=== THE DIFF ===\n' >> "$RUNNER_TEMP/prompt"
+          git diff "$BASE...$HEAD" >> "$RUNNER_TEMP/prompt"
+          npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet \
+            --disallowedTools "Edit,Write,NotebookEdit,Bash" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
+          { echo "<!-- land-review sha=$HEAD -->"; cat "$RUNNER_TEMP/review"; } > "$RUNNER_TEMP/comment"
+          gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment"

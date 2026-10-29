@@ -182,6 +182,7 @@ const rowText = (name: string, note: string): HTMLElement => {
  *  read whole, and the list on the left says what else there is without a scroll. */
 const SECTIONS = [
   { id: "general", name: "General", glyph: "sliders" },
+  { id: "flags", name: "Flags", glyph: "flag" },
   { id: "shortcuts", name: "Shortcuts", glyph: "keyboard" },
   { id: "extensions", name: "Extensions", glyph: "plug" },
   { id: "servers", name: "Servers", glyph: "server" },
@@ -216,6 +217,13 @@ type CatalogEntry = {
   missing: string[];
 };
 
+/* -------------------------------------------------------------------- flags */
+
+/** One switch in `~/.appgeapanel/flags.json`. The file names and explains its own flags, so
+ *  Panel shows whatever the ops tree declares. `repos` overrides `on`, keyed by repo folder. */
+type Flag = { name?: string; note?: string; on?: boolean; repos?: Record<string, boolean> };
+type FlagDoc = { flags?: Record<string, Flag> };
+
 /** Fired after an install or uninstall, so the project rail repaints without a reload. */
 export const EXTENSIONS_EVENT = "panel-extensions";
 
@@ -236,6 +244,10 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
   /* An install that failed, by extension name. Kept outside the row because the click repaints
      the section, which would wipe a message appended to the old row. */
   const failures = new Map<string, string>();
+  /* null until flags_read answers. Repo names come from the registered projects' folders. */
+  let flags: FlagDoc | null = null;
+  let flagError = "";
+  let repoNames: string[] = [];
 
   /* ------------------------------------------------------------------- rows */
 
@@ -388,6 +400,19 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
     return row;
   };
 
+  /** One change at a time, so the Rust side can read-modify-write and keep a script's edit. */
+  const setFlag = (name: string, repo: string | null, on: boolean | null): void => {
+    void invoke<FlagDoc>("flags_set", { name, repo, on })
+      .then((doc) => {
+        flags = doc;
+        flagError = "";
+      })
+      .catch((error) => {
+        flagError = String(error);
+      })
+      .finally(paint);
+  };
+
   /* --------------------------------------------------------------- sections */
 
   function general(): HTMLElement[] {
@@ -467,6 +492,45 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
     return out;
   }
 
+  function flagSection(): HTMLElement[] {
+    if (flagError) return [line("p", "set-state is-error", `Could not change flags. ${flagError}`)];
+    if (!flags) return [line("p", "set-state", "Reading flags…")];
+    const entries = Object.entries(flags.flags ?? {});
+    if (!entries.length) {
+      return [line("p", "set-state", "No flags yet. Ask an agent to add one to ~/.appgeapanel/flags.json.")];
+    }
+    return entries.map(([id, flag]) => {
+      const own = flag.repos ?? {};
+      const rows = [
+        toggleRow("Everywhere", "Every repo without a switch of its own below.", !!flag.on, (next) =>
+          setFlag(id, null, next),
+        ),
+      ];
+      for (const repo of Object.keys(own).sort()) {
+        const row = toggleRow(repo, "This repo only.", own[repo], (next) => setFlag(id, repo, next));
+        const drop = button("set-reset", "×");
+        drop.title = `${repo} follows Everywhere again`;
+        drop.setAttribute("aria-label", `remove ${repo}'s own switch`);
+        drop.addEventListener("click", () => setFlag(id, repo, null));
+        row.insertBefore(drop, row.lastChild);
+        rows.push(row);
+      }
+      const free = repoNames.filter((name) => !(name in own));
+      if (free.length) {
+        const row = make("div", "set-row");
+        const pick = document.createElement("select");
+        pick.className = "set-select";
+        pick.setAttribute("aria-label", `Add a repo to ${flag.name ?? id}`);
+        pick.append(new Option("Add a repo…", ""), ...free.map((name) => new Option(name, name)));
+        // A repo is added to differ from Everywhere. Matching it would be a switch that does nothing.
+        pick.addEventListener("change", () => pick.value && setFlag(id, pick.value, !flag.on));
+        row.append(rowText("A repo of its own", "It starts opposite to Everywhere."), pick);
+        rows.push(row);
+      }
+      return group(flag.name ?? id, rows, flag.note);
+    });
+  }
+
   function shortcuts(taken: Set<ActionId>): HTMLElement[] {
     const groups: HTMLElement[] = [];
     for (const name of new Set(ACTIONS.map((def) => def.group))) {
@@ -523,6 +587,7 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
 
   const LEADS: Record<SectionId, string> = {
     general: "How the workspace behaves. Every change applies at once.",
+    flags: "Switches your agents read before they act. Each one says what it changes.",
     shortcuts: "Click a shortcut, then press the new keys. Esc cancels. Hover a row to see what it does.",
     extensions: "Turn one on and it appears on every project that can use it. No restart.",
     servers:
@@ -573,11 +638,13 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
     const content =
       section === "general"
         ? general()
-        : section === "shortcuts"
-          ? shortcuts(taken)
-          : section === "extensions"
-            ? extensionSection()
-            : serverSection();
+        : section === "flags"
+          ? flagSection()
+          : section === "shortcuts"
+            ? shortcuts(taken)
+            : section === "extensions"
+              ? extensionSection()
+              : serverSection();
     main.dataset.section = section;
     body.replaceChildren(line("p", "set-lead", LEADS[section]), ...content);
 
@@ -648,6 +715,24 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
         })
         .finally(() => {
           if (openState && section === "extensions") paint();
+        });
+
+      // Read on every open: an agent may have added a flag since the last look.
+      void Promise.all([
+        invoke<FlagDoc>("flags_read"),
+        invoke<{ path: string }[]>("list_projects").catch(() => []),
+      ])
+        .then(([doc, projects]) => {
+          flags = doc;
+          flagError = "";
+          const names = projects.map((project) => project.path.split(/[\\/]/).filter(Boolean).pop() ?? "");
+          repoNames = [...new Set(names.filter(Boolean))].sort();
+        })
+        .catch((error) => {
+          flagError = String(error);
+        })
+        .finally(() => {
+          if (openState && section === "flags") paint();
         });
 
       window.addEventListener(KEYMAP_EVENT, paint);

@@ -10,6 +10,7 @@
 mod android;
 mod code_nav;
 mod debug;
+mod flags;
 mod history;
 mod launch;
 mod leases;
@@ -4426,6 +4427,8 @@ fn main() {
             warm_code_nav,
             list_modules,
             module_catalog,
+            flags::flags_read,
+            flags::flags_set,
             install_module,
             uninstall_module,
             module_request,

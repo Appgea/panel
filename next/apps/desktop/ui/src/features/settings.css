@@ -385,3 +385,16 @@
   font-weight: 600;
   color: var(--risk);
 }
+
+/* A repo picker in a settings row, drawn like the buttons beside it. */
+.set-select {
+  flex: none;
+  max-width: 220px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: var(--text-sm);
+  background: var(--bg-raised);
+  color: var(--ink);
+}
+.set-select:hover { border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
