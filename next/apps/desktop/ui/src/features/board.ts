@@ -257,38 +257,70 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
 
   /* ------------------------------------------------------------ the strip */
 
-  function paintStrip(): void {
+  // The strip fits by priority. Level 0 shows everything; each level drops the least useful part
+  // until the items row no longer overflows. See the fit-N rules in board.css.
+
+  function stripItems(level: number, cap = 2): HTMLElement {
     const now = board?.now ?? [];
-    const waiting = board?.you?.length ?? 0;
     const items = h("div", "bs-items");
-    for (const card of now.slice(0, 4)) {
+    const shown = level >= 4 ? cap : 4;
+    for (const card of now.slice(0, shown)) {
       const item = button("bs-item t-work", "", `#${card.number} ${card.title} — ${card.holder ?? ""}`);
-      item.append(h("i", "bs-dot"), h("b", "", `#${card.number}`), h("span", "bs-title", card.title));
+      item.append(h("i", "bs-dot"), h("b", "", `#${card.number}`));
+      if (level < 2) item.append(h("span", "bs-title", card.title));
       const age = held(card.claimed_at);
       if (age) item.append(h("small", "", age));
       item.addEventListener("click", () => events.openUrl(card.url));
       items.append(item);
     }
-    if (now.length > 4) items.append(h("span", "bs-more", `+${now.length - 4}`));
-    for (const scout of list?.scouts ?? []) {
-      if (scout.last?.status !== "running" || (scout.kind === "agent" && !live(scout))) continue;
-      const item = button("bs-item bs-scout t-work", "", `Scout: ${scout.title}`);
-      item.append(h("i", "bs-dot mo-pulse"), h("span", "bs-title", scout.title), h("small", "", "scout"));
-      item.addEventListener("click", () => {
-        if (!scout.last?.session || !events.showSession(scout.last.session)) events.openBoard();
-      });
-      items.append(item);
+    if (now.length > shown) {
+      const more = button("bs-item bs-more", `+${now.length - shown}`, "Open the Board");
+      more.addEventListener("click", () => events.openBoard());
+      items.append(more);
     }
-    for (const build of builds.running) {
-      const item = button("bs-item bs-scout t-work", "", `Build (${build.builder}): ${build.task}`);
-      item.append(h("i", "bs-dot mo-pulse"), h("span", "bs-title", build.task), h("small", "", `${build.builder} build`));
+    const running = (list?.scouts ?? []).filter((scout) => scout.last?.status === "running" && (scout.kind !== "agent" || live(scout)));
+    if (level >= 3 && running.length) {
+      const item = button("bs-item bs-scout t-work", "", running.map((scout) => scout.title).join("\n"));
+      item.append(h("i", "bs-dot mo-pulse"), h("span", "", `${running.length} ${running.length === 1 ? "scout" : "scouts"}`));
       item.addEventListener("click", () => events.openBoard());
       items.append(item);
+    } else {
+      for (const scout of running) {
+        const item = button("bs-item bs-scout t-work", "", `Scout: ${scout.title}`);
+        item.append(h("i", "bs-dot mo-pulse"));
+        if (level < 1) item.append(h("span", "bs-title", scout.title));
+        item.append(h("small", "", "scout"));
+        item.addEventListener("click", () => {
+          if (!scout.last?.session || !events.showSession(scout.last.session)) events.openBoard();
+        });
+        items.append(item);
+      }
+    }
+    if (level >= 3 && builds.running.length) {
+      const count = builds.running.length;
+      const item = button("bs-item bs-scout t-work", "", builds.running.map((build) => `${build.builder} build: ${build.task}`).join("\n"));
+      item.append(h("i", "bs-dot mo-pulse"), h("span", "", `${count} ${count === 1 ? "build" : "builds"}`));
+      item.addEventListener("click", () => events.openBoard());
+      items.append(item);
+    } else {
+      for (const build of builds.running) {
+        const item = button("bs-item bs-scout t-work", "", `${build.builder} build: ${build.task}`);
+        item.append(h("i", "bs-dot mo-pulse"));
+        if (level < 1) item.append(h("span", "bs-title", build.task));
+        item.append(h("small", "", `${build.builder} build`));
+        item.addEventListener("click", () => events.openBoard());
+        items.append(item);
+      }
     }
     if (!items.childElementCount) {
       const quiet = failure || board?.error ? "The board could not be read" : "Nobody is on an issue";
       items.append(h("span", "bs-quiet", quiet));
     }
+    return items;
+  }
+
+  function paintStrip(): void {
+    const waiting = board?.you?.length ?? 0;
     const right = h("div", "bs-right");
     if (waiting) {
       const chip = button("bs-chip t-warn", "", "What waits on you");
@@ -299,8 +331,38 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
     const open = button("bs-open", "Board", "Open the Board");
     open.addEventListener("click", () => events.openBoard());
     right.append(open);
-    strip.replaceChildren(items, right);
+    // Start from level 0 every time, so the strip grows back when there is room.
+    // Level 4 keeps the first two issues and folds the rest into "+N". If two still do not fit,
+    // a last step folds down to one issue. It stays fit-4.
+    const tries = [[0, 2], [1, 2], [2, 2], [3, 2], [4, 2], [4, 1]];
+    for (const [level, cap] of tries) {
+      const items = stripItems(level, cap);
+      strip.className = `board-strip fit-${level}`;
+      strip.replaceChildren(items, right);
+      // Only an issue title shrinks, down to 7em. Flex shrink is proportional, so each issue
+      // item gets a min-width of its fixed parts plus that floor.
+      for (const child of items.children) {
+        const title = child.querySelector<HTMLElement>(".bs-title");
+        if (!title || child.classList.contains("bs-scout")) continue;
+        const gap = parseFloat(getComputedStyle(child).columnGap) || 0;
+        const pad = parseFloat(getComputedStyle(child).paddingLeft) + parseFloat(getComputedStyle(child).paddingRight);
+        let fixed = pad + gap * (child.children.length - 1);
+        for (const part of child.children) if (part !== title) fixed += (part as HTMLElement).offsetWidth;
+        (child as HTMLElement).style.minWidth = `${Math.ceil(fixed + 7 * parseFloat(getComputedStyle(title).fontSize))}px`;
+      }
+      // Fits: the row does not overflow and no item is squeezed below its own content.
+      const squeezed = [...items.children].some((child) => child.scrollWidth > child.clientWidth);
+      if (items.scrollWidth <= items.clientWidth && !squeezed) break;
+    }
   }
+
+  let stripWidth = 0;
+  const stripWatch = new ResizeObserver(() => {
+    if (strip.clientWidth === stripWidth) return;
+    stripWidth = strip.clientWidth;
+    paintStrip();
+  });
+  stripWatch.observe(strip);
 
   /* ------------------------------------------------------------ the screen */
 
@@ -488,6 +550,7 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
     },
     dispose() {
       window.clearTimeout(timer);
+      stripWatch.disconnect();
       strip.hidden = true;
       strip.replaceChildren();
       screen.replaceChildren();

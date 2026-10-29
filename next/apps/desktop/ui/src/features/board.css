@@ -44,26 +44,29 @@
   font-size: var(--text-sm);
   color: var(--ink-dim);
 }
-.bs-items { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+.bs-items { display: flex; align-items: center; gap: 4px; flex: 1 1 0; min-width: 0; overflow: hidden; }
 .bs-item {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 280px;
   padding: 3px 8px;
+  white-space: nowrap;
   border-radius: var(--radius-sm);
 }
 .bs-item:hover { color: var(--ink); background: var(--bg-sunken); }
 .bs-item b { flex: none; color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .bs-item small { flex: none; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
-.bs-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-item > span { flex: none; }
+/* Only a title shrinks, and only at level 0. */
+.bs-item > .bs-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-dot, .bd-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
 .bs-more, .bs-quiet { padding: 3px 6px; color: var(--ink-faint); white-space: nowrap; }
+.bs-item.bs-more, .bs-item.bs-scout { flex: none; }
+.bs-item:not(.bs-scout) > .bs-title { min-width: 7em; }
 .bs-right { display: flex; align-items: center; gap: 4px; flex: none; }
-.board-strip { container-type: inline-size; }
-/* Narrow: an issue keeps its number and age. A scout keeps its name, it has no number. */
-@container (max-width: 900px) { .bs-item:not(.bs-scout) .bs-title { display: none; } }
 .bs-chip, .bs-open { padding: 3px 9px; border-radius: var(--radius-sm); white-space: nowrap; }
 .bs-chip { color: var(--tone); background: color-mix(in srgb, var(--tone) 12%, transparent); }
 .bs-chip b { font-weight: 650; font-variant-numeric: tabular-nums; }

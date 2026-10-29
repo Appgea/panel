@@ -27,6 +27,13 @@ const BOARD: BoardData = params.get("empty")
       { number: 67, title: "Panel: scouts and the board, visible all the time", url: url(67), apps: ["panel"], priority: 1, holder: "claude-e9aca641", claimed_at: ago(48) },
       { number: 20, title: "Tavla Android crash: game screen reads a provider after the widget is unmounted", url: url(20), apps: ["tavla"], priority: 1, holder: "claude-3f1c02aa", claimed_at: ago(12) },
       { number: 42, title: "Bear-off animation sometimes flies to wrong tiles", url: url(42), apps: ["tavla"], priority: 1, holder: "grok-tavla", claimed_at: ago(4) },
+      ...(params.get("many")
+        ? [
+          { number: 55, title: "Weekcut export drops the last caption", url: url(55), apps: ["weekcut"], priority: 1, holder: "sol-weekcut", claimed_at: ago(95) },
+          { number: 71, title: "Pillow paywall flashes before the entitlement loads", url: url(71), apps: ["pillow_app"], priority: 1, holder: "claude-77ab", claimed_at: ago(20) },
+          { number: 88, title: "Trender slideshow audio drifts", url: url(88), apps: [], priority: 1, holder: "luna-trender", claimed_at: ago(7) },
+        ]
+        : []),
     ],
     you: [
       { number: 60, title: "Revoke App Store Connect key 6GHLN3V5DS, it is tracked in two repos", url: url(60), apps: [], priority: 1 },
@@ -78,6 +85,11 @@ const BUILDS: BuildList = params.get("empty")
       row("sol", "medium", 12, 0, "ui", "-", "Round the board stat chips"),
     ],
   };
+
+if (params.get("many")) {
+  SCOUTS.scouts.push(scout({ id: "extra", title: "Reviews and ratings", last: { at: ago(2), status: "running", found: 0, note: "", session: "live-3" }, next_at: null }));
+  BUILDS.running.push({ pid: 103, builder: "sol", effort: "high", kind: "logic", repo: "ops", task: "Move the board reader into its own module", session: "s3", started: ago(25) });
+}
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const api: BoardApi = {
