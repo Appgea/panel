@@ -36,7 +36,10 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/prompt"
+          # review.md says to read files for context. This run has no tools, so say so first, or the model
+          # writes tool calls as text instead of a review (PR #9).
+          printf '%s\n\n' "This run has no tools. You cannot read files or run commands. Judge from the diff below alone, and never write a tool call." > "$RUNNER_TEMP/prompt"
+          gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json body --jq .body >> "$RUNNER_TEMP/prompt"
           printf '\n=== THE DIFF ===\n' >> "$RUNNER_TEMP/prompt"
           git diff "$BASE...$HEAD" >> "$RUNNER_TEMP/prompt"
       # The API key is in this step only, with no GitHub token beside it. The reviewer gets no tools at
