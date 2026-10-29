@@ -54,11 +54,19 @@ pub fn flags_set(name: String, repo: Option<String>, on: Option<bool>) -> Result
         }
         (None, None) => return Err("nothing to set".into()),
     }
-    // Write beside, then rename: a reader never sees half a file.
+    // Write beside, then rename: a reader never sees half a file. The temp name is unique, so two
+    // writers never share one. The read-to-rename window stays open, but it lasts microseconds and
+    // the writers are a person clicking and an agent editing by hand.
     let path = flags_path();
-    let temp = path.with_extension("json.tmp");
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |time| time.subsec_nanos());
+    let temp = path.with_extension(format!("json.{}.{nanos}.tmp", std::process::id()));
     let bytes = serde_json::to_vec_pretty(&doc).map_err(|error| error.to_string())?;
     std::fs::write(&temp, bytes).map_err(|error| error.to_string())?;
-    std::fs::rename(&temp, &path).map_err(|error| error.to_string())?;
+    std::fs::rename(&temp, &path).map_err(|error| {
+        let _ = std::fs::remove_file(&temp);
+        error.to_string()
+    })?;
     Ok(doc)
 }

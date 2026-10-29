@@ -247,6 +247,8 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
   /* null until flags_read answers. Repo names come from the registered projects' folders. */
   let flags: FlagDoc | null = null;
   let flagError = "";
+  /* Bumped by every set, so a read that left before it cannot paint the older document over it. */
+  let flagWrites = 0;
   let repoNames: string[] = [];
 
   /* ------------------------------------------------------------------- rows */
@@ -402,13 +404,14 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
 
   /** One change at a time, so the Rust side can read-modify-write and keep a script's edit. */
   const setFlag = (name: string, repo: string | null, on: boolean | null): void => {
+    flagWrites += 1;
     void invoke<FlagDoc>("flags_set", { name, repo, on })
       .then((doc) => {
         flags = doc;
         flagError = "";
       })
       .catch((error) => {
-        flagError = String(error);
+        flagError = `Could not change the flag. ${error}`;
       })
       .finally(paint);
   };
@@ -493,13 +496,14 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
   }
 
   function flagSection(): HTMLElement[] {
-    if (flagError) return [line("p", "set-state is-error", `Could not change flags. ${flagError}`)];
-    if (!flags) return [line("p", "set-state", "Reading flags…")];
+    // The error sits above the flags, not in place of them: one failed click must not hide them all.
+    const error = flagError ? [line("p", "set-state is-error", flagError)] : [];
+    if (!flags) return error.length ? error : [line("p", "set-state", "Reading flags…")];
     const entries = Object.entries(flags.flags ?? {});
     if (!entries.length) {
-      return [line("p", "set-state", "No flags yet. Ask an agent to add one to ~/.appgeapanel/flags.json.")];
+      return [...error, line("p", "set-state", "No flags yet. Ask an agent to add one to ~/.appgeapanel/flags.json.")];
     }
-    return entries.map(([id, flag]) => {
+    return [...error, ...entries.map(([id, flag]) => {
       const own = flag.repos ?? {};
       const rows = [
         toggleRow("Everywhere", "Every repo without a switch of its own below.", !!flag.on, (next) =>
@@ -528,7 +532,7 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
         rows.push(row);
       }
       return group(flag.name ?? id, rows, flag.note);
-    });
+    })];
   }
 
   function shortcuts(taken: Set<ActionId>): HTMLElement[] {
@@ -718,18 +722,19 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
         });
 
       // Read on every open: an agent may have added a flag since the last look.
+      const writes = flagWrites;
       void Promise.all([
         invoke<FlagDoc>("flags_read"),
         invoke<{ path: string }[]>("list_projects").catch(() => []),
       ])
         .then(([doc, projects]) => {
-          flags = doc;
+          if (writes === flagWrites) flags = doc;
           flagError = "";
           const names = projects.map((project) => project.path.split(/[\\/]/).filter(Boolean).pop() ?? "");
           repoNames = [...new Set(names.filter(Boolean))].sort();
         })
         .catch((error) => {
-          flagError = String(error);
+          flagError = `Could not read flags.json. ${error}`;
         })
         .finally(() => {
           if (openState && section === "flags") paint();

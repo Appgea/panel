@@ -26,6 +26,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+      # The key sits in this step's env. The reviewer gets read tools only, no shell and no web, so a
+      # prompt cannot send it anywhere. The comment is the only thing that leaves.
       - name: Review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -38,6 +40,7 @@ jobs:
           printf '\n=== THE DIFF ===\n' >> "$RUNNER_TEMP/prompt"
           git diff "$BASE...$HEAD" >> "$RUNNER_TEMP/prompt"
           npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet \
-            --disallowedTools "Edit,Write,NotebookEdit,Bash" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
+            --allowedTools "Read,Grep,Glob" \
+            --disallowedTools "Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
           { echo "<!-- land-review sha=$HEAD -->"; cat "$RUNNER_TEMP/review"; } > "$RUNNER_TEMP/comment"
           gh pr comment "$PR" --body-file "$RUNNER_TEMP/comment"
