@@ -6,6 +6,8 @@ import json
 import os
 import urllib.request
 
+from keep_media import keep_media
+
 
 def main():
     parser = argparse.ArgumentParser(description="Send a rich message to Panel")
@@ -67,6 +69,8 @@ def main():
         payload["attachments"] = attachments
     if args.link:
         payload["links"] = args.link
+
+    keep_media(payload)
 
     # A session Panel did not launch has no PANEL_PORT. Panel writes its live port to this file,
     # and the old fixed default sent those reports nowhere.

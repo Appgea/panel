@@ -26,6 +26,9 @@ import os
 import sys
 import urllib.request
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from keep_media import keep_media  # noqa: E402
+
 PORT = os.environ.get("PANEL_PORT", "7391")
 INSTANCE = os.environ.get("PANEL_INSTANCE", "")
 BASE = "http://127.0.0.1:%s" % PORT
@@ -58,19 +61,30 @@ TOOLS = [
         "description": (
             "File a report to the appgea brain, for the CPO/CTO read. This is NOT a message to the "
             "human: the text is written to the project's agent log, and the Inbox shows only the "
-            "headline plus whatever media you attach. Talk to the human in the terminal; report "
-            "here. Call it at REAL checkpoints only — work finished, work blocked, a decision "
-            "needed, or media worth looking at. Not every turn, not for progress narration. "
+            "title plus whatever media you attach. The text opens only when the human clicks the "
+            "title. Write both for a person skimming forty reports. Talk to the human in the "
+            "terminal; report here. Call it at REAL checkpoints only — work finished, work "
+            "blocked, a decision needed, or media worth looking at. Not every turn, not for "
+            "progress narration. "
             "Attach `images` for anything visual, `audio` for a clip to hear, `video` for a file "
             "or URL the human opens outside Panel. Fire-and-forget."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
-                "title": {"type": "string", "description": "short message title"},
+                "title": {
+                    "type": "string",
+                    "description": (
+                        "what happened, in plain everyday words, under 60 characters. It is the "
+                        "whole report until clicked. No file names, ids, code or markdown."
+                    )
+                },
                 "text": {
                     "type": "string",
-                    "description": "one brief explanation of what changed and why it matters"
+                    "description": (
+                        "one plain sentence, under 30 words: the result and why it matters. No "
+                        "markdown, paths or ids. The code goes in `flow`."
+                    )
                 },
                 "outcome": {
                     "type": "string",
@@ -311,7 +325,7 @@ def _call(name, args):
                     "attachments", "links")
                    if k in args and args[k] is not None}
         r = _post("/panel/emit",
-                  {"instance": INSTANCE, "type": "message", "payload": payload}, 10)
+                  {"instance": INSTANCE, "type": "message", "payload": keep_media(payload)}, 10)
         return "sent message %s" % (r.get("id") or "?")
     if name == "ask_user":
         timeout = float(args.get("timeout") or 280)
