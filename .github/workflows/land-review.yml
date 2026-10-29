@@ -46,7 +46,7 @@ jobs:
         run: |
           npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet \
             --allowedTools "Read,Grep,Glob" \
-            --disallowedTools "Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
+            --disallowedTools "Edit,Write,NotebookEdit,Bash,WebFetch,WebSearch,Read(/proc/**),Read(/sys/**)" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
           # land takes any marked comment as the finished review, so an empty one must never be posted.
           [ -s "$RUNNER_TEMP/review" ] || { echo "empty review"; exit 1; }
           if grep -qF "$ANTHROPIC_API_KEY" "$RUNNER_TEMP/review"; then echo "review text holds the key, not posting"; exit 1; fi
