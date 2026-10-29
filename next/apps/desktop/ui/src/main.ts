@@ -388,6 +388,38 @@ async function runWithAgent(prompt: string): Promise<void> {
   jumpToSession(session.project, session.id);
 }
 
+/**
+ * A command an agent printed, run in a shell of that agent's project. An idle shell already open
+ * there takes it, so a row of Run clicks does not leave a row of terminals; otherwise a new one
+ * opens at the project root. Panel goes to that shell either way: what ran is never hidden.
+ */
+async function runInShell(sessionId: string, command: string): Promise<boolean> {
+  const project = sessionById(sessionId)?.project;
+  const here = project ? state(project) : undefined;
+  if (!project || !here) return false;
+  let shell: Session | null = null;
+  for (const candidate of here.sessions) {
+    if (candidate.kind !== "shell" || exited.has(candidate.id) || asleep.has(candidate.id)) continue;
+    if (!await invoke<boolean>("session_busy", { session: candidate.id }).catch(() => true)) {
+      shell = candidate;
+      break;
+    }
+  }
+  shell ??= await openSessionFor(project, "shell");
+  if (!shell) return false;
+  // One line runs. Several are pasted and wait for Enter: a TUI wraps a long command with a
+  // real newline, and running each half on its own could do damage.
+  const data = command.includes("\n") ? `\x1b[200~${command}\x1b[201~` : `${command}\r`;
+  try {
+    // A shell still starting reads it once it is up.
+    await invoke("write_terminal", { terminalId: shell.terminal_id, data });
+  } catch {
+    return false;
+  }
+  jumpToSession(project, shell.id);
+  return true;
+}
+
 let shutdownPromptOpen = false;
 
 /** The manager's project id. It has a project state like every worker, so its terminal is tracked
@@ -4083,6 +4115,7 @@ async function boot(): Promise<void> {
       return openFullPath(target, reveal, sessionById(sessionId)?.project ?? null);
     },
     openAppLink: followAppLink,
+    runCommand: runInShell,
     onExit(sessionId) {
       exited.add(sessionId);
       board?.refresh();

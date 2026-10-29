@@ -186,3 +186,25 @@ export function fileTarget(link: string): FileTarget | null {
 export function sessionLink(conversation: string): string {
   return `appgeapanel://session/${encodeURIComponent(conversation)}`;
 }
+
+/**
+ * A command an agent printed, as a shell should get it. Agents put a command for the human in a
+ * code block, and a terminal shows that block as plain lines: indented, sometimes behind a `$`,
+ * a `!` (Claude's shell escape) or a box edge. Those marks come off and `\` continuations join.
+ * Empty for text nobody meant to run: blank, or longer than a few lines.
+ */
+export function commandFrom(text: string): string {
+  const lines: string[] = [];
+  for (const raw of text.split("\n")) {
+    const line = raw
+      .replace(/^\s*[│┃]\s?/, "")
+      .replace(/\s*[│┃]\s*$/, "")
+      .trim()
+      .replace(/^(?:[$%❯›]|!(?=\s))\s+/, "");
+    if (!line) continue;
+    const last = lines.length - 1;
+    if (last >= 0 && lines[last].endsWith("\\")) lines[last] = `${lines[last].slice(0, -1).trimEnd()} ${line}`;
+    else lines.push(line);
+  }
+  return lines.length && lines.length <= 3 ? lines.join("\n") : "";
+}

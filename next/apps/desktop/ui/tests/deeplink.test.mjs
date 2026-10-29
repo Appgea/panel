@@ -69,3 +69,16 @@ test("appgeapanel://open names a file by full path", () => {
   assert.deepEqual(parseAppLink("appgeapanel://open/~/Desktop/out"), { to: "open", path: "~/Desktop/out" });
   assert.equal(parseAppLink("appgeapanel://open"), null);
 });
+
+test("a command an agent printed comes out ready for a shell", async () => {
+  const { commandFrom } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+  assert.equal(commandFrom("  board next  "), "board next");
+  assert.equal(commandFrom("$ git pull --rebase"), "git pull --rebase");
+  assert.equal(commandFrom("! npm test"), "npm test");
+  assert.equal(commandFrom("│ flutter run │"), "flutter run");
+  assert.equal(commandFrom("python3 a.py \\\n  --image x.png"), "python3 a.py --image x.png");
+  assert.equal(commandFrom("cd ~/app\n\nmake"), "cd ~/app\nmake");
+  assert.equal(commandFrom("!important"), "!important");
+  assert.equal(commandFrom("   \n "), "");
+  assert.equal(commandFrom("a\nb\nc\nd"), "");
+});

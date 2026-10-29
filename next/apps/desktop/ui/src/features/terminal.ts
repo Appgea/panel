@@ -27,6 +27,7 @@ import {
   APP_LINK_IN_TEXT,
   PATH_IN_TEXT,
   PLACE_IN_TEXT,
+  commandFrom,
   fileTarget,
   parsePlace,
   type FileTarget,
@@ -211,10 +212,9 @@ function termLink(uri: string): TermLink | null {
 
 /** What the tooltip and the menu say a link does. */
 function linkHint(link: TermLink): string {
-  const mod = MAC ? "⌘" : "Ctrl-";
-  if (link.kind === "web") return `${mod}click to open link`;
-  if (link.kind === "file") return `${mod}click to open · ${MAC ? "⌥⌘" : "Ctrl-Alt-"}click to show in ${MAC ? "Finder" : "folder"}`;
-  return `${mod}click to open in Panel`;
+  if (link.kind === "web") return "Click to open link";
+  if (link.kind === "file") return `Click to open · ${MAC ? "⌥⌘" : "Ctrl-Alt-"}click to show in ${MAC ? "Finder" : "folder"}`;
+  return "Click to open in Panel";
 }
 
 /** A row and the rows it wraps into, as one string. Long paths wrap; a link must survive it. */
@@ -259,6 +259,9 @@ export type DeckEvents = {
   openFile?(sessionId: string, target: FileTarget, reveal: boolean): Promise<void>;
   /** An `appgeapanel://` link was clicked. */
   openAppLink?(url: string): void;
+  /** Run a command this session printed in a shell of the same project. False when no shell
+   *  could take it. */
+  runCommand?(sessionId: string, command: string): Promise<boolean>;
   /** Put to sleep rather than ended: its bar offers Wake, and says what sleeping gave back when
    *  that is known. Null for a session that is not asleep. */
   asleep?(sessionId: string): { freed: number | null } | null;
@@ -402,7 +405,9 @@ export class TerminalDeck {
     const text = tidyCopy(pane.term.getSelection());
     if (!text.trim()) return;
     void this.copyText(text).then((ok) => {
-      this.flash(pane, ok ? "copied" : "copy blocked");
+      // A selected command can run from here: that is how a command an agent printed gets run.
+      const command = ok ? commandFrom(text) : "";
+      this.flash(pane, ok ? "copied" : "copy blocked", command ? this.runAction(pane, command) : undefined);
       if (!ok) return;
       pane.term.focus();
     });
@@ -456,10 +461,20 @@ export class TerminalDeck {
     pane.mount.append(bar);
   }
 
-  /** ⌘-click on any link. A plain click stays a click, so selecting across one never opens it. */
-  private follow(sessionId: string, link: TermLink, event: MouseEvent, reveal = event.altKey): void {
-    if (!(MAC ? event.metaKey : event.ctrlKey)) return;
-    this.open(sessionId, link, reveal);
+  /**
+   * A click on any link opens it. It was ⌘-click only, and a link that underlines under the
+   * pointer and then ignores the click reads as broken. A drag that ends on the same link made a
+   * selection, and that stays a copy. ⌥ alone hands the click to the app (see the mousedown
+   * note in add()), so only ⌥⌘ means "show in Finder". xterm activates a link on any button's
+   * mouseup, so a right-click (⌃-click on the Mac) for the menu must be turned away here.
+   */
+  private follow(sessionId: string, link: TermLink, event: MouseEvent): void {
+    if (event.button !== 0 || (MAC && event.ctrlKey)) return;
+    const mod = MAC ? event.metaKey : event.ctrlKey;
+    if (event.altKey && !mod) return;
+    // ⌘ skips the forced-selection re-send, so under a TUI an old selection survives it.
+    if (!mod && this.panes.get(sessionId)?.term.hasSelection()) return;
+    this.open(sessionId, link, event.altKey && mod);
   }
 
   private open(sessionId: string, link: TermLink, reveal = false): void {
@@ -482,7 +497,7 @@ export class TerminalDeck {
   }
 
   /** The right-click menu. One per deck, rebuilt on each open; any click or key elsewhere closes it. */
-  private openMenu(pane: Pane, x: number, y: number): void {
+  private openMenu(pane: Pane, x: number, y: number, line = ""): void {
     document.querySelector(".term-menu")?.remove();
     const menu = make("div", "row-menu term-menu");
     menu.setAttribute("role", "menu");
@@ -520,18 +535,26 @@ export class TerminalDeck {
       pane.term.selectAll();
       pane.term.focus();
     });
+    // The selection when there is one, else the line under the pointer: right-click a command
+    // an agent printed and run it.
+    const command = commandFrom(pane.term.hasSelection() ? tidyCopy(pane.term.getSelection()) : line);
+    const run = command ? this.runAction(pane, command) : undefined;
+    if (run) {
+      menu.append(make("div", "row-menu-sep"));
+      item(run.label, "", true, run.run);
+    }
     const link = pane.hovered;
     const sessionId = [...this.panes].find(([, each]) => each === pane)?.[0];
     if (link && sessionId) {
       menu.append(make("div", "row-menu-sep"));
       if (link.kind === "file") {
-        item("Open", `${mod}click`, true, () => this.open(sessionId, link));
+        item("Open", "click", true, () => this.open(sessionId, link));
         item(MAC ? "Show in Finder" : "Show in folder", MAC ? "⌥⌘click" : "Ctrl+Alt+click", true, () =>
           this.open(sessionId, link, true));
         item("Copy path", "", true, () => void this.copyText(link.target.path).then((ok) =>
           this.flash(pane, ok ? "copied" : "copy blocked")));
       } else {
-        item(link.kind === "web" ? "Open link" : "Open in Panel", `${mod}click`, true, () => this.open(sessionId, link));
+        item(link.kind === "web" ? "Open link" : "Open in Panel", "click", true, () => this.open(sessionId, link));
         const text = link.kind === "place" ? link.text : link.url;
         item("Copy link", "", true, () => void this.copyText(text).then((ok) =>
           this.flash(pane, ok ? "copied" : "copy blocked")));
@@ -556,12 +579,37 @@ export class TerminalDeck {
 
   /** A one-line receipt inside the pane. Terminal actions that produce no output — a copy, a
    *  pasted path — otherwise leave the human guessing whether the key landed. */
-  private flash(pane: Pane, message: string): void {
+  private flash(pane: Pane, message: string, action?: { label: string; run: () => void }): void {
     pane.mount.querySelector(".term-flash")?.remove();
     const badge = make("span", "term-flash mo-rise");
     badge.textContent = message;
+    if (action) {
+      // Long enough to reach with the mouse. A button that left at 1.2s was not one.
+      const button = make("button", "term-flash-action") as HTMLButtonElement;
+      button.type = "button";
+      button.textContent = action.label;
+      button.addEventListener("mousedown", (event) => event.preventDefault());
+      button.addEventListener("click", () => {
+        badge.remove();
+        action.run();
+      });
+      badge.append(button);
+    }
     pane.mount.append(badge);
-    window.setTimeout(() => badge.remove(), 1200);
+    window.setTimeout(() => badge.remove(), action ? 5000 : 1200);
+  }
+
+  /** "Run" for a command this pane printed: a shell of the same project types it and runs it. */
+  private runAction(pane: Pane, command: string): { label: string; run: () => void } | undefined {
+    const run = this.events.runCommand;
+    const sessionId = [...this.panes].find(([, each]) => each === pane)?.[0];
+    if (!run || !sessionId) return undefined;
+    return {
+      label: "Run in shell",
+      run: () => void run(sessionId, command).then((ok) => {
+        if (!ok) this.flash(pane, "could not run");
+      }),
+    };
   }
 
   private writeChunk(sessionId: string, pane: Pane, chunk: TerminalChunk): void {
@@ -694,8 +742,8 @@ export class TerminalDeck {
     const search = new SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(search);
-    // Agents print PR, CI and docs URLs constantly. ⌘-click opens one, the way iTerm and VS Code
-    // do; a plain click stays a click, so selecting across a URL never launches a browser.
+    // Agents print PR, CI and docs URLs constantly. A click opens one; see follow() for why a
+    // drag across one still only selects.
     const web = (url: string): TermLink => ({ kind: "web", url });
     term.loadAddon(
       new WebLinksAddon(
@@ -848,7 +896,8 @@ export class TerminalDeck {
     mount.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       event.stopPropagation();
-      this.openMenu(pane, event.clientX, event.clientY);
+      const cell = this.cellAt(pane, event);
+      this.openMenu(pane, event.clientX, event.clientY, cell ? logicalLine(term, cell.row + 1).text : "");
     });
     mount.addEventListener("mousedown", (event) => {
       if (!event.shiftKey || event.button !== 0 || resending) return;

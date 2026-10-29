@@ -1646,6 +1646,21 @@ html.sidebar-compact .health { width: 28px; height: 28px; justify-content: cente
   pointer-events: none;
   --mo-dur: 0.14s;
 }
+/* A receipt that carries an action takes the pointer, only on its button. */
+.term-flash:has(.term-flash-action) { display: inline-flex; align-items: center; gap: 8px; padding-right: 3px; }
+.term-flash-action {
+  pointer-events: auto;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.term-flash-action:hover { filter: brightness(1.08); }
+.term-flash-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* A destructive prompt must point back to the terminal it names — so it is not an app-modal at
    all: the question is asked INSIDE the PTY mount. The mount follows its session into the
