@@ -16,6 +16,7 @@ module hosts and `ops-template/`. Never written to.
 ```
 ~/.appgeapanel/
 ├─ config.json            the portfolio (§2)
+├─ flags.json             switches agents read, set in Settings > Flags. Each flag declares its own name and note
 ├─ ingress-port           loopback port of the running app (deleted on clean exit)
 ├─ modules.json           {"version":1,"installed":[…]} — which extensions are on (§5)
 ├─ modules/<name>/        extensions you dropped in (win over a shipped one of the same name)
