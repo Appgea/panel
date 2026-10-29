@@ -1,7 +1,8 @@
-# The cloud half of `land` (Appgea ops runbooks/land.py). A session with the pr_flow flag on pushes a
-# land/<sha> branch and opens a PR whose body is the review prompt plus the ask. This job adds the diff,
-# runs Claude Code on API credits, and comments. land waits for the comment that carries its head sha.
-name: land review
+# The cloud half of `carry` (Appgea ops runbooks/carry.py). Sessions push to develop. When develop holds a
+# finished whole, carry snapshots it as a carry/<sha> branch and opens a PR to main whose body is the review
+# prompt plus the ask. This job adds the diff, runs Claude Code on API credits, and comments. carry waits for
+# the comment that carries its head sha, then moves main to it.
+name: carry review
 
 on:
   pull_request:
@@ -12,13 +13,13 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: land-review-${{ github.event.pull_request.number }}
+  group: carry-review-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
   review:
     # pull_request from a fork gets no secrets, and its body is not ours to run as a prompt.
-    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'land/')
+    if: github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'carry/')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -46,7 +47,7 @@ jobs:
         run: |
           [ -n "$ANTHROPIC_API_KEY" ] || { echo "ANTHROPIC_API_KEY is not set on this repo"; exit 1; }
           npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet --tools "" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review"
-          # land takes any marked comment as the finished review, so an empty one must never be posted.
+          # carry takes any marked comment as the finished review, so an empty one must never be posted.
           [ -s "$RUNNER_TEMP/review" ] || { echo "empty review"; exit 1; }
       - name: Comment
         env:
@@ -54,5 +55,5 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha }}
           PR: ${{ github.event.pull_request.number }}
         run: |
-          { echo "<!-- land-review sha=$HEAD -->"; cat "$RUNNER_TEMP/review"; } > "$RUNNER_TEMP/comment"
+          { echo "<!-- carry-review sha=$HEAD -->"; cat "$RUNNER_TEMP/review"; } > "$RUNNER_TEMP/comment"
           gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/comment"
