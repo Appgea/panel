@@ -179,6 +179,13 @@ class ScoutTests(unittest.TestCase):
         self.assertIn(str(HOST.resolve()), result["prompt"])
         self.assertIn(str(self.ops / "scouts/_rules.md"), result["prompt"])
 
+    def test_start_if_due_goes_to_one_session(self):
+        self.scout(fields="agent: claude\nevery: 3h")
+        self.assertEqual(self.call("POST", "/start", {"id": "sample", "session": "a", "if_due": True})[0], 200)
+        status, result = self.call("POST", "/start", {"id": "sample", "session": "b", "if_due": True})
+        self.assertEqual((status, result["error"]), (409, "not due"))
+        self.assertEqual(json.loads((self.state / "runs.json").read_text())["sample"]["session"], "a")
+
     def test_board_cache_and_refresh(self):
         self.fake_board()
         self.assertEqual(self.call("GET", "/board"), (200, {"issues": []}))

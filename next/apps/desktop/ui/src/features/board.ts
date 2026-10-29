@@ -5,9 +5,9 @@
  * Two surfaces, one source. The strip rides on top of every screen; the Board screen is the long
  * form. Both read the `scout` extension, so with it absent neither exists.
  *
- * The extension is also the clock. Due scouts start here, while Panel is open, in terminals you
- * can see — never in the background. Nothing polls: a read happens on focus, on session and
- * report events, and once more when the next scout falls due.
+ * Scouts never start on their own here. `board next` runs due scouts as part of the work, and the
+ * Run button runs one now. Nothing polls: a read happens on focus, on session and report events,
+ * and once more when the next scout falls due, so it reads as due.
  */
 import { errorText } from "../errors";
 import "./board.css";
@@ -67,8 +67,6 @@ export type BoardApi = {
 export type BoardEvents = {
   api: BoardApi;
   openUrl(url: string): void;
-  /** False until the app can open a scout's terminal. Due agent scouts wait for it. */
-  ready(): boolean;
   /** Open a visible terminal for an agent scout and type its prompt. `started` runs before the
    *  prompt is typed. The session id, or null. */
   launch(scout: Scout, prompt: string, started: (session: string) => Promise<unknown>): Promise<string | null>;
@@ -140,15 +138,11 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
   let timer = 0;
   let visible = false;
   let lastFresh = 0;
-  /** A due agent scout waited for the app to be ready: look again soon. */
-  let retry = false;
 
   screen.classList.add("board");
   strip.classList.add("board-strip");
 
   const live = (scout: Scout): boolean => Boolean(scout.last?.session && events.isLive(scout.last.session));
-  const agentRunning = (): Scout | undefined =>
-    list?.scouts.find((scout) => scout.kind === "agent" && scout.last?.status === "running" && live(scout));
 
   /* ------------------------------------------------------------ the clock */
 
@@ -172,7 +166,6 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
       board = read;
       failure = "";
       paint();
-      await runDue();
       schedule();
     } catch (error) {
       failure = errorText(error, "the scout extension did not answer");
@@ -185,21 +178,6 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
         void refresh(next);
       }
     }
-  }
-
-  async function runDue(): Promise<void> {
-    if (!list) return;
-    for (const scout of list.scouts.filter((s) => s.due && s.kind === "script" && !s.error)) await runScript(scout);
-    // One agent scout at a time, so a morning never opens five terminals at once. The next one
-    // starts on the pass after this one records its result.
-    if (agentRunning()) return;
-    const next = list.scouts.find((s) => s.due && s.kind === "agent" && !s.error);
-    if (!next) return;
-    if (!events.ready()) {
-      retry = true;
-      return;
-    }
-    await launch(next);
   }
 
   async function runScript(scout: Scout): Promise<void> {
@@ -223,7 +201,7 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
       const session = await events.launch(scout, await api.prompt(scout.id), async (id) => {
         began = await api.start(scout.id, id);
       });
-      // A terminal that never opened still counts as today's run, so it cannot relaunch in a loop.
+      // A terminal that never opened still counts as a run, so the scout reads as failed, not due.
       scout.last = session && began ? began : await api.record(scout.id, "failed", "the terminal did not take its prompt");
     } catch (error) {
       scout.last = await api.record(scout.id, "failed", errorText(error, "the scout extension did not answer")).catch(() => scout.last);
@@ -233,11 +211,6 @@ export function mountBoard(screen: HTMLElement, strip: HTMLElement, events: Boar
 
   function schedule(): void {
     window.clearTimeout(timer);
-    if (retry) {
-      retry = false;
-      timer = window.setTimeout(() => void refresh(), 15_000);
-      return;
-    }
     if (!list?.next_due_at) return;
     // A second past the hour, so the scout reads as due. Capped, because a sleeping Mac stretches timers.
     const wait = new Date(list.next_due_at).getTime() - Date.now() + 1000;

@@ -79,8 +79,7 @@ const strip = document.getElementById("boardStrip")!;
 const handle = mountBoard(screen, strip, {
   api,
   openUrl: (target) => console.log("open", target),
-  // The harness never opens terminals: a due agent scout records a launch without one.
-  ready: () => true,
+  // The harness never opens terminals: Run on an agent scout records a launch without one.
   launch: async (_scout, _prompt, started) => {
     if (!params.get("launch")) return null;
     await started("live-2");

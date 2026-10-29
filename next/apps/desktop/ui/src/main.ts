@@ -341,8 +341,6 @@ let opsMapActive = false;
 let board: BoardHandle | null = null;
 let boardLoading: Promise<BoardHandle> | null = null;
 let boardActive = false;
-/** Scouts open terminals on the main folder, so none starts before boot has loaded it. */
-let scoutsReady = false;
 let settingsFromOpsMap = false;
 let chatFromOpsMap = false;
 /** The support queue. Lazy for the same reason as the plan: it is a screen you go to, not one
@@ -1446,7 +1444,6 @@ function setupBoard(on: boolean): void {
         record: (id, status, note) => modulePost<ScoutRun>("/m/scout/record", { id, status, found: 0, note }),
       },
       openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
-      ready: () => scoutsReady,
       launch: launchScout,
       showSession: (id) => {
         showTerminals();
@@ -4743,7 +4740,6 @@ async function boot(): Promise<void> {
   await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
-  scoutsReady = true;
   board?.refresh();
   paintProjects();
   // The portfolio lands on Home. Only a Panel scoped to ONE project skips it — there is no

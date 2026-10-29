@@ -52,7 +52,7 @@ def atomic_write(path, value):
             os.unlink(temporary)
 
 
-def record(scout_id, status, found=0, note="", session=None):
+def record(scout_id, status, found=0, note="", session=None, when=None):
     if not isinstance(scout_id, str) or not scout_id:
         raise ValueError("id is required")
     if status not in ("running", "done", "failed"):
@@ -66,6 +66,9 @@ def record(scout_id, status, found=0, note="", session=None):
         fcntl.flock(lock, fcntl.LOCK_EX)
         records = read_json(state / "runs.json", {})
         previous = records.get(scout_id) or {}
+        # `when` checks the last run under the lock, so two sessions never both take one scout.
+        if when and not when(records.get(scout_id)):
+            return None
         stamp = now().isoformat()
         # `started` is when the run began. The due rules read it, so a run that ends after
         # midnight still counts for the day it started, not the next one.
@@ -322,7 +325,10 @@ def main():
                 return _respond(200, run_scout(scout))
             if scout["kind"] != "agent" or not isinstance(d.get("session"), str) or not d["session"].strip():
                 raise ValueError("/start requires an agent scout and session")
-            return _respond(200, record(scout["id"], "running", session=d["session"]))
+            # `board next` sends if_due: of two sessions asking at once, only the first gets it.
+            due = (lambda last: schedule(scout, last, now())[0]) if d.get("if_due") else None
+            began = record(scout["id"], "running", session=d["session"], when=due)
+            return _respond(200, began) if began else _respond(409, {"error": "not due"})
         except ValueError as error:
             return _respond(400, {"error": str(error)})
     return _respond(404, {"error": "no route"})
