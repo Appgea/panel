@@ -1,8 +1,7 @@
 /**
- * Dev harness for the Board screen and its strip. NOT part of the app build — index.html never
+ * Dev harness for the Board screen. NOT part of the app build — index.html never
  * loads this. It mounts the REAL module (mountBoard) against fixture data and a stub extension,
- * so both surfaces can be looked at without Tauri. ?view=strip shows the strip over another
- * screen; ?empty=1 shows a quiet board.
+ * so the screen can be looked at without Tauri. ?empty=1 shows a quiet board.
  */
 import "./style.css";
 import "./motion.css";
@@ -106,8 +105,7 @@ const api: BoardApi = {
 };
 
 const screen = document.getElementById("boardScreen")!;
-const strip = document.getElementById("boardStrip")!;
-const handle = mountBoard(screen, strip, {
+const handle = mountBoard(screen, {
   api,
   openUrl: (target) => console.log("open", target),
   // The harness never opens terminals: Run on an agent scout records a launch without one.
@@ -118,7 +116,5 @@ const handle = mountBoard(screen, strip, {
   },
   showSession: () => true,
   isLive: (session) => session.startsWith("live"),
-  openBoard: () => handle.open(),
 });
-if (params.get("view") === "strip") document.getElementById("homeScreen")!.hidden = false;
-else handle.open();
+handle.open();

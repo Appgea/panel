@@ -223,8 +223,8 @@ Targets (one address scheme): `iphone:` / `ipad:` / `ios:` (simulators / a plugg
 
 ## 9. Desk
 
-### Board and the strip (needs the `scout` extension)
-A thin strip sits on top of every screen: the issues sessions hold right now, with how long, any scout that is running, and how many issues wait on you. Click it for the **Board**: Now, Needs you, Next up, and the Scouts column. The board is GitHub Issues in the ops repo, read through `board.py json`.
+### Board (needs the `scout` extension)
+The **Board** is its own screen, opened from the sidebar: Now, Builds, Needs you, Next up, and the Scouts column. It shows which issues sessions hold right now and for how long, and how many wait on you. The board is GitHub Issues in the ops repo, read through `board.py json`.
 
 A **scout** is a recurring check that finds work and files it as an issue. Each one is a file in `ops/scouts/`: add a file, get a scout. A script scout (`run:`) runs with no AI. An agent scout (`agent:`) needs an AI session. Whichever CLI runs `board next` takes it. Scouts are part of the work: `board next` runs due script scouts, and hands a due agent scout to the session as its task before any issue. Panel never starts one on its own. **Run** on a row starts one now, an agent scout in a terminal you can watch. **Show** brings its terminal forward.
 

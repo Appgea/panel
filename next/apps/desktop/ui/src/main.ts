@@ -1465,7 +1465,7 @@ function setupBoard(on: boolean): void {
   }
   if (board || boardLoading) return;
   const loading = import("./features/board").then(({ mountBoard }) => {
-    board = mountBoard(el("boardScreen"), el("boardStrip"), {
+    board = mountBoard(el("boardScreen"), {
       api: {
         scouts: () => moduleGet<ScoutList>("/m/scout/scouts"),
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
@@ -1483,7 +1483,6 @@ function setupBoard(on: boolean): void {
         return terminals.reveal(id);
       },
       isLive: (id) => Boolean(sessionById(id)) && !exited.has(id),
-      openBoard: () => showBoard(),
     });
     return board;
   });
