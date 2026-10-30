@@ -218,7 +218,8 @@ def run_scout(scout):
     found, note, status = 0, "", "done"
     try:
         code, stdout, stderr, expired = command(
-            ["bash", "-lc", scout["run"]], deadline - time.monotonic(),
+            # A login shell puts /usr/bin/python3 (3.9) first; scouts need Homebrew's.
+            ["bash", "-lc", "export PATH=/opt/homebrew/bin:$PATH; " + scout["run"]], deadline - time.monotonic(),
             dict(os.environ, SCOUT_ID=scout_id))
         findings = [line[6:] for line in stdout.splitlines() if line.startswith("FOUND ")]
         found = len(findings)
