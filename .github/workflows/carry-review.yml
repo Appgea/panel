@@ -53,7 +53,9 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           [ -n "$ANTHROPIC_API_KEY" ] || { echo "ANTHROPIC_API_KEY is not set on this repo"; exit 1; }
-          npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet --tools "" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review-sonnet"
+          # Written to .part and moved only on success, so a failed run leaves no partial review for Merge to pass.
+          npx -y @anthropic-ai/claude-code@2.1.312 -p --model sonnet --tools "" < "$RUNNER_TEMP/prompt" > "$RUNNER_TEMP/review-sonnet.part"
+          mv "$RUNNER_TEMP/review-sonnet.part" "$RUNNER_TEMP/review-sonnet"
       - name: Review (Sol)
         continue-on-error: true
         env:
@@ -64,6 +66,8 @@ jobs:
           curl -sS --fail-with-body --max-time 600 https://api.openai.com/v1/responses \
             -H "Authorization: Bearer $OPENAI_API_KEY" -H "Content-Type: application/json" \
             -d @"$RUNNER_TEMP/sol-req.json" > "$RUNNER_TEMP/sol-res.json" || { cat "$RUNNER_TEMP/sol-res.json"; exit 1; }
+          # An incomplete response can still end in a DESTRUCTIVE line, so only a completed one counts.
+          jq -e '.status == "completed"' "$RUNNER_TEMP/sol-res.json" > /dev/null || { jq '{status, incomplete_details, error}' "$RUNNER_TEMP/sol-res.json"; exit 1; }
           jq -r '[.output[]? | select(.type == "message") | .content[] | select(.type == "output_text") | .text] | join("")' \
             "$RUNNER_TEMP/sol-res.json" > "$RUNNER_TEMP/review-sol"
       # carry passes only "No findings." plus "DESTRUCTIVE: none", so the merge keeps that exact shape. A missing,
@@ -82,6 +86,8 @@ jobs:
                   continue
               if not lines[-1].startswith("DESTRUCTIVE:"):
                   findings.append(f"[{name}] review has no DESTRUCTIVE line, so it may be cut off.")
+              if all(l.startswith("DESTRUCTIVE:") for l in lines):
+                  findings.append(f"[{name}] review has no verdict, neither findings nor \"No findings.\".")
               for line in lines:
                   if line.startswith("DESTRUCTIVE:"):
                       what = line[len("DESTRUCTIVE:"):].strip()
