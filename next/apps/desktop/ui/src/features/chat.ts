@@ -519,7 +519,6 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
       authorButton.addEventListener("click", () => events.openSession(post.project, session));
       header.append(authorButton);
     } else header.append(make("b", "msg-author", post.author));
-    if (session && !live) header.append(make("span", "msg-bot", "EXITED"));
     header.append(make("time", undefined, time(post.at)));
     // A box created after this paint (first click on a ref) still has to reach the DOM, and it
     // belongs to THIS row — the one the human is looking at, not the one it was born under.

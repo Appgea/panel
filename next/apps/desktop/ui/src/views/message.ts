@@ -6,7 +6,8 @@
  * cannot carry: a headline you can scan, and media you have to look at, hear or open.
  *
  * That is the whole rule. Talking to an agent happens in its terminal. The Inbox is a place you
- * LOOK, so anything that is only words gets one line and no more.
+ * LOOK, so a folded report is its title and its pictures. The agent's sentence, the doors and
+ * the replay open when you click the title.
  *
  * Media, in three deliberately different shapes:
  *   * images — a tile per shot, ratio taken from the picture itself, click for the lightbox.
@@ -17,6 +18,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { parsePlace, placeLabel } from "../deeplink";
+import { plainLines, plainText } from "../plain";
 import { projectAssetUrl, projectImage } from "../project-assets";
 import type { Payload, ViewRenderer } from "../types";
 import { arr, el, obj, str } from "./dom";
@@ -29,22 +31,13 @@ const named = (value: unknown, fallbackKey: string): Payload => {
 
 const basename = (path: string): string => path.replaceAll("\\", "/").split("/").pop() || path;
 
-/** The typed half of a report. Unknown values render nothing rather than an unstyled chip. */
+/** The typed half of a report. Done is what a report usually says, so it gets no chip: only
+ *  the states that are not done show. Unknown values render nothing. */
 const OUTCOMES = new Map([
   ["progress", "in progress"],
-  ["done", "done"],
   ["blocked", "blocked"],
   ["needs_decision", "needs you"],
 ]);
-
-/** The first real sentence. Headings, bullets and blank lines are structure, not the point. */
-function headline(text: string): string {
-  for (const raw of text.split("\n")) {
-    const line = raw.trim().replace(/^[#>*-]+\s*/, "");
-    if (line) return line;
-  }
-  return "";
-}
 
 export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
   const root = el("article", "v v-message");
@@ -57,16 +50,17 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
   const note = str(payload._panel_note);
   if (note) eyebrow.title = `filed to ${note}`;
   head.append(eyebrow);
-  head.append(el("h3", "v-title", str(payload.title, "Message")));
+  const heading = el("h3", "v-title");
+  head.append(heading);
   const outcome = str(payload.outcome);
   if (OUTCOMES.has(outcome)) {
     head.append(el("span", `v-message-outcome is-${outcome}`, OUTCOMES.get(outcome)!));
   }
   root.append(head);
 
-  // One line. The report is in the brain; this only has to tell you whether to care.
-  const line = headline(str(payload.text, str(payload.report)));
-  if (line) root.append(el("p", "v-message-line", line));
+  // Folded away until the title is clicked. The full report is in the brain.
+  const words = plainLines(str(payload.text, str(payload.report)));
+  if (words) root.append(el("p", "v-message-line", words));
 
   /* ------------------------------------------------------------------ images */
 
@@ -221,6 +215,19 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
     }
     root.append(rail);
   }
+
+  // The title is the fold when there is anything behind it: words, doors, or the replay the
+  // feed adds under a report with `flow`.
+  const title = plainText(str(payload.title, "Message"));
+  if (words || root.querySelector(".v-message-attachments") || arr(payload.flow).length) {
+    const toggle = el("button", "v-message-toggle", title) as HTMLButtonElement;
+    toggle.type = "button";
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      toggle.setAttribute("aria-expanded", String(root.classList.toggle("is-open")));
+    });
+    heading.append(toggle);
+  } else heading.textContent = title;
 
   return root;
 };

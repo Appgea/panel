@@ -1636,7 +1636,6 @@ function refreshHistorySignals(): void {
       agent: session.agent,
       projectName: historyProjectName(session.project),
       title: session.title,
-      lastText: session.lastText,
       at: Date.parse(session.endedAt),
     })));
   }).catch((error: unknown) => console.warn("[panel] history unavailable", error));

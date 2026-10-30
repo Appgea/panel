@@ -12,6 +12,7 @@
  */
 
 import { icon } from "../icons";
+import { plainText } from "../plain";
 import { ENGINES, type SessionKind } from "./agent-kinds";
 import { createCodeEditor } from "./editor";
 import "./sprint.css";
@@ -881,7 +882,7 @@ export function mountSprint(host: HTMLElement, events: SprintEvents): SprintHand
         const row = make("button", "sp-report") as HTMLButtonElement;
         row.type = "button";
         row.title = `Open ${report.project_name}`;
-        row.append(make("b", undefined, report.project_name), make("span", undefined, report.title));
+        row.append(make("b", undefined, report.project_name), make("span", undefined, plainText(report.title)));
         const tail = make("small");
         tail.append(make("i", `sp-outcome is-${report.outcome || "none"}`, report.outcome), document.createTextNode(report.at));
         row.append(tail);

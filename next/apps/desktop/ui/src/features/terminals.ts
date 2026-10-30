@@ -64,6 +64,7 @@ import { icon, type IconName } from "../icons";
 import { ENGINES, type SessionKind } from "./agent-kinds";
 import { projectImage, projectIconUrl } from "../project-assets";
 import { prose } from "../views/dom";
+import { plainText } from "../plain";
 import { isLightboxOpen, showLightbox, type LightboxShot } from "../views/lightbox";
 import { IS_MAC, KEYMAP_EVENT, chordLabel, chordOf, digitOf, label as chordText, matches } from "./keymap";
 import { COLS, COLS_KEY, PREF, PREFS_EVENT, setTermLayout, termLayout } from "./settings";
@@ -2995,7 +2996,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     pill.className = "term-note-pill";
     pill.dataset.note = notice.id;
     pill.setAttribute("aria-expanded", "false");
-    pill.title = `${notice.title} — ${noticeMeta(notice)}`;
+    pill.title = `${plainText(notice.title)} — ${noticeMeta(notice)}`;
     pill.innerHTML =
       `<span class="term-note-glyph">◳</span>` +
       `<b class="term-note-who"></b>` +
@@ -3003,7 +3004,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       (notice.shots.length ? `<span class="term-note-n"></span>` : "");
     pill.querySelector<HTMLElement>(".term-note-who")!.textContent =
       notice.author || notice.projectName;
-    pill.querySelector<HTMLElement>(".term-note-title")!.textContent = notice.title;
+    pill.querySelector<HTMLElement>(".term-note-title")!.textContent = plainText(notice.title);
     const count = pill.querySelector<HTMLElement>(".term-note-n");
     if (count) count.textContent = `◫ ${notice.shots.length}`;
     pill.addEventListener("click", () => unfold(notice));
@@ -3037,7 +3038,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       `<span class="term-note-caret">⌃</span>`;
     fold.querySelector<HTMLElement>(".term-note-who")!.textContent =
       notice.author || notice.projectName;
-    fold.querySelector<HTMLElement>(".term-note-title")!.textContent = notice.title;
+    fold.querySelector<HTMLElement>(".term-note-title")!.textContent = plainText(notice.title);
     fold.querySelector<HTMLElement>(".term-note-meta")!.textContent = noticeMeta(notice);
     fold.addEventListener("click", () => {
       unfolded.delete(notice.id);

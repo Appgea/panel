@@ -894,18 +894,36 @@
   border-color: color-mix(in oklab, var(--accent) 34%, var(--line));
 }
 .v-message-text { margin: 0 0 14px; }
-/* One line of prose, and that is the ceiling. The written report lives in the appgea brain; if
-   this line does not tell you whether to care, ask the companion — do not grow this box. */
+/* Folded, a report is its title and its pictures. The agent's words and the doors wait behind
+   the title, so a feed of forty reports is forty lines, not forty paragraphs. */
+.v-message-toggle {
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.v-message-toggle::after {
+  content: "›";
+  display: inline-block;
+  margin-left: 6px;
+  color: var(--ink-faint);
+  font-weight: 400;
+  transition: transform var(--fast, 120ms) ease;
+}
+.v-message.is-open .v-message-toggle::after { transform: rotate(90deg); }
+.v-message-toggle:hover { text-decoration: underline; text-underline-offset: 3px; }
+.v-message:not(.is-open) > .v-message-line,
+.v-message:not(.is-open) > .v-message-attachments { display: none; }
 .v-message-line {
   max-width: var(--measure, 68ch);
   margin: 0 0 12px;
   color: var(--ink-dim, var(--muted));
   font-size: var(--text-md);
   line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  white-space: pre-line;
 }
 
 /* ---- audio: played here, because a clip IS the review ---- */

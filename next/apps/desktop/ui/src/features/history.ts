@@ -18,6 +18,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { sessionLink } from "../deeplink";
 import { errorText } from "../errors";
+import { plainLines, plainText } from "../plain";
 import { ENGINES } from "./agent-kinds";
 import "./history.css";
 
@@ -394,13 +395,11 @@ export function mountHistory(host: HTMLElement, events: HistoryEvents): HistoryH
     const top = make("div", "hist-row-top");
     top.append(make("i", "hist-dot"));
     top.append(make("b", "hist-row-project", events.projectName(session.project)));
-    top.append(make("span", "hist-row-title", session.title || "Untitled session"));
+    top.append(make("span", "hist-row-title", plainText(session.title) || "Untitled session"));
     if (session.headless) top.append(make("span", "hist-chip", "headless"));
     if (live) top.append(make("span", "hist-chip is-live", "open"));
     top.append(make("time", "hist-row-when", clock(session.endedAt)));
     row.append(top);
-
-    if (session.lastText) row.append(make("p", "hist-row-last", session.lastText));
 
     const meta = make("div", "hist-row-meta");
     const used = data?.usage.filter((item) => item.session === session.id).reduce((sum, item) => sum + processed(item), 0) ?? 0;
@@ -465,6 +464,9 @@ export function mountHistory(host: HTMLElement, events: HistoryEvents): HistoryH
     };
     field("First ask", session.firstPrompt);
     if (session.lastPrompt !== session.firstPrompt) field("Last ask", session.lastPrompt);
+    // The agent's last reply, only here: a folded row is the title, so a day of sessions stays a
+    // list you can scan.
+    field("Last reply", plainLines(session.lastText));
     if (session.files.length) {
       const item = make("div", "hist-field");
       item.append(make("span", "hist-label", "Files written"));
@@ -550,7 +552,7 @@ export function mountHistory(host: HTMLElement, events: HistoryEvents): HistoryH
           ...(hit.role === "you" ? [make("span", "hist-chip is-you", "you")] : []),
           make("time", "hist-row-when", relativeTime(hit.at)),
         );
-        row.append(top, make("p", "hist-hit-snippet", hit.snippet));
+        row.append(top, make("p", "hist-hit-snippet", plainText(hit.snippet)));
         row.addEventListener("click", () => focusSession(hit.session));
         return row;
       }),

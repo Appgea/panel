@@ -166,16 +166,6 @@ button.msg-author {
   cursor: pointer;
 }
 button.msg-author:hover { transform: none; text-decoration: underline; }
-.msg-bot {
-  padding: 1px 4px;
-  color: var(--ink-dim);
-  background: color-mix(in oklab, var(--ink) 10%, transparent);
-  border-radius: 3px;
-  font-size: var(--text-xs);
-  font-weight: 800;
-  letter-spacing: .06em;
-}
-.msg-bot.is-gone { color: var(--ink-faint); }
 /* A label, not a door — see inbox.ts. Nothing here is clickable. */
 .msg-project {
   padding: 1px 6px;
@@ -399,6 +389,8 @@ button.msg-author:hover { transform: none; text-decoration: underline; }
 .msg-main .v.in-feed .v-message-attachments { margin-top: 9px; }
 .msg-main .v.in-feed .v-message-attachments + * { margin-top: 6px; }
 .msg-actions:has(+ .msg-actions) { margin-bottom: 0; }
+/* The replay belongs to the opened report, like its words. */
+.msg-main:has(> .v-message:not(.is-open)) > .msg-actions { display: none; }
 .msg-main > .v.in-feed:has(.v-message-attachments) + .msg-actions { margin-top: 6px; }
 
 /* --------------------------------------------------------- the measure

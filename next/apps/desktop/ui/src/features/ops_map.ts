@@ -15,7 +15,8 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { errorNote } from "../errors";
-import { buildGraph, humanDates, layout, plainText, STALL_DAYS, type DoneRow, type Graph, type GraphNode, type OpsMapData, type Thread, type Tone } from "./ops_graph";
+import { plainText } from "../plain";
+import { buildGraph, humanDates, layout, STALL_DAYS, type DoneRow, type Graph, type GraphNode, type OpsMapData, type Thread, type Tone } from "./ops_graph";
 import "./ops_map.css";
 
 export type OpsMapEvents = {

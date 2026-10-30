@@ -12,6 +12,7 @@ import { projectIconUrl } from "../project-assets";
 import { isAgentKind } from "./agent-kinds";
 import { moduleGet } from "./modules";
 import { errorText } from "../errors";
+import { plainText } from "../plain";
 import "./home.css";
 
 /* ------------------------------------------------------------------ analytics
@@ -107,7 +108,6 @@ export type HomeAway = {
   agent: string;
   projectName: string;
   title: string;
-  lastText: string;
   at: number;
 };
 
@@ -651,7 +651,7 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
         line.querySelector("b")!.textContent = post.projectName;
         line.querySelector("i")!.textContent = post.author;
         const title = make("span", "home-act-title");
-        title.textContent = post.title;
+        title.textContent = plainText(post.title);
         body.append(line, title);
         const when = make("time", "home-act-when");
         when.textContent = relative(post.at);
@@ -707,13 +707,13 @@ export function mountHome(host: HTMLElement, events: HomeEvents): HomeHandle {
         const avatar = make("span", "home-act-ico");
         avatar.dataset.agent = session.agent;
         avatar.innerHTML = icon(activityGlyph(session.agent));
+        // The session's title, not its last reply. Replies are long agent prose; History has them.
         const text = make("span", "home-act-body");
         const line = make("span", "home-act-line");
-        line.append(make("b", "home-act-project"), make("i", "home-act-author"));
+        line.append(make("b", "home-act-project"));
         line.querySelector("b")!.textContent = session.projectName;
-        line.querySelector("i")!.textContent = session.title;
         const last = make("span", "home-act-title");
-        last.textContent = session.lastText || "No reply recorded.";
+        last.textContent = plainText(session.title) || "Untitled session";
         text.append(line, last);
         const when = make("time", "home-act-when");
         when.textContent = relative(session.at);

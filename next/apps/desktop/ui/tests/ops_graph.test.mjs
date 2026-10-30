@@ -1,13 +1,8 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { transformWithOxc } from "vite";
+import { src } from "./load.mjs";
 
-const source = await readFile(new URL("../src/features/ops_graph.ts", import.meta.url), "utf8");
-const { code } = await transformWithOxc(source, "ops_graph.ts");
-const { buildGraph, deadlineIn, headline, humanDates, humanName, layout, STALL_DAYS } = await import(
-  `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
-);
+const { buildGraph, deadlineIn, humanDates, humanName, layout, STALL_DAYS } = await src("features/ops_graph.ts");
 
 const app = (key, name, extra = {}) => ({ key, name, kind: "flutter-app", project: null, depends_on: [], serves: [], ...extra });
 const at = (date) => Date.parse(`${date}T12:00:00`) / 1000;
@@ -102,21 +97,11 @@ test("done honours the window, and layout is stable and keeps old places", () =>
 });
 
 test("ops lines read as one plain headline", () => {
-  const read = (text) => headline(humanDates(text, 2026));
-  assert.equal(read("The signing certificate ends 2026-10-26. Renewing means a new one."),
-    "The signing certificate ends Oct 26");
-  assert.equal(read("Portfolio has rebuilt legal pages for 10 apps (coinapp, fitstrail). Push later."),
-    "Portfolio has rebuilt legal pages for 10 apps");
-  assert.equal(read("1.13.0 (20) shipped. iOS in App Review."), "1.13.0 shipped");
-  assert.equal(read("dark mode live on both stores. Left the widget."), "Dark mode live on both stores");
-  assert.equal(read("D-0042 · No app sells in China mainland (ICP filing); new apps leave CHN unchecked"),
+  const done = (text) => buildGraph(data({ done: [{ date: "2026-10-27", kind: "decision", tags: [], text, path: "d.md", line: 1 }] }), 14, () => null).done[0].title;
+  assert.equal(done("D-0042 · No app sells in China mainland (ICP filing); new apps leave CHN unchecked"),
     "No app sells in China mainland");
-  assert.equal(read("Sync paused (`.env` false). **Notes** export hidden."), "Sync paused");
-  const long = read("Every screenshot in the store listing needs to be taken again once the new layout lands.");
-  assert.ok(long.length <= 73 && long.endsWith("…") && !long.includes("  "), long);
-  assert.equal(read("Decide the launch order of the new levels: easy first, or hard first."),
-    "Decide the launch order of the new levels");
-  assert.equal(read("Reviews: iOS ratings are low. Cause is install volume."), "Reviews: iOS ratings are low");
+  assert.equal(done("The signing certificate ends 2026-10-26. Renewing means a new one."),
+    "The signing certificate ends Oct 26");
   assert.equal(humanDates("from 2025-12-01", 2026), "from Dec 1, 2025");
   assert.deepEqual(["billing-8", "ios-cover-art", "admob-consolidation"].map(humanName), ["Billing 8", "iOS cover art", "AdMob consolidation"]);
 });

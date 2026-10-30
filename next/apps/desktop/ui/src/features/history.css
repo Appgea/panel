@@ -206,8 +206,7 @@
 }
 .hist-chip.is-live { color: var(--ok); border-color: color-mix(in oklab, var(--ok) 45%, var(--line)); }
 
-/* The last thing the agent said, two lines. For a session that never reported, this is its report. */
-.hist-row-last,
+/* A search hit, two lines around what matched. */
 .hist-hit-snippet {
   display: -webkit-box;
   margin: 0;
@@ -218,7 +217,6 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.hist-row.is-open .hist-row-last { -webkit-line-clamp: unset; }
 
 .hist-row-meta {
   display: flex;

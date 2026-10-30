@@ -86,13 +86,13 @@ Stdio, newline-delimited JSON-RPC, MCP `2024-11-05`, no third-party deps. Reads 
 Fire-and-forget visual. `type` (required, free string → renderer key), `payload` (object). Use only for things hooks can't see (a phase, a plan, a result). Returns `emitted event <id>`.
 
 ### `send_to_user`
-A **report**, not a chat message: prose is filed to the brain; the Inbox shows the headline + media.
+A **report**, not a chat message: prose is filed to the brain. The Inbox shows the title and media; the text opens on a click.
 Sent as `/panel/emit` with `type:"message"`.
 
 | param | req | notes |
 |---|---|---|
-| `title` | ✔ | short |
-| `text` | ✔ | one brief explanation |
+| `title` | ✔ | plain words, under 60 characters; no file names, ids, code or markdown |
+| `text` | ✔ | one plain sentence, under 30 words; code goes in `flow` |
 | `outcome` | ✔ | `progress` \| `done` \| `blocked` \| `needs_decision` |
 | `flow` | ✔ (≥1) | `[{ref, label, detail}]`; `ref` = `path:line`; 2–5 steps |
 | `images` | | strings or `{path, caption}`; **every screenshot, captioned** |
