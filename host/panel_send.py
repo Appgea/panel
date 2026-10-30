@@ -4,9 +4,11 @@
 import argparse
 import json
 import os
+import sys
 import urllib.request
 
 from keep_media import keep_media
+from slack_mirror import slack_mirror
 
 
 def main():
@@ -95,9 +97,20 @@ def main():
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(request, timeout=10) as response:
-        result = json.loads(response.read().decode() or "{}")
-    print("sent message %s" % (result.get("id") or "?"))
+    # Panel closed is not a lost report: its pictures still reach Slack below.
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            result = json.loads(response.read().decode() or "{}")
+        print("sent message %s" % (result.get("id") or "?"))
+        panel_ok = True
+    except OSError as error:
+        print("Panel did not take it: %s" % error, file=sys.stderr)
+        panel_ok = False
+    slack_ok = bool(payload.get("images")) and slack_mirror(payload)
+    if slack_ok:
+        print("pictures sent to Slack #desk")
+    if not panel_ok and not slack_ok:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

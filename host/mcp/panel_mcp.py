@@ -28,6 +28,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from keep_media import keep_media  # noqa: E402
+from slack_mirror import slack_mirror  # noqa: E402
 
 PORT = os.environ.get("PANEL_PORT", "7391")
 INSTANCE = os.environ.get("PANEL_INSTANCE", "")
@@ -326,7 +327,9 @@ def _call(name, args):
                    if k in args and args[k] is not None}
         r = _post("/panel/emit",
                   {"instance": INSTANCE, "type": "message", "payload": keep_media(payload)}, 10)
-        return "sent message %s" % (r.get("id") or "?")
+        # One flow, two places: the pictures also land in Slack #desk.
+        slack = " and its pictures to Slack #desk" if payload.get("images") and slack_mirror(payload) else ""
+        return "sent message %s%s" % (r.get("id") or "?", slack)
     if name == "ask_user":
         timeout = float(args.get("timeout") or 280)
         spec = {k: args[k] for k in ("kind", "prompt", "title", "options", "fields", "handoff",
