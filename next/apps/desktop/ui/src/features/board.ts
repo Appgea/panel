@@ -209,7 +209,8 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       list = scouts;
       builds = builtList;
       board = read;
-      pictures.clear();
+      const paths = new Set([...(read.now ?? []), ...(read.you ?? []), ...(read.next ?? [])].flatMap((card) => card.show ?? []));
+      for (const path of pictures.keys()) if (!paths.has(path)) pictures.delete(path);
       failure = "";
       paint();
       schedule();
@@ -283,6 +284,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       icons.append(tile);
     }
     if (!card.apps.length) icons.append(h("span", "bd-icon bd-icon-ops", "A"));
+    icons.append(h("i", "bd-dot"));
     row.append(icons);
     const text = h("span", "bd-text");
     text.append(h("span", "bd-title", card.title));
@@ -318,8 +320,11 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         const img = h("img", "bd-picture");
         img.alt = "Issue picture";
         if (!pictures.has(path)) pictures.set(path, api.picture(path));
-        void pictures.get(path)!.then((src) => { img.src = src; }).catch(() => {
-          img.replaceWith(h("span", "bd-picture-missing", "Picture unavailable"));
+        void pictures.get(path)!.then((src) => { img.src = src; }).catch((error: unknown) => {
+          pictures.delete(path);
+          const missing = h("span", "bd-picture-missing", "Picture unavailable");
+          missing.title = errorText(error, "The image could not be read");
+          img.replaceWith(missing);
         });
         img.addEventListener("error", () => img.replaceWith(h("span", "bd-picture-missing", "Picture unavailable")), { once: true });
         preview.append(img);

@@ -110,7 +110,8 @@
 }
 .bd-row { grid-template-columns: 40px minmax(0, 1fr) auto; padding: 12px 8px; gap: 14px; }
 .bd-row + .bd-row { border-top: 1px solid var(--line); border-radius: 0; }
-.bd-icons { display: flex; flex-direction: column; gap: 4px; }
+.bd-icons { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.bd-icons > .bd-dot { position: absolute; right: -2px; bottom: -2px; box-shadow: 0 0 0 3px var(--bg); }
 .bd-icon { position: relative; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 9px; background: var(--bg-raised); color: var(--ink-dim); font-weight: 650; overflow: hidden; }
 .bd-icon img { position: absolute; width: 100%; height: 100%; object-fit: cover; }
 .bd-icon-ops { border: 1px solid var(--line); }
