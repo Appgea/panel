@@ -6,6 +6,7 @@
 import "./style.css";
 import "./motion.css";
 import { mountBoard, type BoardApi, type BoardData, type BuildList, type Scout, type ScoutList } from "./features/board";
+import type { ReviewCard, ReviewDeck } from "./features/swipe";
 
 const params = new URLSearchParams(location.search);
 const ago = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -123,5 +124,70 @@ const handle = mountBoard(screen, {
   },
   showSession: () => true,
   isLive: (session) => session.startsWith("live"),
+  openSwipe: () => void swipe(),
 });
 handle.open();
+
+/* Swipe review against fixtures. ?swipe=1 opens it at once; ?swipe=play deals the cards too. */
+const card = (c: Partial<ReviewCard> & Pick<ReviewCard, "number" | "title" | "kind">): ReviewCard => ({
+  url: url(c.number), apps: [], workflow: false, priority: 2, labels: [], summary: "", why: "", ask: "", points: [],
+  minutes: null, who: "", at: ago(90), pictures: [], ...c,
+});
+const DECK: ReviewDeck = {
+  since: ago(60 * 20),
+  until: new Date().toISOString(),
+  repo: "Appgea/ops",
+  profile: { xp: 1340, streak: 4, last_day: null, last_at: null, best_combo: 17, sessions: 6, badges: ["first-swipe", "combo-10", "voice"] },
+  moves: {
+    done: { right: "Ship it", left: "Redo", up: "Love it", down: "Skip" },
+    new: { right: "Go", left: "Drop", up: "Rush", down: "Skip" },
+    dropped: { right: "Fine", left: "Revive", up: "Love it", down: "Skip" },
+  },
+  cards: [
+    card({ number: 449, kind: "done", priority: 0, apps: ["tavla"], who: "claude-3f1c02aa", minutes: 38, title: "Tavla Android crash: the game screen reads a provider after the widget is unmounted",
+      summary: "Fixed: the game screen now stops listening before it unmounts, so the crash on leaving a match is gone in 1.9.2.",
+      points: ["flutter test test/game_screen_test.dart passes, with a new test that leaves a match mid-move", "Crashlytics shows 0 of this crash on the internal track build after 40 matches", "Play internal testing has 1.9.2 build 212"],
+      why: "It was the top Android crash: 31% of all crash-free-user loss last week.", pictures: params.get("picture") ? ["/tmp/x.png"] : [] }),
+    card({ number: 451, kind: "done", priority: 1, apps: ["pillow_app"], who: "sol-pillow", minutes: 22, title: "Pillow: outside the top 100 for sleep sounds in 8 locales", labels: ["decided"],
+      summary: "Pillow 2.4.1 ships the new title, subtitle and keywords in all 8 locales.", points: ["asc_listing --edit shows the new copy, keywords 94 to 100 chars", "Play listing API read-back shows the new title in all 8 locales"] }),
+    card({ number: 709, kind: "new", priority: 1, apps: ["interbellum"], title: "Interbellum: better tiles, and front lines that run whole along a border",
+      summary: "The map's tiles are hard to read and too many. Some tiles are in several pieces or sit inside another tile.",
+      points: ["The tile audit shows 0 tiles in two land pieces", "A front line runs unbroken along every border with no sea gap"],
+      why: "The map is the game. A player who cannot read the tiles cannot plan a war.", ask: "Should empty land merge into one big tile per region?" }),
+    card({ number: 718, kind: "new", priority: 3, workflow: true, title: "board next picks a P3 before an older P2 when the P2 has no estimate", labels: ["speed"],
+      summary: "Sessions starting work get a low-value issue because the sort treats a missing estimate as zero." }),
+    card({ number: 702, kind: "dropped", priority: 2, apps: ["weekcut"], labels: ["untrue"], who: "claude-77ab", title: "Weekcut export drops the last caption",
+      summary: "Untrue: the last caption is in the export. The player cut it at the end because the video was 0.2 s shorter than the audio." }),
+    card({ number: 690, kind: "done", priority: 2, workflow: true, who: "claude-e9aca641", minutes: 12, title: "Panel: scouts and the board, visible all the time",
+      summary: "The Board screen now shows who holds what and the scouts' next run.", points: ["npm run check passes", "Dev harness screenshot shows the strip at 1440 and 900 wide"] }),
+  ],
+};
+async function swipe(): Promise<void> {
+  const { openSwipe } = await import("./features/swipe");
+  openSwipe({
+    api: {
+      deck: async () => { await wait(300); return structuredClone(DECK); },
+      voice: async () => { await wait(1200); return { text: "Bunu bir sonraki sürümle birlikte gönder, ama önce Türkçe metni kontrol et.", path: "/tmp/x.m4a" }; },
+      send: async (body) => {
+        await wait(800);
+        console.log("send", body);
+        return { applied: body.verdicts.map((v) => ({ number: v.number, label: "x", act: v.move === "left" ? "reopen" : null, note: v.note, did: [v.note ? "noted" : "", v.move === "left" ? "reopened" : ""].filter(Boolean) })),
+          errors: [], brief: "/tmp/brief.md", prompt: "Read /tmp/brief.md and do what it says.",
+          profile: { ...DECK.profile, xp: DECK.profile.xp + body.xp, streak: 5, best_combo: Math.max(17, body.best_combo), badges: body.badges } };
+      },
+      picture: async () => params.get("picture") ?? "",
+    },
+    appIcon: (dir) => params.get(`icon-${dir}`),
+    appName: (dir) => ({ tavla: "Tavla", pillow_app: "Pillow", interbellum: "Interbellum", weekcut: "Weekcut" })[dir] ?? dir,
+    openUrl: (target) => console.log("open", target),
+    launchAgent: async () => (params.get("launch") ? "live-2" : null),
+    showSession: () => true,
+    fullscreen: async (on) => on,
+    onClose: () => console.log("swipe closed"),
+  });
+  if (params.get("swipe") === "play") {
+    await wait(500);
+    document.querySelector<HTMLButtonElement>(".sw-go")?.click();
+  }
+}
+if (params.get("swipe")) void swipe();

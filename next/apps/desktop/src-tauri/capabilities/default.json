@@ -3,5 +3,5 @@
   "identifier": "main-window",
   "description": "Allows the Panel window to receive agent and terminal events.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default", "core:window:allow-set-theme"]
+  "permissions": ["core:default", "core:event:default", "core:window:allow-set-theme", "core:window:allow-set-fullscreen", "core:window:allow-is-fullscreen"]
 }

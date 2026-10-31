@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Tauri merges this into Panel.app's Info.plist. macOS refuses the microphone to an app without
+     this line: the swipe review's voice notes need it. -->
+<plist version="1.0">
+<dict>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Panel records the voice notes you leave in a swipe review and turns them into text on this Mac.</string>
+</dict>
+</plist>

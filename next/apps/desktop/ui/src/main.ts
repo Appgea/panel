@@ -44,6 +44,7 @@ import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
 import type { BoardData, BoardHandle, BuildList, Scout, ScoutList, ScoutRun } from "./features/board";
+import type { ReviewDeck, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -1488,6 +1489,7 @@ function setupBoard(on: boolean): void {
         return terminals.reveal(id);
       },
       isLive: (id) => Boolean(sessionById(id)) && !exited.has(id),
+      openSwipe: () => void openSwipeReview(),
     });
     return board;
   });
@@ -1496,6 +1498,51 @@ function setupBoard(on: boolean): void {
     boardLoading = null;
     console.warn("[panel] board", error);
   });
+}
+
+/** The swipe review (swipe.ts) over the whole window. Its verdicts go to GitHub through the scout
+ *  module, and his words to one Claude terminal on the main folder, typed like a scout's prompt. */
+let swipeOpen = false;
+async function openSwipeReview(): Promise<void> {
+  if (swipeOpen) return;
+  swipeOpen = true;
+  try {
+    const { openSwipe } = await import("./features/swipe");
+    const projectFor = (dir: string) =>
+      [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`))?.project;
+    openSwipe({
+      api: {
+        deck: (hours) => moduleGet<ReviewDeck>(`/m/scout/review/deck${hours ? `?hours=${hours}` : ""}`),
+        voice: (audio, mime) => modulePost<{ text: string; path: string }>("/m/scout/review/voice", { audio, mime }),
+        send: (body) => modulePost<SendResult>("/m/scout/review/send", body),
+        picture: (path) =>
+          moduleGet<{ src: string }>(`/m/scout/review/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
+      },
+      appIcon: (dir) => {
+        const project = projectFor(dir);
+        return project ? projectIconUrl(project.id) : null;
+      },
+      appName: (dir) => projectFor(dir)?.name ?? dir.replace(/_/g, " "),
+      openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] swipe", error)),
+      launchAgent: (prompt) => launchScout({ id: "swipe-review", agent: "claude" } as Scout, prompt, async () => undefined),
+      showSession: (id) => {
+        showTerminals();
+        return terminals.reveal(id);
+      },
+      fullscreen: async (on) => {
+        const panel = getCurrentWindow();
+        await panel.setFullscreen(on);
+        return panel.isFullscreen();
+      },
+      onClose: () => {
+        swipeOpen = false;
+        board?.refresh(true);
+      },
+    });
+  } catch (error) {
+    swipeOpen = false;
+    console.warn("[panel] swipe", error);
+  }
 }
 
 /**

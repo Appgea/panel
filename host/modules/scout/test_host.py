@@ -281,5 +281,115 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(self.call("GET", "/missing"), (404, {"error": "no route"}))
 
 
+REVIEW = Path(__file__).parent / "bin/review.py"
+review_spec = importlib.util.spec_from_file_location("scout_review", REVIEW)
+review = importlib.util.module_from_spec(review_spec)
+with patch.object(sys, "dont_write_bytecode", True):
+    review_spec.loader.exec_module(review)
+
+
+def issue(number, state="OPEN", labels=(), body="", comments=(), reason=None):
+    return {"number": number, "title": "T%d" % number, "url": "u", "state": state, "stateReason": reason,
+            "labels": [{"name": l} for l in labels], "body": body, "comments": [{"body": c} for c in comments],
+            "createdAt": "2026-11-01T08:00:00Z", "closedAt": "2026-11-01T09:00:00Z" if state == "CLOSED" else None}
+
+
+class SwipeReviewTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name).resolve()
+        self.state = self.root / "state"
+
+    def test_card_kind_summary_and_points(self):
+        done = review.card(issue(1, "CLOSED", ["app:tavla", "P0"], "Problem: crash", [
+            "Claimed by `pisekar`", "Done by `pisekar` in 12 min.\nFixed the provider read.\n- test passes\n- shipped"]))
+        self.assertEqual((done["kind"], done["apps"], done["priority"], done["workflow"]), ("done", ["tavla"], 0, False))
+        self.assertEqual((done["summary"], done["points"], done["minutes"], done["who"]),
+                         ("Fixed the provider read.", ["test passes", "shipped"], 12, "pisekar"))
+        new = review.card(issue(2, body="Problem: slow **deck**\nDone when:\n- under 2 s\n- `check` passes"))
+        self.assertEqual((new["kind"], new["summary"], new["points"], new["workflow"]),
+                         ("new", "slow deck",["under 2 s", "check passes"], True))
+        self.assertEqual(review.card(issue(3, "CLOSED", reason="NOT_PLANNED"))["kind"], "dropped")
+        self.assertEqual(review.card(issue(4, "CLOSED", ["untrue"]))["kind"], "dropped")
+
+    def test_picture_path_stays_inside_roots(self):
+        allowed = self.root / "allowed"
+        allowed.mkdir()
+        (allowed / "shot.png").write_bytes(b"png")
+        (self.root / "outside.png").write_bytes(b"png")
+        (allowed / "escape.png").symlink_to(self.root / "outside.png")
+        (allowed / "notes.txt").write_text("x")
+        with patch.object(review, "PICTURE_ROOTS", (allowed,)):
+            self.assertEqual(review._picture_path(str(allowed / "shot.png")), allowed / "shot.png")
+            for bad in ("outside.png", "allowed/escape.png", "allowed/notes.txt", "allowed/../outside.png", "allowed/none.png"):
+                self.assertIsNone(review._picture_path(str(self.root / bad)), bad)
+            with self.assertRaises(ValueError):
+                review.picture("/etc/passwd")
+
+    def test_apply_writes_only_what_the_verdict_means(self):
+        cards = {5: {"kind": "new", "priority": 2}}
+        cases = [
+            ({"number": 5, "kind": "done", "move": "right"}, []),
+            ({"number": 5, "kind": "done", "move": "up", "note": "nice"}, [["issue", "comment"]]),
+            ({"number": 5, "kind": "done", "move": "left"}, [["issue", "comment"], ["issue", "reopen"]]),
+            ({"number": 5, "kind": "new", "move": "left"}, [["issue", "comment"], ["issue", "close"]]),
+            ({"number": 5, "kind": "new", "move": "up"}, [["issue", "comment"], ["issue", "edit"]]),
+            ({"number": 5, "kind": "new", "move": "up", "priority": 0}, [["issue", "comment"]]),
+            ({"number": 5, "kind": "bogus", "move": "sideways"}, []),
+        ]
+        for verdict, expected in cases:
+            with patch.object(review, "_gh", return_value="") as gh:
+                review._apply(verdict, cards, "2026-11-01")
+            self.assertEqual([c.args[0][:2] for c in gh.call_args_list], expected, verdict)
+        with patch.object(review, "_gh", return_value="") as gh:
+            result = review._apply({"number": 5, "kind": "new", "move": "up"}, cards, "2026-11-01")
+        self.assertEqual(result["did"], ["P2 to P1"])
+        self.assertIn("--add-label", gh.call_args_list[1].args[0])
+
+    def test_send_keeps_going_past_a_failed_write_and_counts_the_streak(self):
+        today = datetime.now().astimezone().date()
+        review._write(self.state / "review/profile.json", {
+            "xp": 100, "streak": 3, "last_day": (today - timedelta(days=1)).isoformat(), "best_combo": 9, "badges": ["voice"]})
+
+        def gh(args, **_):
+            if args[2] == "7":
+                raise RuntimeError("gone")
+            return ""
+        with patch.object(review, "_gh", side_effect=gh):
+            result = review.send(self.state, {"until": "2026-11-01T10:00:00Z", "xp": 50, "best_combo": 4, "badges": ["boss"],
+                                              "verdicts": [{"number": 7, "kind": "done", "move": "left"},
+                                                           {"number": 8, "kind": "done", "move": "right", "note": "ok"}]})
+        self.assertEqual(result["errors"], [{"number": 7, "error": "gone", "note": ""}])
+        self.assertEqual([r["number"] for r in result["applied"]], [8])
+        text = Path(result["brief"]).read_text(encoding="utf-8")
+        self.assertIn("Owner: ok", text)
+        self.assertIn("## #7", text)
+        self.assertIn("NOT WRITTEN to GitHub (gone)", text)
+        with patch.object(review, "_gh") as gh, self.assertRaises(ValueError):
+            review.send(self.state, {"xp": "lots", "verdicts": [{"number": 1, "kind": "done", "move": "left"}]})
+        gh.assert_not_called()
+        mine = result["profile"]
+        self.assertEqual((mine["xp"], mine["streak"], mine["best_combo"], mine["badges"], mine["last_at"]),
+                         (150, 4, 9, ["boss", "voice"], "2026-11-01T10:00:00Z"))
+        with patch.object(review, "_gh", return_value=""):
+            again = review.send(self.state, {"verdicts": [{"number": 9, "kind": "done", "move": "right"}]})
+        self.assertEqual((again["profile"]["streak"], again["brief"], again["prompt"]), (4, None, ""))
+
+    def test_window_starts_at_the_last_review_and_never_past_three_days(self):
+        self.assertAlmostEqual((lambda s, u: (u - s).total_seconds() / 3600)(*review.window(self.state)), 24, places=1)
+        review._write(self.state / "review/profile.json", {"last_at": "2020-01-01T00:00:00+00:00"})
+        since, until = review.window(self.state)
+        self.assertAlmostEqual((until - since).total_seconds() / 3600, 72, places=1)
+        since, until = review.window(self.state, "6")
+        self.assertAlmostEqual((until - since).total_seconds() / 3600, 6, places=1)
+        stamp = review._iso(review._now() - timedelta(hours=2))
+        for saved in (stamp, stamp[:-1], "garbage"):
+            review._write(self.state / "review/profile.json", {"last_at": saved})
+            since, until = review.window(self.state)
+            self.assertAlmostEqual((until - since).total_seconds() / 3600, 24 if saved == "garbage" else 2, places=1)
+        self.assertIsNone(review._picture_path(None))
+
+
 if __name__ == "__main__":
     unittest.main()

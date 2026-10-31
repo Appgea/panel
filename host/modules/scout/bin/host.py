@@ -404,6 +404,23 @@ def main():
                   (scout_id, ops_path() / "scouts/_rules.md", ops_path() / ("scouts/%s.md" % scout_id),
                    "'" + str(Path(__file__).resolve()).replace("'", "'\"'\"'") + "'", shlex.quote(scout_id)))
         return _respond(200, {"prompt": prompt.replace("\n", " ").replace("\r", " ")})
+    if path.startswith("/review/"):
+        import review
+        try:
+            if method == "GET" and path == "/review/deck":
+                return _respond(200, review.deck(state_path(), qs("hours") or None))
+            if method == "GET" and path == "/review/picture":
+                return _respond(200, review.picture(qs("path")))
+            body = json.loads(sys.stdin.buffer.read() or b"{}")
+            if not isinstance(body, dict):
+                raise ValueError("body must be an object")
+            if method == "POST" and path == "/review/voice":
+                return _respond(200, review.voice(state_path(), body))
+            if method == "POST" and path == "/review/send":
+                return _respond(200, review.send(state_path(), body))
+        except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
+            return _respond(400, {"error": str(error)})
+        return _respond(404, {"error": "no route"})
     if method == "POST" and path in ("/run", "/start", "/record"):
         try:
             d = json.loads(sys.stdin.buffer.read() or b"{}")

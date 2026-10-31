@@ -104,6 +104,8 @@ export type BoardEvents = {
   /** Bring a scout's terminal forward. False when it is gone. */
   showSession(session: string): boolean;
   isLive(session: string): boolean;
+  /** The full-screen swipe review of what the board did since you last looked (swipe.ts). */
+  openSwipe(): void;
 };
 
 export type BoardHandle = { open(): void; clear(): void; refresh(fresh?: boolean): void; dispose(): void };
@@ -439,6 +441,9 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     }
     heading.append(stats);
     const actions = h("div", "bd-actions");
+    const swipe = button("bd-chip bd-chip-swipe", "Swipe review", "Judge what was shipped and filed since your last review, one card at a time");
+    swipe.addEventListener("click", () => events.openSwipe());
+    actions.append(swipe);
     const reread = button("bd-chip", "Refresh", "Read the board and the scouts again");
     reread.addEventListener("click", () => void refresh(true));
     actions.append(reread);
