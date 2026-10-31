@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Scout module host — one CGI-argv request or record command per process."""
 import argparse
+import base64
 from datetime import datetime, timedelta
 import fcntl
 import json
@@ -293,6 +294,25 @@ def board(fresh):
         return {"error": str(error)}
 
 
+PICTURE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
+PICTURE_LIMIT = 3 * 1024 * 1024
+
+
+def picture(raw):
+    """A card's picture as a data URL. Only an image inside the ops folder, so this route reads nothing else."""
+    try:
+        file = Path(raw).expanduser().resolve()
+        root = ops_path().resolve()
+        kind = PICTURE_TYPES.get(file.suffix.lower())
+        if not kind or root not in file.parents or not file.is_file():
+            return 400, {"error": "not a picture in ops"}
+        if file.stat().st_size > PICTURE_LIMIT:
+            return 413, {"error": "picture too large"}
+        return 200, {"src": "data:%s;base64,%s" % (kind, base64.b64encode(file.read_bytes()).decode("ascii"))}
+    except OSError as error:
+        return 400, {"error": str(error)}
+
+
 BUILD_COLUMNS = ["date", "builder", "effort", "repo", "minutes", "exit", "session", "kind", "verdict", "task"]
 
 
@@ -372,6 +392,8 @@ def main():
         return _respond(200, board(qs("fresh") == "1"))
     if method == "GET" and path == "/builds":
         return _respond(200, builds())
+    if method == "GET" and path == "/picture":
+        return _respond(*picture(qs("path")))
     if method == "GET" and path == "/prompt":
         scout = next((s for s in scouts() if s["id"] == qs("id")), None)
         if not scout:

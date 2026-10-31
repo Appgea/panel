@@ -1470,11 +1470,16 @@ function setupBoard(on: boolean): void {
         scouts: () => moduleGet<ScoutList>("/m/scout/scouts"),
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
         builds: () => moduleGet<BuildList>("/m/scout/builds"),
+        picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
         run: (id) => modulePost<ScoutRun>("/m/scout/run", { id }),
         prompt: (id) =>
           moduleGet<{ prompt: string }>(`/m/scout/prompt?id=${encodeURIComponent(id)}`).then((answer) => answer.prompt),
         start: (id, session) => modulePost<ScoutRun>("/m/scout/start", { id, session }),
         record: (id, status, note) => modulePost<ScoutRun>("/m/scout/record", { id, status, found: 0, note }),
+      },
+      appIcon: (dir) => {
+        const project = [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`));
+        return project ? projectIconUrl(project.project.id) : null;
       },
       openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
       launch: launchScout,

@@ -43,6 +43,9 @@ export type BoardCard = {
   priority: number;
   holder?: string;
   claimed_at?: string | null;
+  ask?: string;
+  estimate?: number;
+  show?: string[];
 };
 export type BoardData = {
   repo?: string;
@@ -52,6 +55,7 @@ export type BoardData = {
   you?: BoardCard[];
   next?: BoardCard[];
   error?: string;
+  apps?: Record<string, { name: string; dir: string }>;
 };
 export type RunningBuild = {
   pid: number;
@@ -83,6 +87,7 @@ export type BoardApi = {
   scouts(): Promise<ScoutList>;
   board(fresh: boolean): Promise<BoardData>;
   builds(): Promise<BuildList>;
+  picture(path: string): Promise<string>;
   run(id: string): Promise<ScoutRun>;
   prompt(id: string): Promise<string>;
   start(id: string, session: string): Promise<ScoutRun>;
@@ -91,6 +96,7 @@ export type BoardApi = {
 
 export type BoardEvents = {
   api: BoardApi;
+  appIcon(dir: string): string | null;
   openUrl(url: string): void;
   /** Open a visible terminal for an agent scout and type its prompt. `started` runs before the
    *  prompt is typed. The session id, or null. */
@@ -172,6 +178,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
   let timer = 0;
   let visible = false;
   let lastFresh = 0;
+  const pictures = new Map<string, Promise<string>>();
 
   screen.classList.add("board");
 
@@ -202,6 +209,8 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       list = scouts;
       builds = builtList;
       board = read;
+      const paths = new Set([...(read.now ?? []), ...(read.you ?? []), ...(read.next ?? [])].flatMap((card) => card.show ?? []));
+      for (const path of pictures.keys()) if (!paths.has(path)) pictures.delete(path);
       failure = "";
       paint();
       schedule();
@@ -259,12 +268,69 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   function cardRow(card: BoardCard, tone: string, meta: string[]): HTMLButtonElement {
     const row = button(`bd-row ${tone}`, "", card.url);
-    row.append(h("i", "bd-dot"), h("b", "bd-num", `#${card.number}`));
+    const icons = h("span", "bd-icons");
+    for (const key of card.apps.slice(0, 3)) {
+      const app = board?.apps?.[key] ?? { name: key, dir: key };
+      const tile = h("span", "bd-icon", app.name.charAt(0).toUpperCase());
+      tile.title = app.name;
+      const src = events.appIcon(app.dir);
+      if (src) {
+        const img = h("img");
+        img.src = src;
+        img.alt = "";
+        img.addEventListener("error", () => img.remove(), { once: true });
+        tile.append(img);
+      }
+      icons.append(tile);
+    }
+    if (!card.apps.length) icons.append(h("span", "bd-icon bd-icon-ops", "A"));
+    icons.append(h("i", "bd-dot"));
+    row.append(icons);
     const text = h("span", "bd-text");
     text.append(h("span", "bd-title", card.title));
-    const sub = [...card.apps, ...meta].filter(Boolean);
-    if (sub.length) text.append(h("small", "", sub.join(" · ")));
+    const facts = h("span", "bd-facts");
+    facts.append(h("b", `bd-priority bd-p${card.priority}`, `P${card.priority}`),
+      h("span", "bd-num", `#${card.number}`));
+    const sub = [...card.apps.map((key) => board?.apps?.[key]?.name ?? key), ...meta].filter(Boolean);
+    if (sub.length) facts.append(h("small", "", sub.join(" · ")));
+    text.append(facts);
+    if (card.ask) text.append(h("span", "bd-ask", card.ask));
+    if (card.claimed_at && card.estimate && card.estimate > 0) {
+      const minutes = Math.max(0, (Date.now() - Date.parse(card.claimed_at)) / 60_000);
+      if (Number.isFinite(minutes)) {
+        const progress = h("span", `bd-progress${minutes > card.estimate ? " bd-over" : ""}`);
+        const label = `${Math.round(minutes)}m / ${card.estimate}m estimated`;
+        progress.title = label;
+        progress.setAttribute("role", "meter");
+        progress.setAttribute("aria-label", "Time held against estimate");
+        progress.setAttribute("aria-valuemin", "0");
+        progress.setAttribute("aria-valuemax", String(card.estimate));
+        progress.setAttribute("aria-valuenow", String(Math.min(minutes, card.estimate)));
+        progress.setAttribute("aria-valuetext", label);
+        const fill = h("span");
+        fill.style.width = `${Math.min(100, minutes / card.estimate * 100)}%`;
+        progress.append(fill);
+        text.append(h("small", "bd-estimate", label), progress);
+      }
+    }
     row.append(text);
+    if (card.show?.length) {
+      const preview = h("span", "bd-pictures");
+      for (const path of card.show.slice(0, 2)) {
+        const img = h("img", "bd-picture");
+        img.alt = "Issue picture";
+        if (!pictures.has(path)) pictures.set(path, api.picture(path));
+        void pictures.get(path)!.then((src) => { img.src = src; }).catch((error: unknown) => {
+          pictures.delete(path);
+          const missing = h("span", "bd-picture-missing", "Picture unavailable");
+          missing.title = errorText(error, "The image could not be read");
+          img.replaceWith(missing);
+        });
+        img.addEventListener("error", () => img.replaceWith(h("span", "bd-picture-missing", "Picture unavailable")), { once: true });
+        preview.append(img);
+      }
+      row.append(preview);
+    }
     row.addEventListener("click", () => events.openUrl(card.url));
     return row;
   }
@@ -394,7 +460,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         buildsSection(),
         section("Needs you", board?.you?.length ?? 0, (board?.you ?? []).map((c) => cardRow(c, "t-warn", [])),
           "Nothing waits on you."),
-        section("Next up", null, (board?.next ?? []).map((c) => cardRow(c, "t-quiet", [`P${c.priority}`])),
+        section("Next up", null, (board?.next ?? []).map((c) => cardRow(c, "t-quiet", [])),
           "The board is empty."),
       );
     }

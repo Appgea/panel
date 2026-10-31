@@ -22,9 +22,10 @@ const BOARD: BoardData = params.get("empty")
   : {
     repo: "Appgea/ops",
     open: 61,
+    apps: { panel: { name: "Appgea Panel", dir: "panel" }, tavla: { name: "Tavla", dir: "Tavla" } },
     now: [
-      { number: 67, title: "Panel: scouts and the board, visible all the time", url: url(67), apps: ["panel"], priority: 1, holder: "claude-e9aca641", claimed_at: ago(48) },
-      { number: 20, title: "Tavla Android crash: game screen reads a provider after the widget is unmounted", url: url(20), apps: ["tavla"], priority: 1, holder: "claude-3f1c02aa", claimed_at: ago(12) },
+      { number: 67, title: "Panel: scouts and the board, visible all the time", url: url(67), apps: ["panel"], priority: 2, holder: "claude-e9aca641", claimed_at: ago(48), estimate: 30 },
+      { number: 20, title: "Tavla Android crash: game screen reads a provider after the widget is unmounted", url: url(20), apps: ["tavla"], priority: 0, holder: "claude-3f1c02aa", claimed_at: ago(12), estimate: 40 },
       { number: 42, title: "Bear-off animation sometimes flies to wrong tiles", url: url(42), apps: ["tavla"], priority: 1, holder: "grok-tavla", claimed_at: ago(4) },
       ...(params.get("many")
         ? [
@@ -37,13 +38,13 @@ const BOARD: BoardData = params.get("empty")
     you: [
       { number: 60, title: "Revoke App Store Connect key 6GHLN3V5DS, it is tracked in two repos", url: url(60), apps: [], priority: 1 },
       { number: 1, title: "Renew the Apple distribution certificate", url: url(1), apps: [], priority: 1 },
-      { number: 31, title: "No iOS privacy manifest, analytics fire before consent", url: url(31), apps: ["pillow_app"], priority: 1 },
+      { number: 31, title: "Pillow: choose the paywall layout", url: url(31), apps: ["pillow_app"], priority: 1, ask: "Bu satın alma ekranıyla devam edelim mi?", show: ["paywall"] },
     ],
     next: [
       { number: 28, title: "Portfolio-wide consent compliance", url: url(28), apps: [], priority: 1 },
       { number: 29, title: "Money integrity across IAP apps", url: url(29), apps: [], priority: 1 },
       { number: 40, title: "Set up RevenueCat entitlements and offerings for Tavla", url: url(40), apps: ["tavla"], priority: 1 },
-      { number: 66, title: "Write the app kit standards the weekly beat checks", url: url(66), apps: [], priority: 2 },
+      { number: 66, title: "Write the app kit standards the weekly beat checks", url: url(66), apps: [], priority: 3 },
     ],
   };
 
@@ -95,6 +96,11 @@ const api: BoardApi = {
   scouts: async () => structuredClone(SCOUTS),
   board: async () => structuredClone(BOARD),
   builds: async () => structuredClone(BUILDS),
+  picture: async () => {
+    const path = params.get("picture");
+    if (!path) throw new Error("Pass ?picture=URL to preview an issue's image");
+    return path;
+  },
   run: async (id) => {
     await wait(900);
     return { at: new Date().toISOString(), status: "done", found: 0, note: `${id} ran`, session: null };
@@ -107,6 +113,7 @@ const api: BoardApi = {
 const screen = document.getElementById("boardScreen")!;
 const handle = mountBoard(screen, {
   api,
+  appIcon: (dir) => params.get(`icon-${dir}`),
   openUrl: (target) => console.log("open", target),
   // The harness never opens terminals: Run on an agent scout records a launch without one.
   launch: async (_scout, _prompt, started) => {
