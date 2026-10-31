@@ -258,6 +258,25 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(result["recent"], [dict(zip(host.BUILD_COLUMNS,
                          ["2026-10-01", "sol", "medium", "panel", "9", "0", "abc", "-", "-", "-"]))])
 
+    def test_picture_only_inside_ops(self):
+        inside = self.ops / "card.png"
+        inside.write_bytes(b"\x89PNG fake")
+        outside = self.root / "outside.png"
+        outside.write_bytes(b"\x89PNG fake")
+        (self.ops / "notes.txt").write_text("not a picture")
+        code, body = host.picture(str(inside))
+        self.assertEqual(code, 200)
+        self.assertTrue(body["src"].startswith("data:image/png;base64,"))
+        self.assertEqual(host.picture(str(outside))[0], 400)
+        self.assertEqual(host.picture(str(self.ops / "notes.txt"))[0], 400)
+        self.assertEqual(host.picture(str(self.ops / ".." / "outside.png"))[0], 400)
+        (self.ops / "escape.png").symlink_to(outside)
+        self.assertEqual(host.picture(str(self.ops / "escape.png"))[0], 400)
+        large = self.ops / "large.png"
+        with large.open("wb") as file:
+            file.truncate(host.PICTURE_LIMIT + 1)
+        self.assertEqual(host.picture(str(large))[0], 413)
+
     def test_no_route(self):
         self.assertEqual(self.call("GET", "/missing"), (404, {"error": "no route"}))
 
