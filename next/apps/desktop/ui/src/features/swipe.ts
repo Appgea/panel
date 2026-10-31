@@ -56,7 +56,16 @@ export type ReviewDeck = {
 };
 export type Verdict = { number: number; kind: Kind; move: Move; note: string; voice: boolean; priority: number };
 export type SendBody = { since: string; until: string; verdicts: Verdict[]; xp: number; best_combo: number; badges: string[] };
+/** One card as he judged it in a sent review. `now` is where the issue stands today: open, closed, dropped. */
+export type PastVerdict = {
+  number: number; title: string; url: string; apps: string[]; kind: Kind; move: Move; label: string;
+  note: string; voice: boolean; did: string[]; error: string; now: "open" | "closed" | "dropped" | null;
+};
+export type PastReview = { id: string; since: string | null; until: string | null; xp: number; brief: string | null; agent: string | null; verdicts: PastVerdict[] };
+export type ReviewHistory = { reviews: PastReview[]; repo: string };
 export type SendResult = {
+  /** The review's id in history; null when history could not be written. */
+  id: string | null;
   applied: { number: number; label: string; act: string | null; note: string; did: string[] }[];
   errors: { number: number; error: string; note: string }[];
   brief: string | null;
@@ -68,6 +77,9 @@ export type SwipeApi = {
   voice(audio: string, mime: string): Promise<{ text: string; path: string }>;
   send(body: SendBody): Promise<SendResult>;
   picture(path: string): Promise<string>;
+  history(): Promise<ReviewHistory>;
+  /** Ties the agent session that took a review's brief to that review. */
+  agent(id: string, session: string): Promise<unknown>;
 };
 export type SwipeEvents = {
   api: SwipeApi;
@@ -224,7 +236,12 @@ function makeSound(): { play(name: "right" | "left" | "up" | "down" | "combo" | 
 
 /* ------------------------------------------------------------ the screen */
 
-type Phase = "loading" | "start" | "play" | "end" | "sent" | "error";
+type Phase = "loading" | "start" | "play" | "end" | "sent" | "error" | "history";
+const HISTORY_ALL = "panel.swipe.history.all";
+/** A verdict that asked for something: words, or a move that changes the issue. Mirrors MOVES in review.py. */
+const acted = (v: { note: string; kind: Kind; move: Move }): boolean =>
+  Boolean(v.note) || v.move === "left" || (v.move === "up" && v.kind === "new");
+const NOW_WORD = { open: "Now open", closed: "Now closed", dropped: "Now dropped" } as const;
 type Draft = { saved: number; verdicts: Verdict[] };
 const DRAFT_DAYS = 3;
 const DRAFT = "panel.swipe.draft";
@@ -269,6 +286,11 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   let flying = false;
   /** Set by "Finish now": the end of the window he really reviewed, so the cards he left come back next time. */
   let reviewedUntil: string | null = null;
+  /** The history screen: what he decided before, and the screen he came from. */
+  let past: ReviewHistory | null = null;
+  let pastError = "";
+  let pastFrom: Phase = "start";
+  let pastAll = store.get<boolean>(HISTORY_ALL, false);
   const busy = (): boolean => flying || Boolean(recording) || transcribing || arming;
   const pictures = new Map<string, Promise<string>>();
 
@@ -495,6 +517,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
         try {
           agent = await events.launchAgent(sent.prompt);
           if (!agent) agentError = "The agent terminal did not open.";
+          else if (sent.id) void api.agent(sent.id, agent).catch(() => undefined); // history links it; the review stands without it
         } catch (error) {
           agentError = errorText(error, "The agent terminal did not open.");
         }
@@ -705,6 +728,11 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     go.disabled = !size;
     go.addEventListener("click", deal);
     box.append(go);
+    if (deck.profile.sessions) {
+      const looking = btn("sw-ghost", "What you decided before · H");
+      looking.addEventListener("click", () => void openHistory());
+      box.append(looking);
+    }
     const quests = h("div", "sw-quests");
     quests.append(h("span", "", "Today’s quests"), h("small", "", "Clear the deck · Leave 3 notes · Build a ×10 combo"));
     box.append(quests);
@@ -725,7 +753,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
 
   function legend(): HTMLElement {
     const keys = h("div", "sw-legend");
-    for (const [k, t] of [["→", "good"], ["←", "redo / drop"], ["↑", "love / rush"], ["↓", "skip"], ["C", "note"], ["V", "voice"], ["Z", "undo"], ["F", "fullscreen"]]) {
+    for (const [k, t] of [["→", "good"], ["←", "redo / drop"], ["↑", "love / rush"], ["↓", "skip"], ["C", "note"], ["V", "voice"], ["Z", "undo"], ["H", "history"], ["F", "fullscreen"]]) {
       const item = h("span");
       item.append(h("kbd", "", k), document.createTextNode(` ${t}`));
       keys.append(item);
@@ -927,8 +955,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       }
       box.append(shelf);
     }
-    // Mirrors MOVES in review.py: a note, or a move that changes the issue (Redo, Drop, Revive, Rush).
-    const notes = verdicts.filter((v) => v.note || v.move === "left" || (v.move === "up" && v.kind === "new"));
+    const notes = verdicts.filter(acted);
     if (notes.length) {
       box.append(h("div", "sw-label", `${notes.length} for the agent`));
       const list = h("ul", "sw-orders");
@@ -991,10 +1018,120 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       });
       row.append(watch);
     }
+    const looking = btn("sw-ghost", "Your decisions · H");
+    looking.addEventListener("click", () => void openHistory());
     const done = btn(agent ? "sw-ghost" : "sw-go", "Close");
     done.addEventListener("click", shut);
-    row.append(done);
+    row.append(looking, done);
     box.append(row);
+    return box;
+  }
+
+  /* ---------------- history */
+
+  async function openHistory(): Promise<void> {
+    if (phase === "history" || phase === "loading" || busy() || editing) return;
+    pastFrom = phase;
+    paused = false;
+    phase = "history";
+    pastError = "";
+    paint();
+    try {
+      past = await api.history();
+    } catch (error) {
+      pastError = errorText(error, "Your past reviews could not be read.");
+    }
+    if (phase === "history") paint();
+  }
+
+  function closeHistory(): void {
+    phase = pastFrom;
+    paint();
+  }
+
+  /** One decision as a row: the verdict, the card, his words, and what came of it. A click opens the issue. */
+  function pastRow(v: { number: number; title: string; url: string; kind: Kind; move: Move; label: string; note: string; voice: boolean },
+    facts: { text: string; tone: string }[]): HTMLElement {
+    const li = h("li", `sw-past-row${acted(v) ? "" : " is-plain"}`);
+    const open = btn("sw-past-open", "", `Open #${v.number} on GitHub`);
+    open.append(h("b", `sw-order-tag m-${v.move}`, v.label), h("span", "sw-past-title", `#${v.number} ${v.title}`));
+    open.addEventListener("click", () => events.openUrl(v.url));
+    li.append(open);
+    if (v.note) li.append(h("em", "", `${v.voice ? "🎙 " : "✎ "}${v.note}`));
+    if (facts.length) {
+      const row = h("div", "sw-past-facts");
+      for (const f of facts) row.append(h("span", `sw-fact ${f.tone}`, f.text));
+      li.append(row);
+    }
+    return li;
+  }
+
+  function historyScreen(): HTMLElement {
+    const box = h("div", "sw-end sw-history");
+    box.append(h("div", "sw-kicker", "Your decisions"), h("h1", "sw-hero sw-hero-small", "What you decided"));
+    const toggle = h("div", "sw-ranges");
+    for (const [all, label] of [[false, "Notes and changes"], [true, "Everything"]] as const) {
+      const b = btn(`sw-range${pastAll === all ? " is-on" : ""}`, label);
+      b.setAttribute("aria-pressed", String(pastAll === all));
+      b.addEventListener("click", () => { pastAll = all; store.set(HISTORY_ALL, all); paint(); });
+      toggle.append(b);
+    }
+    box.append(toggle);
+    const scroll = h("div", "sw-past");
+
+    // This review, before it is sent: what he would be sending.
+    const pending = verdicts.filter((v) => pastAll || acted(v));
+    if ((pastFrom === "play" || pastFrom === "end") && verdicts.length) {
+      const group = h("section", "sw-past-group is-pending");
+      group.append(h("div", "sw-past-head", `This review · not sent yet · ${verdicts.length} judged`));
+      const list = h("ul", "sw-past-list");
+      for (const v of pending) {
+        const c = cards.find((x) => x.number === v.number);
+        list.append(pastRow({ ...v, title: c?.title ?? "", url: c?.url ?? "", label: deck!.moves[v.kind][v.move] }, []));
+      }
+      if (!pending.length) list.append(h("li", "sw-past-empty", "No notes or changes yet."));
+      group.append(list);
+      scroll.append(group);
+    }
+
+    if (pastError) scroll.append(h("p", "sw-errline", pastError));
+    else if (!past) scroll.append(h("div", "sw-loading sw-loading-inline", "Reading your past reviews…"));
+    else if (!past.reviews.length) scroll.append(h("p", "sw-sub", "No sent reviews yet. Finish a deck and they show up here."));
+    else {
+      for (const r of past.reviews) {
+        const shown = r.verdicts.filter((v) => pastAll || acted(v));
+        const group = h("section", "sw-past-group");
+        const head = h("div", "sw-past-head");
+        const asked = r.verdicts.filter(acted).length;
+        const many = r.verdicts.length === 1 ? "1 card" : `${r.verdicts.length} cards`;
+        head.append(h("span", "", `${clock(r.id)} · ${many} · ${asked} asked · +${r.xp} XP`));
+        if (r.agent) {
+          const watch = btn("sw-past-agent", "Watch the agent");
+          watch.addEventListener("click", () => {
+            const id = r.agent!;
+            if (events.showSession(id)) shut();
+            else toast("That agent session is closed", "warn", "Its work is on each issue, a click away.");
+          });
+          head.append(watch);
+        }
+        group.append(head);
+        const list = h("ul", "sw-past-list");
+        for (const v of shown) {
+          const facts: { text: string; tone: string }[] = [];
+          for (const d of v.did) if (d !== "noted") facts.push({ text: d === "reopened" ? "Reopened" : d === "closed" ? "Closed" : d, tone: "" });
+          if (v.error) facts.push({ text: `Not written: ${v.error}`, tone: "is-bad" });
+          if (v.now) facts.push({ text: NOW_WORD[v.now], tone: v.now === "closed" ? "is-good" : v.now === "dropped" ? "is-bad" : "is-open" });
+          list.append(pastRow(v, facts));
+        }
+        if (!shown.length) list.append(h("li", "sw-past-empty", "Only approvals and skips. Show everything to see them."));
+        group.append(list);
+        scroll.append(group);
+      }
+    }
+    box.append(scroll);
+    const back = btn("sw-go", pastFrom === "play" ? "Back to the deck · Esc" : "Back · Esc");
+    back.addEventListener("click", closeHistory);
+    box.append(back);
     return box;
   }
 
@@ -1015,9 +1152,11 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       phase = "end";
       paint();
     });
+    const looking = btn("sw-ghost", "Your decisions · H");
+    looking.addEventListener("click", () => void openHistory());
     const leave = btn("sw-ghost", "Leave for later");
     leave.addEventListener("click", shut);
-    box.append(resume, finish, leave);
+    box.append(resume, looking, finish, leave);
     layer.append(box);
     return layer;
   }
@@ -1036,6 +1175,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     } else if (phase === "start") nodes.push(startScreen());
     else if (phase === "end") nodes.push(endScreen());
     else if (phase === "sent") nodes.push(sentScreen());
+    else if (phase === "history") nodes.push(historyScreen());
     else {
       const card = current();
       const table = h("div", "sw-table");
@@ -1086,11 +1226,14 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     let handled = true;
     if (key === "Escape") {
       if (recording) recording.stop();
+      else if (phase === "history") closeHistory();
       else if (paused) { paused = false; paint(); }
       else if (phase === "play") pause();
       else shut();
     } else if (key === "f") void toggleFullscreen();
     else if (key === "m") toggleMute();
+    else if (key === "h") void openHistory();
+    else if (phase === "history") handled = false;
     else if (paused) handled = false;
     else if (phase === "start" && key === "Enter") deal();
     else if (phase === "end" && key === "Enter") void send();

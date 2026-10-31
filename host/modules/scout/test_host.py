@@ -376,6 +376,37 @@ class SwipeReviewTests(unittest.TestCase):
             again = review.send(self.state, {"verdicts": [{"number": 9, "kind": "done", "move": "right"}]})
         self.assertEqual((again["profile"]["streak"], again["brief"], again["prompt"]), (4, None, ""))
 
+    def test_history_keeps_every_decision_and_where_the_issue_is_now(self):
+        review._write(self.state / "review/deck.json", {"cards": [{"number": 8, "title": "Eight", "url": "u8", "kind": "done", "apps": ["tavla"]}]})
+
+        def gh(args, **_):
+            if args[:2] == ["api", "graphql"]:
+                self.assertIn("i8: issue(number: 8)", args[3])
+                return json.dumps({"data": {"repository": {"i7": {"state": "OPEN", "stateReason": None},
+                                                            "i8": {"state": "CLOSED", "stateReason": "COMPLETED"}}}})
+            if args[2] == "7":
+                raise RuntimeError("gone")
+            return ""
+        with patch.object(review, "_gh", side_effect=gh):
+            sent = review.send(self.state, {"verdicts": [{"number": 7, "kind": "done", "move": "left", "note": "again"},
+                                                         {"number": 8, "kind": "done", "move": "right", "voice": True, "note": "ok"},
+                                                         {"number": 9, "kind": "new", "move": "down"}]})
+            with (self.state / "review/history.jsonl").open("a") as handle:
+                handle.write("damaged line\n")
+            review.agent(self.state, {"id": sent["id"], "session": "s-1"})
+            shown = review.history(self.state)["reviews"]
+        self.assertIn("damaged line", (self.state / "review/history.jsonl").read_text())
+        self.assertEqual(len(shown), 1)
+        self.assertEqual((shown[0]["id"], shown[0]["agent"]), (sent["id"], "s-1"))
+        rows = {v["number"]: v for v in shown[0]["verdicts"]}
+        self.assertEqual((rows[7]["label"], rows[7]["note"], rows[7]["error"], rows[7]["now"]), ("Redo", "again", "gone", "open"))
+        self.assertEqual((rows[8]["title"], rows[8]["voice"], rows[8]["did"], rows[8]["now"]), ("Eight", True, ["noted"], "closed"))
+        self.assertEqual((rows[9]["label"], rows[9]["now"]), ("Skip", None))
+        with self.assertRaises(ValueError):
+            review.agent(self.state, {"id": "nope", "session": "s"})
+        with patch.object(review, "_gh", side_effect=RuntimeError("offline")):
+            self.assertIsNone(review.history(self.state)["reviews"][0]["verdicts"][0]["now"])
+
     def test_window_starts_at_the_last_review_and_never_past_three_days(self):
         self.assertAlmostEqual((lambda s, u: (u - s).total_seconds() / 3600)(*review.window(self.state)), 24, places=1)
         review._write(self.state / "review/profile.json", {"last_at": "2020-01-01T00:00:00+00:00"})

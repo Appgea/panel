@@ -44,7 +44,7 @@ import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
 import type { BoardData, BoardHandle, BuildList, Scout, ScoutList, ScoutRun } from "./features/board";
-import type { ReviewDeck, SendResult } from "./features/swipe";
+import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -1515,6 +1515,8 @@ async function openSwipeReview(): Promise<void> {
         deck: (hours) => moduleGet<ReviewDeck>(`/m/scout/review/deck${hours ? `?hours=${hours}` : ""}`),
         voice: (audio, mime) => modulePost<{ text: string; path: string }>("/m/scout/review/voice", { audio, mime }),
         send: (body) => modulePost<SendResult>("/m/scout/review/send", body),
+        history: () => moduleGet<ReviewHistory>("/m/scout/review/history"),
+        agent: (id, session) => modulePost("/m/scout/review/agent", { id, session }),
         picture: (path) =>
           moduleGet<{ src: string }>(`/m/scout/review/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
       },

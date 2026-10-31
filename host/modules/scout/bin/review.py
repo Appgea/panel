@@ -7,6 +7,8 @@ I should be able to comment, so after I am done ... an agent ... triggered with 
     GET  /review/deck[?hours=N]   cards since the last finished review (or the last N hours), plus his profile
     POST /review/voice            {audio: base64, mime} -> {text, path}: whisper on this Mac, nothing leaves it
     POST /review/send             {since, verdicts, xp, best_combo, badges} -> what changed on GitHub, and the agent brief
+    GET  /review/history          his last reviews: each verdict, his words, what it changed, where the issue is now
+    POST /review/agent            {id, session} -> ties the agent that took a review to it
 
 A verdict changes GitHub only when it means a change: a note becomes a comment, Redo and Revive reopen,
 Drop closes, Rush raises the priority. An approval with no note writes nothing.
@@ -329,5 +331,113 @@ def send(state, payload):
                 sessions=mine["sessions"] + 1, badges=sorted(set(mine["badges"]) | badges), last_at=_iso(until))
     _write(state / "review/profile.json", mine)
     (state / "board.json").unlink(missing_ok=True)
+    try:
+        review_id = _record(state, payload, verdicts, results, errors, cards, path, xp)
+    except (OSError, ValueError, TypeError):
+        review_id = None  # GitHub already has his words: a history hiccup must not invite a retry that posts twice
     prompt = "Read %s and do what it says." % path if path else ""
-    return {"applied": results, "errors": errors, "brief": str(path) if path else None, "prompt": prompt, "profile": mine}
+    return {"id": review_id, "applied": results, "errors": errors, "brief": str(path) if path else None,
+            "prompt": prompt, "profile": mine}
+
+
+HISTORY_SHOW = 30
+
+
+def _history_file(state):
+    return state / "review/history.jsonl"
+
+
+def _record(state, payload, verdicts, results, errors, cards, path, xp):
+    """Every sent review, kept for good so he can look back at what he decided. One JSON line per review, appended."""
+    done = {r["number"]: r for r in results}
+    failed = {e["number"]: e["error"] for e in errors}
+    rows = []
+    for v in verdicts:
+        if not isinstance(v, dict) or "number" not in v:
+            continue
+        try:
+            number = int(v["number"])
+        except (TypeError, ValueError):
+            continue
+        found = cards.get(number, {})
+        kind = v.get("kind") if v.get("kind") in MOVES else found.get("kind", "done")
+        move = v.get("move") if v.get("move") in MOVES[kind] else "down"
+        rows.append({"number": number, "title": found.get("title", ""), "url": found.get("url") or
+                     "https://github.com/%s/issues/%d" % (REPO, number), "apps": found.get("apps", []),
+                     "kind": kind, "move": move, "label": MOVES[kind][move][0], "note": str(v.get("note") or "").strip(),
+                     "voice": bool(v.get("voice")), "did": done.get(number, {}).get("did", []),
+                     "error": failed.get(v.get("number"), "")})
+    # Microseconds: two sends in one second still get their own id, and the id still reads as a time.
+    review_id = _now().isoformat(timespec="microseconds").replace("+00:00", "Z")
+    entry = {"id": review_id, "since": payload.get("since"), "until": payload.get("until"), "xp": xp,
+             "brief": str(path) if path else None, "agent": None, "verdicts": rows}
+    file = _history_file(state)
+    file.parent.mkdir(parents=True, exist_ok=True)
+    with file.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return review_id
+
+
+def _reviews(state):
+    reviews = []
+    file = _history_file(state)
+    for line in file.read_text(encoding="utf-8", errors="replace").splitlines() if file.exists() else []:
+        try:
+            reviews.append(json.loads(line))
+        except ValueError:
+            continue
+    return reviews
+
+
+def _states(numbers):
+    """Where each issue stands now, in one GraphQL call. Empty when GitHub does not answer: history still shows."""
+    if not numbers:
+        return {}
+    owner, name = REPO.split("/", 1)
+    fields = " ".join("i%d: issue(number: %d) { state stateReason }" % (n, n) for n in sorted(numbers)[:150])
+    query = 'query { repository(owner: "%s", name: "%s") { %s } }' % (owner, name, fields)
+    try:
+        data = json.loads(_gh(["api", "graphql", "-f", "query=" + query], timeout=20))
+    except (RuntimeError, ValueError, OSError, subprocess.SubprocessError):
+        return {}
+    found = (data.get("data") or {}).get("repository") or {}
+    now = {}
+    for key, issue in found.items():
+        if issue:
+            closed = issue.get("state") == "CLOSED"
+            now[int(key[1:])] = "dropped" if closed and issue.get("stateReason") == "NOT_PLANNED" else "closed" if closed else "open"
+    return now
+
+
+def history(state):
+    """His last reviews, newest first, each card with what he decided and where the issue stands now."""
+    reviews = list(reversed(_reviews(state)))[:HISTORY_SHOW]
+    now = _states({v["number"] for r in reviews for v in r.get("verdicts", [])})
+    for r in reviews:
+        for v in r.get("verdicts", []):
+            v["now"] = now.get(v["number"])
+    return {"reviews": reviews, "repo": REPO}
+
+
+def agent(state, payload):
+    """Ties the agent session that took a review's brief to that review, so history can open it."""
+    review_id, session = str(payload.get("id") or ""), str(payload.get("session") or "")
+    if not review_id or not session:
+        raise ValueError("id and session are required")
+    file = _history_file(state)
+    lines = file.read_text(encoding="utf-8").splitlines(keepends=True) if file.exists() else []
+    for i, line in enumerate(lines):
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue  # a damaged line stays exactly as it is
+        if entry.get("id") == review_id:
+            entry["agent"] = session
+            lines[i] = json.dumps(entry, ensure_ascii=False) + "\n"
+            break
+    else:
+        raise ValueError("no such review")
+    temporary = file.with_suffix(".tmp")
+    temporary.write_text("".join(lines), encoding="utf-8")
+    os.replace(temporary, file)
+    return {"ok": True}

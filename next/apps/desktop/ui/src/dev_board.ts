@@ -6,7 +6,7 @@
 import "./style.css";
 import "./motion.css";
 import { mountBoard, type BoardApi, type BoardData, type BuildList, type Scout, type ScoutList } from "./features/board";
-import type { ReviewCard, ReviewDeck } from "./features/swipe";
+import type { ReviewCard, ReviewDeck, ReviewHistory } from "./features/swipe";
 
 const params = new URLSearchParams(location.search);
 const ago = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
@@ -162,6 +162,30 @@ const DECK: ReviewDeck = {
       summary: "The Board screen now shows who holds what and the scouts' next run.", points: ["npm run check passes", "Dev harness screenshot shows the strip at 1440 and 900 wide"] }),
   ],
 };
+const HISTORY: ReviewHistory = {
+  repo: "Appgea/ops",
+  reviews: [
+    { id: new Date(Date.now() - 20 * 3_600_000).toISOString(), since: null, until: null, xp: 210, brief: "/tmp/b.md", agent: "live-1",
+      verdicts: [
+        { number: 640, title: "Tavla: dice roll sound clips on older iPhones", url: "u", apps: ["tavla"], kind: "done", move: "left", label: "Redo",
+          note: "Still clips on my iPhone 12. Test on a real device this time.", voice: true, did: ["noted", "reopened"], error: "", now: "closed" },
+        { number: 655, title: "Pillow: add a rain category to the sleep sounds", url: "u", apps: ["pillow_app"], kind: "new", move: "up", label: "Rush",
+          note: "", voice: false, did: ["P2 to P1"], error: "", now: "open" },
+        { number: 661, title: "Weekcut export drops the last caption", url: "u", apps: ["weekcut"], kind: "done", move: "right", label: "Ship it",
+          note: "Nice. Add this to the release notes.", voice: false, did: ["noted"], error: "", now: "closed" },
+        { number: 662, title: "Scout: weekly review timing", url: "u", apps: [], kind: "new", move: "left", label: "Drop",
+          note: "", voice: false, did: [], error: "HTTP 502", now: "open" },
+        { number: 663, title: "Interbellum: map labels overlap at small zoom", url: "u", apps: ["interbellum"], kind: "done", move: "right", label: "Ship it",
+          note: "", voice: false, did: [], error: "", now: "closed" },
+      ] },
+    { id: new Date(Date.now() - 50 * 3_600_000).toISOString(), since: null, until: null, xp: 95, brief: null, agent: null,
+      verdicts: [
+        { number: 600, title: "Panel: board refresh is slow", url: "u", apps: [], kind: "done", move: "right", label: "Ship it",
+          note: "", voice: false, did: [], error: "", now: "closed" },
+      ] },
+  ],
+};
+
 async function swipe(): Promise<void> {
   const { openSwipe } = await import("./features/swipe");
   openSwipe({
@@ -171,11 +195,13 @@ async function swipe(): Promise<void> {
       send: async (body) => {
         await wait(800);
         console.log("send", body);
-        return { applied: body.verdicts.map((v) => ({ number: v.number, label: "x", act: v.move === "left" ? "reopen" : null, note: v.note, did: [v.note ? "noted" : "", v.move === "left" ? "reopened" : ""].filter(Boolean) })),
+        return { id: new Date().toISOString(), applied: body.verdicts.map((v) => ({ number: v.number, label: "x", act: v.move === "left" ? "reopen" : null, note: v.note, did: [v.note ? "noted" : "", v.move === "left" ? "reopened" : ""].filter(Boolean) })),
           errors: [], brief: "/tmp/brief.md", prompt: "Read /tmp/brief.md and do what it says.",
           profile: { ...DECK.profile, xp: DECK.profile.xp + body.xp, streak: 5, best_combo: Math.max(17, body.best_combo), badges: body.badges } };
       },
       picture: async () => params.get("picture") ?? "",
+      history: async () => { await wait(500); return structuredClone(HISTORY); },
+      agent: async (id, session) => console.log("agent", id, session),
     },
     appIcon: (dir) => params.get(`icon-${dir}`),
     appName: (dir) => ({ tavla: "Tavla", pillow_app: "Pillow", interbellum: "Interbellum", weekcut: "Weekcut" })[dir] ?? dir,
