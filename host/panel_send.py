@@ -8,7 +8,7 @@ import sys
 import urllib.request
 
 from keep_media import keep_media
-from slack_mirror import slack_mirror
+from slack_mirror import slack_mirror, voice_problems
 
 
 def main():
@@ -71,6 +71,10 @@ def main():
         payload["attachments"] = attachments
     if args.link:
         payload["links"] = args.link
+
+    if bad := voice_problems(payload):
+        sys.exit("Not sent anywhere. Its Slack copy would be refused, fix the title or first text line:\n"
+                 + "\n".join("- " + b for b in bad))
 
     keep_media(payload)
 

@@ -28,7 +28,7 @@ import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from keep_media import keep_media  # noqa: E402
-from slack_mirror import slack_mirror  # noqa: E402
+from slack_mirror import slack_mirror, voice_problems  # noqa: E402
 
 PORT = os.environ.get("PANEL_PORT", "7391")
 INSTANCE = os.environ.get("PANEL_INSTANCE", "")
@@ -325,6 +325,9 @@ def _call(name, args):
                    ("title", "text", "outcome", "flow", "images", "audio", "video",
                     "attachments", "links")
                    if k in args and args[k] is not None}
+        if bad := voice_problems(payload):
+            return ("Not sent anywhere. Its Slack copy would be refused, fix the title or first text line:\n"
+                    + "\n".join("- " + b for b in bad))
         r = _post("/panel/emit",
                   {"instance": INSTANCE, "type": "message", "payload": keep_media(payload)}, 10)
         # One flow, two places: the pictures also land in Slack #desk.

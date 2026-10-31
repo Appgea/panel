@@ -7,6 +7,7 @@ The post speaks as the session's person from ~/.appgeapanel/state/session-people
 never lost to its Slack copy.
 """
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -35,22 +36,46 @@ def _area():
     return os.path.basename(top or os.getcwd().rstrip("/")) or "Panel"
 
 
-def slack_mirror(payload):
-    """Post the payload's images to #desk under its title. Returns True only when Slack has them."""
-    paths = [i if isinstance(i, str) else i.get("path") for i in payload.get("images") or []]
-    paths = [p for p in paths if isinstance(p, str) and os.path.isfile(p)]
-    if not paths:
-        return False
+def _paths(payload):
+    paths = [i if isinstance(i, str) else i.get("path") for i in payload.get("images") or []
+             if isinstance(i, (str, dict))]
+    return [p for p in paths if isinstance(p, str) and os.path.isfile(p)]
+
+
+def _post_text(payload):
     head = " ".join(str(payload.get("title") or "New pictures").split())
     lines = [line.strip() for line in str(payload.get("text") or "").splitlines() if line.strip()]
     detail = lines[0] if lines else "Pictures below."
     if len(detail) > 200:
         detail = detail[:199].rstrip() + "…"
+    return head + "\n" + detail
+
+
+def voice_problems(payload):
+    """Why slack.py would refuse this report's Slack copy. Run before Panel gets it: a refusal found only after
+    the Panel post made every corrected retry a duplicate in Panel (3 copies of one report, 2026-10-31)."""
+    if not _paths(payload):
+        return []
+    try:
+        spec = importlib.util.spec_from_file_location("appgea_slack", SLACK)
+        slack = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(slack)
+        return slack.problems(_post_text(payload))
+    except Exception as error:  # a broken check never blocks a report
+        print("Slack voice check skipped: %s" % error, file=sys.stderr)
+        return []
+
+
+def slack_mirror(payload):
+    """Post the payload's images to #desk under its title. Returns True only when Slack has them."""
+    paths = _paths(payload)
+    if not paths:
+        return False
     cmd = [sys.executable, SLACK, "say", "--as", _person(), "--to", "desk", "--about", _area(),
            "--kind", KINDS.get(payload.get("outcome"), "info")]
     for path in paths:
         cmd += ["--file", path]
-    cmd += ["--", head + "\n" + detail]  # a title starting with "-" is still text
+    cmd += ["--", _post_text(payload)]  # a title starting with "-" is still text
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired) as error:
