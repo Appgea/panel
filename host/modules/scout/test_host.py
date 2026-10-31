@@ -131,6 +131,32 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((result["status"], result["note"]), ("failed", "bad news"))
 
+    def test_two_failures_in_a_row_file_one_issue(self):
+        self.fake_board()
+        self.scout(fields="run: printf 'bad news\\n' >&2; exit 2")
+        for _ in range(3):
+            self.call("POST", "/run", {"id": "sample"})
+        calls = [json.loads(line) for line in self.args_file.read_text().splitlines()]
+        self.assertEqual([c[1] for c in calls], ["Scout sample keeps failing"])
+        self.assertIn("failed 2 runs in a row. Last error: bad news", calls[0][3])
+        self.assertEqual(calls[0][4:], ["--label", "P1", "--label", "app:ops"])
+        # A good run clears the count, so one later failure files nothing.
+        self.scout(fields="run: true")
+        self.call("POST", "/run", {"id": "sample"})
+        filed = len(self.args_file.read_text().splitlines())
+        self.scout(fields="run: exit 2")
+        for _ in range(3):
+            self.call("POST", "/run", {"id": "sample"})
+        self.assertEqual(len(self.args_file.read_text().splitlines()), filed + 1)
+
+    def test_a_board_that_cannot_run_never_blocks_the_scout(self):
+        os.environ["SCOUT_BOARD"] = "/nonexistent/board"
+        self.scout(fields="run: exit 2")
+        for _ in range(3):
+            status, result = self.call("POST", "/run", {"id": "sample"})
+        self.assertEqual((status, result["status"], result["fails"]), (200, "failed", 3))
+        self.assertTrue(result["note"].startswith("keeps-failing issue not filed: "))
+
     def test_timeout_and_board_share_budget(self):
         scout = self.scout(fields="run: true")
         with patch.object(host, "command", return_value=(-9, "", "", True)):

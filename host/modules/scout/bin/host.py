@@ -70,10 +70,12 @@ def record(scout_id, status, found=0, note="", session=None, when=None):
         if when and not when(records.get(scout_id)):
             return None
         stamp = now().isoformat()
+        # `fails` counts failed runs in a row, so `run_scout` can tell a broken scout from one bad run.
+        fails = previous.get("fails", 0) + 1 if status == "failed" else 0 if status == "done" else previous.get("fails", 0)
         # `started` is when the run began. The due rules read it, so a run that ends after
         # midnight still counts for the day it started, not the next one.
         result = {"at": stamp, "started": stamp if status == "running" else previous.get("started", stamp),
-                  "status": status, "found": found, "note": note,
+                  "status": status, "found": found, "note": note, "fails": fails,
                   "session": session if status == "running" else previous.get("session")}
         records[scout_id] = result
         atomic_write(state / "runs.json", records)
@@ -210,10 +212,41 @@ def last_line(text):
     return next((line.strip() for line in reversed(text.splitlines()) if line.strip()), "")
 
 
+def file_finding(scout_id, title, body, labels, deadline):
+    """`board file` one finding. Returns why it failed, or None."""
+    body = (body.strip() + "\n" if body.strip() else "") + "Found by scout %s." % scout_id
+    flags = [arg for label in labels if label.strip() for arg in ("--label", label.strip())]
+    filed, _, error, expired = command(
+        board_command() + ["file", title.strip(), "--body", body, *flags], deadline - time.monotonic())
+    if filed or expired:
+        return "timed out after 50 s" if expired else last_line(error) or "board exited %d" % filed
+    return None
+
+
+def report_broken(scout, last, deadline):
+    """A failed run counts as a run, so a broken scout waits for its next slot and its checks file nothing.
+    On 2026-10-31 `mac` had failed on one long title and nobody knew. Two failures in a row become one issue,
+    filed before the next try. `board file` skips the title while it is open, so this never piles up.
+    Returns why the issue could not be filed, or None. It gets 10 s, so a slow board still leaves the scout its run."""
+    if (last or {}).get("fails", 0) < 2:
+        return None
+    try:
+        return file_finding(scout["id"], "Scout %s keeps failing" % scout["id"],
+                            "Problem: the %s scout failed %d runs in a row. Last error: %s "
+                            "Why: a failed run counts as done, so its checks stop filing work and nobody hears. "
+                            "Checked: %s `cd ~/.appgeapanel/ops && %s`"
+                            % (scout["id"], last["fails"], last.get("note") or "none",
+                               now().date().isoformat(), scout["run"]),
+                            ["P1", "app:ops"], min(deadline, time.monotonic() + 10))
+    except (OSError, ValueError) as error:
+        return str(error)
+
+
 def run_scout(scout):
     # Board filing shares the budget so Panel never kills us before saving the result.
     deadline = time.monotonic() + 49.5
     scout_id = scout["id"]
+    unreported = report_broken(scout, read_json(state_path() / "runs.json", {}).get(scout_id), deadline)
     record(scout_id, "running")
     found, note, status = 0, "", "done"
     try:
@@ -234,16 +267,13 @@ def run_scout(scout):
             # FOUND <title> | <body> | <labels, comma separated>
             title, _, rest = finding.partition("|")
             body, _, labels = rest.partition("|")
-            body = (body.strip() + "\n" if body.strip() else "") + "Found by scout %s." % scout_id
-            flags = [arg for label in labels.split(",") if label.strip() for arg in ("--label", label.strip())]
-            filed, _, error, expired = command(
-                board_command() + ["file", title.strip(), "--body", body, *flags], deadline - time.monotonic())
-            if filed or expired:
-                status = "failed"
-                note = "timed out after 50 s" if expired else last_line(error) or "board exited %d" % filed
+            if error := file_finding(scout_id, title, body, labels.split(","), deadline):
+                status, note = "failed", error
                 break
     except (OSError, ValueError) as error:
         status, note = "failed", str(error)
+    if unreported:
+        note = "keeps-failing issue not filed: %s. %s" % (unreported, note)
     return record(scout_id, status, found, note)
 
 
