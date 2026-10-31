@@ -1471,16 +1471,19 @@ struct Reopen {
     conversation: Option<String>,
 }
 
+const OPENCODE_DEEPSEEK: &str = "opencode/deepseek-v4.1-flash-free";
+
 /// The executable a kind execs, plus fixed args. Kinds name the binary directly — except the
 /// opencode model variants, which all run `opencode --model <model>` so the plain opencode kind
 /// stays the default model.
 fn kind_program(kind: &str) -> (&str, Vec<String>) {
     match kind {
         "opencode-kimi-k3" => ("opencode", vec!["--model".into(), "kimi/kimi-k3".into()]),
-        "opencode-deepseek-v4-flash" => (
-            "opencode",
-            vec!["--model".into(), "deepseek/deepseek-v4-flash".into()],
-        ),
+        // The free OpenCode Zen route. The owner turned the paid `deepseek` provider off (2026-10-31),
+        // so `deepseek/deepseek-v4-flash` opened a session that failed on its first message.
+        "opencode-deepseek-v4-flash" => {
+            ("opencode", vec!["--model".into(), OPENCODE_DEEPSEEK.into()])
+        }
         other => (other, Vec::new()),
     }
 }
@@ -4141,7 +4144,7 @@ fn selftest() -> i32 {
         (
             "opencode deepseek v4 flash",
             "opencode",
-            &["--model", "deepseek/deepseek-v4-flash", "--version"],
+            &["--model", OPENCODE_DEEPSEEK, "--version"],
         ),
     ];
 
