@@ -20,10 +20,14 @@ mkdir -p "$OUT/modules"
 # The shims an agent is launched with, the schemas, and the ops skeleton. `config.json` is
 # deliberately absent: it is one person's portfolio, and its presence in the bundle is also the
 # signal `paths::migrate` reads as "this machine ran an older Panel".
-for item in session_hook.py panel_send.py cpo-response.schema.json mcp ops-template; do
+for item in session_hook.py panel_send.py keep_media.py slack_mirror.py cpo-response.schema.json mcp ops-template; do
   [[ -e "$SRC/$item" ]] || { echo "missing: host/$item" >&2; exit 1; }
   cp -R "$SRC/$item" "$OUT/"
 done
+
+# The fallback report path must run from the bundle alone. Why: 2026-11-02 the bundled
+# panel_send.py crashed on an unstaged keep_media import, and an agent's report nearly got lost.
+(cd /tmp && python3 "$OUT/panel_send.py" --help >/dev/null) || { echo "bundled panel_send.py does not start: a host import is not staged" >&2; exit 1; }
 
 shipped=()
 skipped=()
