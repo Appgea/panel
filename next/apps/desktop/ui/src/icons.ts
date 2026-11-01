@@ -38,7 +38,16 @@ export type IconName =
   | "keyboard"
   | "plug"
   | "server"
-  | "flag";
+  | "flag"
+  | "check"
+  | "target"
+  | "bolt"
+  | "flame"
+  | "clock"
+  | "trophy"
+  | "search"
+  | "external"
+  | "close";
 
 const paths: Record<IconName, string> = {
   // Six teeth rather than the usual eight: at 14px the extra pair closes the gaps into a blob.
@@ -77,6 +86,15 @@ const paths: Record<IconName, string> = {
   flag: '<path d="M5 21V4"/><path d="M5 4h11l-2 4 2 4H5"/>',
   server: '<rect x="3.5" y="4" width="17" height="7" rx="2"/><rect x="3.5" y="13" width="17" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
   analytics: '<path d="M4 20V4M4 20h16"/><rect x="7" y="12" width="3" height="5"/><rect x="12" y="8" width="3" height="9"/><rect x="17" y="5" width="3" height="12"/>',
+  check: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
+  target: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="0.8"/>',
+  bolt: '<path d="M13 2.5 5 13.5h6l-1 8 8-11h-6z"/>',
+  flame: '<path d="M12 21.5c-3.9 0-7-2.8-7-6.6 0-3.3 2.3-5.4 3.9-7.5.3 1.8 1.2 3 2.4 3.6-.4-3.4 1.2-6.4 4.2-8.5-.2 2.9 1.2 4.7 2.6 6.4 1.2 1.5 1.9 3.3 1.9 5.4 0 4-3.6 7.2-8 7.2Z"/><path d="M12 21.5c-1.7 0-3-1.2-3-2.9 0-1.9 1.6-3 2.5-4.7.9 1.4 3.5 2.6 3.5 4.9 0 1.6-1.3 2.7-3 2.7Z"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0Z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4M12 13v4M8.5 20.5h7M10 17h4l.5 3.5h-5Z"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+  external: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 19V7.5A1.5 1.5 0 0 1 5.5 6H10"/>',
+  close: '<path d="M6 6l12 12M18 6 6 18"/>',
 };
 
 export function icon(name: IconName, className = "ui-icon"): string {

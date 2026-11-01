@@ -1,11 +1,12 @@
 /**
  * Dev harness for the Board screen. NOT part of the app build — index.html never
  * loads this. It mounts the REAL module (mountBoard) against fixture data and a stub extension,
- * so the screen can be looked at without Tauri. ?empty=1 shows a quiet board.
+ * so the screen can be looked at without Tauri. ?empty=1 shows a quiet board. ?real=1 reads
+ * board.real.json, a saved `board json` that is never committed.
  */
 import "./style.css";
 import "./motion.css";
-import { mountBoard, type BoardApi, type BoardData, type BuildList, type Scout, type ScoutList } from "./features/board";
+import { mountBoard, type BoardApi, type BoardCard, type BoardData, type BuildList, type DoneCard, type Scout, type ScoutList } from "./features/board";
 import type { ReviewCard, ReviewDeck, ReviewHistory } from "./features/swipe";
 
 const params = new URLSearchParams(location.search);
@@ -18,15 +19,57 @@ const at = (days: number, hour: number): string => {
 };
 const url = (n: number): string => `https://github.com/Appgea/ops/issues/${n}`;
 
+const closes = (): DoneCard[] => {
+  const titles = ["Tavla: dice sound clips on older iPhones", "Speed: board json reads closed issues in parallel", "Pillow: rain category in sleep sounds",
+    "Weekcut export drops the last caption", "Interbellum: map labels overlap at small zoom", "Panel: board refresh is slow", "videokit: read stayed-to-watch by API"];
+  const apps = [["tavla"], [], ["pillow_app"], ["weekcut"], ["interbellum"], ["panel"], ["videokit"]];
+  const out: DoneCard[] = [];
+  // A steady two weeks with a quiet day nine days back, so the bars and the streak both show something.
+  for (let back = 13; back >= 0; back--) {
+    if (back === 9) continue;
+    for (let k = 0; k < ((back * 7) % 5) + 1; k++) {
+      const n = 900 - back * 10 - k;
+      out.push({ number: n, title: titles[n % 7], url: url(n), apps: apps[n % 7], priority: 2, closed_at: ago(back * 1440 + k * 37 + 5),
+        estimate: n % 3 ? 10 + (n % 6) * 10 : undefined, dropped: n % 11 === 0 });
+    }
+  }
+  return out.sort((a, b) => (b.closed_at ?? "").localeCompare(a.closed_at ?? ""));
+};
+
+const READY: BoardCard[] = [
+  { number: 742, title: "Pillow: the sleep timer forgets its value after a background kill", url: url(742), apps: ["pillow_app"], priority: 0, estimate: 30,
+    problem: "Set a 30 min timer, lock the phone, and iOS kills the app: the sound keeps playing all night.", why: "Two one-star reviews this week name it.",
+    goals: [{ goal: "The timer survives a kill", check: "flutter test test/timer_restore_test.dart" }], confidence: 95 },
+  { number: 709, title: "Interbellum: better tiles, and front lines that run whole along a border", url: url(709), apps: ["interbellum"], priority: 1, estimate: 90,
+    problem: "The map's tiles are hard to read and too many. Some tiles are in several pieces or sit inside another tile.",
+    why: "The map is the game. A player who cannot read the tiles cannot plan a war.",
+    goals: [{ goal: "No tile is in two land pieces", check: "python3 tools/tile_audit.py --pieces" }, { goal: "A front line runs unbroken along every border", check: "vk shot map --front" }, { goal: "Tile names read at a glance at the default zoom" }],
+    direction: "Merge enclaves into their host tile. Draw the front from the shared border path, not from tile centres. Keep the save format.",
+    confidence: 85, run_with: "sonnet", created_at: ago(3 * 1440) },
+  { number: 28, title: "Portfolio-wide consent compliance", url: url(28), apps: [], priority: 1, estimate: 60,
+    problem: "Three apps ask for tracking before they show the consent screen.", why: "A store reviewer can reject on it, and EU users are owed the choice first.",
+    goals: [{ goal: "Every app shows consent before the first tracked event", check: "`rg -n 'logEvent' lib/` runs after `consent.ready`" }], confidence: 62, created_at: ago(9 * 1440) },
+  { number: 40, title: "Set up RevenueCat entitlements and offerings for Tavla", url: url(40), apps: ["tavla"], priority: 1, kinds: ["redesign"], estimate: 45,
+    problem: "Tavla sells one product with no entitlement, so a restore on a new phone gives nothing.", goals: [{ goal: "Restore on a fresh simulator unlocks the board pack" }], created_at: ago(2 * 1440) },
+  { number: 731, title: "Speed: review loop", url: url(731), apps: [], priority: 2, kinds: ["speed"], problem: "review loop", estimate: 20, created_at: ago(300) },
+  { number: 66, title: "Write the app kit standards the weekly beat checks", url: url(66), apps: [], priority: 3, created_at: ago(20 * 1440) },
+];
+
 const BOARD: BoardData = params.get("empty")
-  ? { repo: "Appgea/ops", open: 4, now: [], you: [], next: [] }
+  ? { repo: "Appgea/ops", open: 0, now: [], you: [], ready: [], waiting: [], done: [] }
   : {
     repo: "Appgea/ops",
-    open: 61,
-    apps: { panel: { name: "Appgea Panel", dir: "panel" }, tavla: { name: "Tavla", dir: "Tavla" } },
+    at: ago(2),
+    open: 14,
+    apps: {
+      panel: { name: "Appgea Panel", dir: "panel" }, tavla: { name: "Tavla", dir: "Tavla" }, pillow_app: { name: "Pillow", dir: "pillow_app" },
+      interbellum: { name: "Interbellum", dir: "interbellum" }, weekcut: { name: "Weekcut", dir: "weekcut" }, videokit: { name: "VideoKit", dir: "videokit" },
+    },
     now: [
-      { number: 67, title: "Panel: scouts and the board, visible all the time", url: url(67), apps: ["panel"], priority: 2, holder: "claude-e9aca641", claimed_at: ago(48), estimate: 30 },
-      { number: 20, title: "Tavla Android crash: game screen reads a provider after the widget is unmounted", url: url(20), apps: ["tavla"], priority: 0, holder: "claude-3f1c02aa", claimed_at: ago(12), estimate: 40 },
+      { number: 67, title: "Panel: scouts and the board, visible all the time", url: url(67), apps: ["panel"], priority: 2, holder: "claude-e9aca641", claimed_at: ago(48), estimate: 30,
+        problem: "The board hides who holds what.", goals: [{ goal: "The board shows every holder" }] },
+      { number: 20, title: "Tavla Android crash: game screen reads a provider after the widget is unmounted", url: url(20), apps: ["tavla"], priority: 0, holder: "codex-3f1c02aa", claimed_at: ago(12), estimate: 40,
+        problem: "Leaving a match mid-move crashes on Android 14.", why: "It is the top Android crash: 31% of crash-free-user loss last week." },
       { number: 42, title: "Bear-off animation sometimes flies to wrong tiles", url: url(42), apps: ["tavla"], priority: 1, holder: "grok-tavla", claimed_at: ago(4) },
       ...(params.get("many")
         ? [
@@ -37,17 +80,26 @@ const BOARD: BoardData = params.get("empty")
         : []),
     ],
     you: [
-      { number: 60, title: "Revoke App Store Connect key 6GHLN3V5DS, it is tracked in two repos", url: url(60), apps: [], priority: 1 },
-      { number: 1, title: "Renew the Apple distribution certificate", url: url(1), apps: [], priority: 1 },
-      { number: 31, title: "Pillow: choose the paywall layout", url: url(31), apps: ["pillow_app"], priority: 1, ask: "Bu satın alma ekranıyla devam edelim mi?", show: ["paywall"] },
+      { number: 60, title: "Revoke App Store Connect key 6GHLN3V5DS, it is tracked in two repos", url: url(60), apps: [], priority: 1,
+        ask: "Revoke the key in App Store Connect. The new one is already in the keychain.", problem: "An old API key sits in two repos' history." },
+      { number: 31, title: "Pillow: choose the paywall layout", url: url(31), apps: ["pillow_app"], priority: 1, ask: "Bu satın alma ekranıyla devam edelim mi?", show: ["paywall"], confidence: 60 },
     ],
-    next: [
-      { number: 28, title: "Portfolio-wide consent compliance", url: url(28), apps: [], priority: 1 },
-      { number: 29, title: "Money integrity across IAP apps", url: url(29), apps: [], priority: 1 },
-      { number: 40, title: "Set up RevenueCat entitlements and offerings for Tavla", url: url(40), apps: ["tavla"], priority: 1 },
-      { number: 66, title: "Write the app kit standards the weekly beat checks", url: url(66), apps: [], priority: 3 },
+    ready: READY,
+    next: READY.slice(0, 5),
+    waiting: [
+      { number: 215, title: "Tavla: ship 1.9.3 with the bear-off fix", url: url(215), apps: ["tavla"], priority: 1, after: [42], estimate: 25 },
+      { number: 333, title: "Check the paywall_encounter rate after the new layout", url: url(333), apps: ["pillow_app"], priority: 2, recheck: at(6, 12).slice(0, 10), kinds: ["recheck"] },
+      { number: 12, title: "How to cut a release in a develop_flow repo", url: url(12), apps: [], priority: 3, kinds: ["guide"] },
     ],
+    done: closes(),
   };
+
+if (params.get("real")) {
+  // Replace, not merge: a real board has its own lanes.
+  const real = (await fetch("/board.real.json").then((r) => r.json())) as BoardData;
+  for (const key of Object.keys(BOARD) as (keyof BoardData)[]) delete BOARD[key];
+  Object.assign(BOARD, real);
+}
 
 const scout = (s: Partial<Scout> & Pick<Scout, "id" | "title">): Scout => ({
   every: "daily", after: 8, kind: "agent", agent: "claude", model: null, needs: null, summary: "", error: null,
