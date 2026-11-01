@@ -4,5 +4,6 @@ dist/
 apps/desktop/src-tauri/gen/
 .DS_Store
 *.log
-# A saved `board json` for the board harness (?real=1). Real issue text, never committed.
+# A saved `board json` (?real=1) and review deck (?swipe=1&real=1) for the board harness. Real issue text, never committed.
 apps/desktop/ui/board.real.json
+apps/desktop/ui/deck.real.json

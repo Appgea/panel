@@ -456,6 +456,8 @@
 .sw-card-body {
   display: grid;
   align-content: start;
+  /* Every part keeps its full height and the body scrolls. Auto rows let a long text crush the pictures to a sliver. */
+  grid-auto-rows: max-content;
   gap: 10px;
   min-height: 0;
   overflow: auto;
@@ -481,7 +483,32 @@
 .sw-points li::before { content: "○"; position: absolute; left: 2px; color: var(--sw-faint); }
 .sw-points.is-proof li::before { content: "✓"; color: var(--sw-good); font-weight: 800; }
 .sw-pictures { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: thin; }
-.sw-picture { height: 150px; max-width: 100%; border-radius: 12px; object-fit: cover; background: rgba(255, 255, 255, 0.05); }
+.sw-picture {
+  flex: none;
+  height: clamp(120px, 24vh, 210px);
+  max-width: 100%;
+  border: 1px solid var(--sw-line);
+  border-radius: 12px;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: zoom-in;
+}
+.sw-pictures.is-one .sw-picture { width: 100%; height: clamp(150px, 30vh, 280px); }
+/* The picture at full size, over the whole review. */
+.sw-view {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px 24px 16px;
+  background: rgba(4, 6, 14, 0.94);
+  cursor: zoom-out;
+}
+.sw-view img { max-width: 100%; max-height: 100%; align-self: center; border-radius: 12px; object-fit: contain; }
+.sw-view small { color: var(--sw-dim); font-size: 12px; }
 .sw-card-foot {
   display: flex;
   justify-content: space-between;

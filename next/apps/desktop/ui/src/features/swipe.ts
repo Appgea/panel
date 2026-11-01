@@ -308,6 +308,8 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   let pastAll = store.get<boolean>(HISTORY_ALL, false);
   const busy = (): boolean => flying || Boolean(recording) || transcribing || arming;
   const pictures = new Map<string, Promise<string>>();
+  /** A card's pictures at full size, and which one. It owns the keys while open, so an arrow never judges the card under it. */
+  let viewing: { srcs: string[]; i: number; at: number } | null = null;
 
   const current = (): ReviewCard | null => cards[at] ?? null;
   /** The verdict of the card on screen, when you already judged it. */
@@ -656,7 +658,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   /* ---------------- drag */
 
   function draggable(el: HTMLElement): void {
-    let start: { x: number; y: number; t: number; id: number } | null = null;
+    let start: { x: number; y: number; t: number; id: number; picture: HTMLImageElement | null } | null = null;
     let dx = 0, dy = 0;
     const stamps = {
       right: el.querySelector<HTMLElement>(".sw-stamp-right"),
@@ -664,8 +666,10 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       up: el.querySelector<HTMLElement>(".sw-stamp-up"),
     };
     el.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0 || (e.target as HTMLElement).closest("button, a, textarea, .sw-scroll-x")) return;
-      start = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId };
+      if (e.button !== 0 || (e.target as HTMLElement).closest("button, a, textarea")) return;
+      // A picture drags the card like any other part of it. A press that does not move opens it big.
+      const picture = (e.target as HTMLElement).closest<HTMLImageElement>("img.sw-picture");
+      start = { x: e.clientX, y: e.clientY, t: performance.now(), id: e.pointerId, picture };
       el.setPointerCapture(e.pointerId);
       el.style.transition = "none";
     });
@@ -685,7 +689,16 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     const end = (e: PointerEvent): void => {
       if (!start || e.pointerId !== start.id) return;
       const speed = Math.hypot(dx, dy) / Math.max(1, performance.now() - start.t);
+      // A cancelled press, such as a system gesture, is not a tap on the picture.
+      const tapped = e.type === "pointerup" && Math.hypot(dx, dy) < 6 ? start.picture : null;
       start = null;
+      if (tapped?.src) {
+        dx = dy = 0;
+        el.style.transform = "";
+        const srcs = [...el.querySelectorAll<HTMLImageElement>("img.sw-picture")].map((img) => img.src).filter(Boolean);
+        viewing = { srcs, i: Math.max(0, srcs.indexOf(tapped.src)), at };
+        return paint();
+      }
       root.style.setProperty("--sw-tint", "transparent");
       const far = (n: number): boolean => Math.abs(n) > 130 || (Math.abs(n) > 50 && speed > 0.7);
       const move: Move | null = far(dx) && Math.abs(dx) >= Math.abs(dy) ? (dx > 0 ? "right" : "left")
@@ -869,10 +882,12 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     body.append(h("h2", "sw-title", card.title));
     if (card.summary) body.append(h("p", "sw-summary", card.summary));
     if (card.pictures.length) {
-      const strip = h("div", "sw-pictures sw-scroll-x");
+      const strip = h("div", `sw-pictures${card.pictures.length === 1 ? " is-one" : ""}`);
       for (const path of card.pictures) {
         const img = h("img", "sw-picture");
         img.alt = "Picture from the issue";
+        img.title = "Click to see it big";
+        img.draggable = false;
         if (!pictures.has(path)) pictures.set(path, api.picture(path));
         void pictures.get(path)!.then((src) => { img.src = src; }).catch(() => img.remove());
         strip.append(img);
@@ -1254,6 +1269,8 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
 
   function paint(): void {
     root.dataset.phase = phase;
+    // The viewer belongs to the card it opened on. Any move off that card closes it.
+    if (viewing && (phase !== "play" || viewing.at !== at)) viewing = null;
     const nodes: HTMLElement[] = [hud()];
     if (phase === "loading") nodes.push(h("div", "sw-loading", "Shuffling the deck…"));
     else if (phase === "error") {
@@ -1287,8 +1304,27 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       if (card) table.append(actions(card));
       nodes.push(table);
       if (paused) nodes.push(pauseLayer());
+      else if (viewing) nodes.push(viewer(viewing));
     }
     stage.replaceChildren(...nodes);
+  }
+
+  function viewer(view: { srcs: string[]; i: number }): HTMLElement {
+    const layer = h("div", "sw-view");
+    layer.setAttribute("role", "dialog");
+    layer.setAttribute("aria-label", "Picture");
+    const img = h("img");
+    img.src = view.srcs[view.i];
+    img.alt = "Picture from the issue";
+    img.draggable = false;
+    const many = view.srcs.length > 1;
+    layer.append(img, h("small", "", `${many ? `${view.i + 1} of ${view.srcs.length} · ← → for the next · ` : ""}Click or Esc to close`));
+    layer.addEventListener("click", closeViewer);
+    return layer;
+  }
+  function closeViewer(): void {
+    viewing = null;
+    paint();
   }
 
   /* ---------------- keys and lifecycle */
@@ -1317,7 +1353,13 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     if (typing) return;
     const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     let handled = true;
-    if (key === "Escape") {
+    if (viewing) {
+      const step = key === "ArrowRight" ? 1 : key === "ArrowLeft" ? -1 : 0;
+      if (step && viewing.srcs.length > 1) {
+        viewing.i = (viewing.i + step + viewing.srcs.length) % viewing.srcs.length;
+        paint();
+      } else if (key === "Escape" || key === " " || key === "Enter") closeViewer();
+    } else if (key === "Escape") {
       if (recording) recording.stop();
       else if (phase === "history") closeHistory();
       else if (paused) { paused = false; paint(); }

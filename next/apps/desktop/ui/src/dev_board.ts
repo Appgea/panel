@@ -99,6 +99,9 @@ if (params.get("real")) {
   const real = (await fetch("/board.real.json").then((r) => r.json())) as BoardData;
   for (const key of Object.keys(BOARD) as (keyof BoardData)[]) delete BOARD[key];
   Object.assign(BOARD, real);
+  // No real issue may carry a picture. ?picture=URL gives the first ready quest two, to check the brief's pictures.
+  const first = BOARD.ready?.[0];
+  if (first && params.get("picture")) first.show = ["a.png", "b.png"];
 }
 
 const scout = (s: Partial<Scout> & Pick<Scout, "id" | "title">): Scout => ({
@@ -214,6 +217,11 @@ const DECK: ReviewDeck = {
       summary: "The Board screen now shows who holds what and the scouts' next run.", points: ["npm run check passes", "Dev harness screenshot shows the strip at 1440 and 900 wide"] }),
   ],
 };
+if (params.get("swipe") && params.get("real")) {
+  // The last real deck, its cards with pictures first. Every picture shows ?picture=URL.
+  const real = (await fetch("/deck.real.json").then((r) => r.json())) as { cards: ReviewCard[] };
+  DECK.cards = real.cards.sort((a, b) => b.pictures.length - a.pictures.length);
+}
 const HISTORY: ReviewHistory = {
   repo: "Appgea/ops",
   reviews: [

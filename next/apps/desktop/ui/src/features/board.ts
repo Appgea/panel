@@ -1,8 +1,11 @@
 /**
- * Board — the quest board. Every open issue in Appgea/ops as a card in one of four lanes: your move,
- * in play, ready, waiting. Done quests score XP above them. Click a card and its brief opens beside
- * the lanes in plain parts: the problem, why it matters, the goals and their proof.
- * Owner, 2026-11-01: "I should enjoy looking at it and understand them at once".
+ * Board — the quest board. Every open issue in Appgea/ops as a card. Your move is a wide band on top,
+ * then the lanes: in play, ready, waiting, done. Each card says one thing under its title: your call,
+ * or the problem. Click a card and its brief opens as a sheet in the middle of the screen, the point
+ * first: your call or the problem, then why, the pictures and the goals. ← and → walk the board.
+ * Owner, 2026-11-01: "I should enjoy looking at it and understand them at once", and later the same
+ * day, of the old drawer: "my head is stuck reading it on right side … I should be getting the point
+ * as fast as possible".
  *
  * The Crew tab holds the scouts that find the work and the builds that do it.
  *
@@ -237,11 +240,11 @@ const buildState = (row: BuildRow): { tone: string; word: string } => {
 
 type Lane = "you" | "now" | "ready" | "waiting";
 type Tab = "quests" | "crew";
-const LANES: { key: Lane; title: string; hint: string; tone: string; empty: string }[] = [
-  { key: "you", title: "Your move", hint: "Only you can unblock these", tone: "t-warn", empty: "Nothing waits on you." },
-  { key: "now", title: "In play", hint: "An agent is on it right now", tone: "t-work", empty: "Nobody is on a quest. Type work in a terminal." },
-  { key: "ready", title: "Ready", hint: "Free to take, best first", tone: "t-ready", empty: "No free quests." },
-  { key: "waiting", title: "Waiting", hint: "Comes back on a date, or after another quest", tone: "t-quiet", empty: "Nothing is parked." },
+const LANES: { key: Lane; title: string; hint: string; tone: string; icon: IconName; empty: string }[] = [
+  { key: "you", title: "Your move", hint: "Only you can unblock these", tone: "t-warn", icon: "flag", empty: "Nothing waits on you." },
+  { key: "now", title: "In play", hint: "An agent is on it right now", tone: "t-work", icon: "play", empty: "Nobody is on a quest. Type work in a terminal." },
+  { key: "ready", title: "Ready", hint: "Free to take, best first", tone: "t-ready", icon: "inbox", empty: "No free quests." },
+  { key: "waiting", title: "Waiting", hint: "Back on a date, or after another quest", tone: "t-quiet", icon: "clock", empty: "Nothing is parked." },
 ];
 const NO_APP = "_ops";
 
@@ -285,18 +288,25 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
   let appFilter = remember("app");
   let query = "";
   let selected: number | null = null;
-  /** Where the open brief was scrolled to, so a background refresh does not throw the owner back to its top. */
-  let readAt = { number: -1, top: 0 };
-  let opener: HTMLElement | null = null;
+  /** Where the open brief was scrolled to, and if its fine print was open, so a background refresh
+   *  does not throw the owner back to its top. */
+  let readAt = { number: -1, top: 0, more: false };
   const pictures = new Map<string, Promise<string>>();
   let lanesHost: HTMLElement | null = null;
   let filterHost: HTMLElement | null = null;
 
   screen.classList.add("board");
   screen.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && selected !== null) {
+    if (selected === null) return;
+    const zoomed = screen.querySelector<HTMLElement>(".bq-zoom");
+    if (event.key === "Escape") {
       event.stopPropagation();
-      closeDrawer();
+      if (zoomed) unzoom();
+      else closeBrief();
+    } else if ((event.key === "ArrowLeft" || event.key === "ArrowRight") && !zoomed) {
+      event.preventDefault();
+      event.stopPropagation();
+      step(event.key === "ArrowLeft" ? -1 : 1);
     }
   });
 
@@ -457,74 +467,67 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   /* ------------------------------------------------------------ a quest card */
 
+  const appsLabel = (card: { apps: string[] }): string => (card.apps.length ? card.apps.map(appName).join(" + ") : "Ops");
+  const titleOf = (card: BoardCard): { title: string; tag: string } =>
+    splitTitle(card.title, [...card.apps, ...card.apps.map(appName)]);
+  const level = (card: { priority: number }): number => Math.min(Math.max(card.priority, 0), 3);
+  /** One kind word for a card: the title's own tag, else its first known kind. */
+  const kindOf = (card: BoardCard, tag: string): string =>
+    tag || ((card.kinds ?? []).map((k) => KIND_WORD[k]).find(Boolean) ?? "");
+
+  /** A card says three things at a glance: whose app, what, and the one line that matters. Only Critical
+   *  and High wear their tier; Normal and Low are most cards, so a chip there was noise. */
   function questCard(card: BoardCard, key: Lane, first: boolean): HTMLButtonElement {
-    const el = button(`bq-card p${Math.min(Math.max(card.priority, 0), 3)}`);
+    const p = level(card);
+    const el = button(`bq-card p${p}`);
     el.dataset.number = String(card.number);
     if (selected === card.number) el.classList.add("is-open");
     el.setAttribute("aria-label", `#${card.number} ${card.title}`);
 
     const top = h("span", "bq-card-top");
-    const apps = h("span", "bq-apps");
-    if (card.apps.length) card.apps.slice(0, 3).forEach((a) => apps.append(appTile(a, "sm")));
-    else apps.append(appTile(null, "sm"));
-    apps.append(h("span", "bq-appname", card.apps.length ? card.apps.map(appName).join(" + ") : "Ops"));
-    top.append(apps);
+    top.append(appTile(card.apps[0] ?? null, "sm"), h("span", "bq-appname", appsLabel(card)));
     if (first && key === "ready") top.append(h("span", "bq-badge-next", "Next up"));
+    else if (p <= 1) top.append(h("span", "bq-urgent", tier(p)));
     top.append(h("span", "bq-num", `#${card.number}`));
     el.append(top);
 
-    const words = [...card.apps, ...card.apps.map(appName)];
-    const split = splitTitle(card.title, words);
+    const split = titleOf(card);
     el.append(h("span", "bq-title", split.title));
-    if (card.problem && !echoes(card.problem, split.title)) {
-      el.append(rich("span", "bq-problem", card.problem));
-    }
     if (key === "you" && card.ask) {
       const ask = h("span", "bq-ask");
       ask.append(h("b", "", "Your call"), rich("span", "", card.ask));
       el.append(ask);
-    }
-    if (key === "now" && card.holder) {
-      const who = h("span", "bq-holder");
-      const engine = engineOf(card.holder);
-      who.append(avatar(card.holder), h("span", "", engine.name), h("small", "", held(card.claimed_at)));
-      el.append(who);
-      if (card.claimed_at && card.estimate && card.estimate > 0) {
-        const minutes = Math.max(0, (Date.now() - Date.parse(card.claimed_at)) / 60_000);
-        if (Number.isFinite(minutes)) {
-          const label = `${Math.round(minutes)} of ${card.estimate} min`;
-          const bar = meter(minutes, card.estimate, minutes > card.estimate ? "is-over" : "", "Time held against the estimate");
-          bar.setAttribute("aria-valuetext", label);
-          bar.title = label;
-          el.append(bar);
-        }
-      }
+    } else if (card.problem && !echoes(card.problem, split.title)) {
+      el.append(rich("span", "bq-problem", card.problem));
     }
 
     const foot = h("span", "bq-foot");
-    const chip = h("span", "bq-tier", `P${card.priority} ${tier(card.priority)}`);
-    foot.append(chip);
-    if (split.tag) foot.append(h("span", "bq-tag", split.tag));
-    for (const kind of card.kinds ?? []) {
-      const word = KIND_WORD[kind];
-      if (word && word.toLowerCase() !== split.tag.toLowerCase()) foot.append(h("span", "bq-tag", word));
-    }
-    if (key === "waiting") {
-      const wait = h("span", "bq-tag bq-wait");
+    if (key === "now" && card.holder) {
+      foot.append(avatar(card.holder), h("span", "bq-who", engineOf(card.holder).name), h("small", "bq-held", held(card.claimed_at)));
+    } else if (key === "waiting") {
+      const wait = h("span", "bq-wait");
       wait.append(glyph("clock"), document.createTextNode(waitReason(card)));
       foot.append(wait);
+    } else {
+      const kind = kindOf(card, split.tag);
+      if (kind) foot.append(h("span", "bq-kind", kind));
     }
-    foot.append(h("span", "bq-gap"));
-    if (card.goals?.length) {
-      const goals = h("span", "bq-goals");
-      goals.append(glyph("target"), document.createTextNode(String(card.goals.length)));
-      goals.title = `${card.goals.length} goal${card.goals.length === 1 ? "" : "s"} to finish it`;
-      foot.append(goals);
-    }
-    foot.append(xpChip(card));
+    foot.append(h("span", "bq-gap"), xpChip(card));
     el.append(foot);
 
-    el.addEventListener("click", () => openDrawer(card.number, el));
+    // Time held against the estimate, as a line along the card's bottom edge.
+    if (key === "now" && card.claimed_at && card.estimate && card.estimate > 0) {
+      const minutes = Math.max(0, (Date.now() - Date.parse(card.claimed_at)) / 60_000);
+      if (Number.isFinite(minutes)) {
+        const label = `${Math.round(minutes)} of ${card.estimate} min`;
+        const bar = meter(minutes, card.estimate, `is-edge${minutes > card.estimate ? " is-over" : ""}`, "Time held against the estimate");
+        bar.setAttribute("aria-valuetext", label);
+        el.title = label;
+        el.append(bar);
+      }
+    }
+
+    el.addEventListener("click", () => openBrief(card.number));
     return el;
   }
 
@@ -536,11 +539,11 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
     const tile = (cls: string, iconName: IconName, value: string, label: string, sub: string | HTMLElement): HTMLElement => {
       const el = h("div", `bq-stat ${cls}`);
-      const head = h("div", "bq-stat-head");
-      head.append(glyph(iconName), h("span", "", label));
-      el.append(head, h("b", "bq-stat-value", value));
-      if (typeof sub === "string") el.append(h("small", "", sub));
-      else el.append(sub);
+      const text = h("div", "bq-stat-text");
+      const line = h("div", "bq-stat-line");
+      line.append(h("b", "bq-stat-value", value), h("span", "bq-stat-label", label));
+      text.append(line, typeof sub === "string" ? h("small", "", sub) : sub);
+      el.append(glyph(iconName, "bq-glyph bq-stat-icon"), text);
       return el;
     };
 
@@ -558,7 +561,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     else weekSub.append(meter(s.week, Math.max(s.week, s.lastWeek, 1), beat >= 0 ? "is-win" : "", "This week against last week"),
       h("small", "", s.lastWeek === 0 ? "Last week had none"
         : beat >= 0 ? `Beat last week by ${number(beat)} XP` : `${number(-beat)} XP to beat last week`));
-    strip.append(tile("is-week", "bolt", show(s.week), "XP, last 7 days", weekSub));
+    strip.append(tile("is-week", "bolt", show(s.week), "XP in 7 days", weekSub));
 
     strip.append(tile(s.streak >= 3 ? "is-hot" : "", "flame", show(s.streak), "Day streak",
       unread ? later : s.streak >= 14 ? "Every day for two weeks" : s.today.count ? "Today counts" : "Close one today to keep it"));
@@ -613,24 +616,53 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     screen.querySelectorAll<HTMLElement>(".bq-lane-body").forEach((el) => scrolled.set(el.dataset.lane ?? "", el.scrollTop));
     const row = screen.querySelector<HTMLElement>(".bq-lanes");
     if (row) scrolled.set("_row", row.scrollLeft);
+    const you = screen.querySelector<HTMLElement>(".bq-you-row");
+    if (you) scrolled.set("_you", you.scrollLeft);
   }
   function restoreScroll(): void {
     screen.querySelectorAll<HTMLElement>(".bq-lane-body").forEach((el) => { el.scrollTop = scrolled.get(el.dataset.lane ?? "") ?? 0; });
     const row = screen.querySelector<HTMLElement>(".bq-lanes");
     if (row) row.scrollLeft = scrolled.get("_row") ?? 0;
+    const you = screen.querySelector<HTMLElement>(".bq-you-row");
+    if (you) you.scrollLeft = scrolled.get("_you") ?? 0;
+  }
+
+  function laneTitle(name: IconName, title: string, count: number): HTMLElement {
+    const el = h("h2");
+    el.append(glyph(name), h("span", "", title), h("span", "bq-count", String(count)));
+    return el;
+  }
+
+  /** What waits on the owner leads the screen, wide, so the ask reads before anything else. Clear, it
+   *  shrinks to one green line: that is the news. */
+  function youBand(): HTMLElement {
+    const l = LANES[0];
+    const all = lane("you");
+    const cards = all.filter(matches);
+    const clear = !cards.length;
+    const band = h("section", `bq-you ${clear && !all.length ? "t-ok is-clear" : l.tone}`);
+    band.setAttribute("aria-label", l.title);
+    const head = h("header", "bq-you-head");
+    head.append(laneTitle(clear && !all.length ? "check" : l.icon, l.title, cards.length),
+      h("small", "", cards.length ? l.hint : all.length ? "No match for this filter." : l.empty));
+    band.append(head);
+    if (!clear) {
+      const row = h("div", "bq-you-row");
+      cards.forEach((c) => row.append(questCard(c, "you", false)));
+      band.append(row);
+    }
+    return band;
   }
 
   function paintLanes(): void {
     if (!lanesHost) return;
     const row = h("div", "bq-lanes");
-    for (const l of LANES) {
+    for (const l of LANES.slice(1)) {
       const cards = lane(l.key).filter(matches);
       const col = h("section", `bq-lane ${l.tone}`);
       col.setAttribute("aria-label", l.title);
       const head = h("header", "bq-lane-head");
-      const title = h("h2", "", l.title);
-      title.append(h("span", "bq-count", String(cards.length)));
-      head.append(title, h("small", "", l.hint));
+      head.append(laneTitle(l.icon, l.title, cards.length), h("small", "", l.hint));
       const body = h("div", "bq-lane-body");
       body.dataset.lane = l.key;
       if (cards.length) cards.forEach((c, i) => body.append(questCard(c, l.key, i === 0 && !query && !appFilter)));
@@ -639,7 +671,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       row.append(col);
     }
     row.append(doneLane());
-    lanesHost.replaceChildren(row);
+    lanesHost.replaceChildren(youBand(), row);
   }
 
   function doneLane(): HTMLElement {
@@ -648,9 +680,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const all = (board?.done ?? []).filter(matches);
     const s = score(board?.done ?? []);
     const head = h("header", "bq-lane-head");
-    const title = h("h2", "", "Done");
-    title.append(h("span", "bq-count", String(all.filter((d) => !d.dropped).length)));
-    head.append(title, h("small", "", "Closed in the last 14 days"));
+    head.append(laneTitle("check", "Done", all.filter((d) => !d.dropped).length), h("small", "", "Closed in the last 14 days"));
     const body = h("div", "bq-lane-body");
     body.dataset.lane = "done";
     const today = s.today.date;
@@ -750,92 +780,159 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     }
   }
 
-  /* ------------------------------------------------------------ the brief, beside the lanes */
+  /* ------------------------------------------------------------ the brief, a sheet in the middle */
 
-  function openDrawer(n: number, from: HTMLElement): void {
+  /** The quests in the order the board shows them, so ← and → walk the board. */
+  const shownCards = (): BoardCard[] => LANES.flatMap((l) => lane(l.key).filter(matches));
+
+  function openBrief(n: number): void {
     selected = n;
-    readAt = { number: -1, top: 0 };
-    opener = from;
-    screen.querySelectorAll(".bq-card.is-open").forEach((el) => el.classList.remove("is-open"));
-    from.classList.add("is-open");
-    paintDrawer();
-    screen.querySelector<HTMLElement>(".bq-drawer")?.focus();
+    readAt = { number: -1, top: 0, more: false };
+    paintBrief();
+    screen.querySelector<HTMLElement>(".bq-sheet")?.focus();
   }
 
-  function closeDrawer(): void {
+  function closeBrief(): void {
+    const n = selected;
     selected = null;
-    screen.querySelectorAll(".bq-card.is-open").forEach((el) => el.classList.remove("is-open"));
-    screen.querySelector(".bq-drawer")?.remove();
-    // Back to the card it came from, or to the same card after a repaint.
-    const back = opener?.isConnected ? opener : null;
-    opener = null;
-    back?.focus();
+    paintBrief();
+    // Back to the card it came from, found again in case a refresh rebuilt it.
+    screen.querySelector<HTMLElement>(`.bq-card[data-number="${n}"]`)?.focus();
   }
 
-  function paintDrawer(): void {
-    const old = screen.querySelector(".bq-drawer");
+  function step(by: number): void {
+    const order = shownCards();
+    const at = order.findIndex((c) => c.number === selected);
+    const next = at < 0 ? undefined : order[at + by];
+    if (next) openBrief(next.number);
+  }
+
+  function zoom(host: HTMLElement, src: string): void {
+    const big = button("bq-zoom", "", "Click or Esc to close");
+    const img = h("img");
+    img.src = src;
+    img.alt = "Picture for this quest, full size";
+    big.append(img);
+    big.addEventListener("click", unzoom);
+    host.append(big);
+    big.focus();
+  }
+
+  function unzoom(): void {
+    screen.querySelector(".bq-zoom")?.remove();
+    screen.querySelector<HTMLElement>(".bq-sheet")?.focus();
+  }
+
+  function paintBrief(): void {
+    const old = screen.querySelector(".bq-focus");
     const hadFocus = Boolean(old?.contains(document.activeElement));
     old?.remove();
-    if (selected === null || tab !== "quests") return;
-    const found = LANES.map((l) => ({ l, card: lane(l.key).find((c) => c.number === selected) })).find((x) => x.card);
-    if (!found?.card) {
-      selected = null;
-      return;
-    }
-    const { card } = found;
+    const found = selected === null || tab !== "quests" ? undefined
+      : LANES.map((l) => ({ l, card: lane(l.key).find((c) => c.number === selected) })).find((x) => x.card);
+    if (!found?.card) selected = null;
+    // The board behind the sheet takes no clicks, keys or focus while it is open.
+    for (const el of screen.children) if (el instanceof HTMLElement) el.inert = selected !== null;
+    screen.querySelectorAll<HTMLElement>(".bq-card").forEach((el) => el.classList.toggle("is-open", Number(el.dataset.number) === selected));
+    if (!found?.card) return;
+    const card = found.card;
     const l = found.l;
-    const drawer = h("aside", `bq-drawer p${Math.min(Math.max(card.priority, 0), 3)}`);
-    drawer.tabIndex = -1;
-    drawer.dataset.number = String(card.number);
-    drawer.setAttribute("aria-label", `Quest #${card.number}`);
+    const p = level(card);
 
-    const top = h("header", "bq-drawer-top");
-    const where = h("div", "bq-drawer-where");
-    where.append(h("span", `bq-lane-pill ${l.tone}`, l.title), h("span", "bq-tier", `P${card.priority} ${tier(card.priority)}`),
-      h("span", "bq-num", `#${card.number}`));
+    const veil = h("div", "bq-focus");
+    veil.addEventListener("click", (event) => {
+      if (event.target === veil) closeBrief();
+    });
+    const sheet = h("article", `bq-sheet ${l.tone} p${p}`);
+    sheet.tabIndex = -1;
+    sheet.dataset.number = String(card.number);
+    sheet.setAttribute("role", "dialog");
+    sheet.setAttribute("aria-modal", "true");
+    sheet.setAttribute("aria-label", `Quest #${card.number}`);
+
+    const top = h("header", "bq-sheet-top");
+    const where = h("div", "bq-sheet-where");
+    const pill = h("span", "bq-lane-pill");
+    pill.append(glyph(l.icon), document.createTextNode(l.title));
+    where.append(appTile(card.apps[0] ?? null, "sm"), h("span", "bq-appname", appsLabel(card)), pill);
+    if (p <= 1) where.append(h("span", "bq-urgent", tier(p)));
+    const order = shownCards();
+    const at = order.findIndex((c) => c.number === card.number);
+    const nav = h("div", "bq-sheet-nav");
+    const walk = (by: number, label: string): HTMLButtonElement => {
+      const el = button(`bq-icon-btn${by < 0 ? " is-back" : ""}`, "", `${label} (${by < 0 ? "←" : "→"})`);
+      el.append(glyph("arrow"));
+      el.setAttribute("aria-label", label);
+      el.disabled = at < 0 || !order[at + by];
+      el.addEventListener("click", () => step(by));
+      return el;
+    };
     const close = button("bq-icon-btn", "", "Close (Esc)");
     close.append(glyph("close"));
     close.setAttribute("aria-label", "Close");
-    close.addEventListener("click", closeDrawer);
-    top.append(where, close);
-    drawer.append(top);
+    close.addEventListener("click", closeBrief);
+    nav.append(walk(-1, "Previous quest"), h("small", "bq-pos", at >= 0 ? `${at + 1} of ${order.length}` : ""),
+      walk(1, "Next quest"), close);
+    top.append(where, nav);
+    sheet.append(top);
 
-    const scroll = h("div", "bq-drawer-body");
-    const apps = h("div", "bq-apps");
-    if (card.apps.length) card.apps.forEach((a) => apps.append(appTile(a, "sm")));
-    else apps.append(appTile(null, "sm"));
-    apps.append(h("span", "bq-appname", card.apps.length ? card.apps.map(appName).join(" + ") : "Ops"));
-    scroll.append(apps);
-    const split = splitTitle(card.title, [...card.apps, ...card.apps.map(appName)]);
-    const title = h("h2", "bq-drawer-title", split.title);
-    scroll.append(title);
+    const body = h("div", "bq-sheet-body");
+    const split = titleOf(card);
+    const kicker = [`#${card.number}`, kindOf(card, split.tag)].filter(Boolean).join(" · ");
+    body.append(h("p", "bq-kicker", kicker), h("h2", "bq-sheet-title", split.title));
 
-    const facts = h("div", "bq-facts");
-    const fact = (iconName: IconName, value: string, label: string): void => {
-      const el = h("div", "bq-fact");
-      el.append(glyph(iconName), h("b", "", value), h("small", "", label));
-      facts.append(el);
-    };
-    fact("bolt", `${xpOf(card)} XP`, card.estimate ? `${card.estimate} min of work` : "No estimate");
-    if (card.goals?.length) fact("target", String(card.goals.length), card.goals.length === 1 ? "goal" : "goals");
-    if (card.holder) fact("agent", engineOf(card.holder).name, `on it for ${held(card.claimed_at) || "a moment"}`);
-    else if (l.key === "waiting") fact("clock", waitReason(card), "then it is free");
-    else if (card.created_at) fact("clock", held(card.created_at), "since it was filed");
-    scroll.append(facts);
-
+    // The point first: your call when there is one, else the problem.
+    const problem = card.problem && !echoes(card.problem, split.title) ? card.problem : "";
     if (card.ask) {
       const ask = h("section", "bq-callout");
       ask.append(h("h3", "", "Your call"), rich("p", "", card.ask));
-      scroll.append(ask);
+      body.append(ask);
+    } else if (problem) {
+      body.append(rich("p", "bq-lead", problem));
     }
-    const part = (heading: string, text: string | undefined, cls = ""): void => {
-      if (!text) return;
-      const box = h("section", `bq-part ${cls}`.trim());
-      box.append(h("h3", "", heading), rich("p", "", text));
-      scroll.append(box);
+
+    const facts = h("div", "bq-facts");
+    const fact = (name: IconName, text: string, cls = ""): void => {
+      const el = h("span", `bq-fact ${cls}`.trim());
+      el.append(glyph(name), document.createTextNode(text));
+      facts.append(el);
     };
-    if (card.problem && !echoes(card.problem, split.title)) part("The problem", card.problem);
-    part("Why it matters", card.why);
+    fact("bolt", `${xpOf(card)} XP${card.estimate ? ` · ${card.estimate} min of work` : ""}`, "is-xp");
+    if (card.holder) fact("agent", `${engineOf(card.holder).name} on it · ${held(card.claimed_at) || "just now"}`);
+    else if (l.key === "waiting") fact("clock", waitReason(card));
+    if (card.created_at) fact("inbox", `Filed ${held(card.created_at)} ago`);
+    body.append(facts);
+
+    const part = (into: HTMLElement, heading: string, text: string | undefined): void => {
+      if (!text) return;
+      const box = h("section", "bq-part");
+      box.append(h("h3", "", heading), rich("p", "", text));
+      into.append(box);
+    };
+    if (card.ask) part(body, "The problem", problem);
+    part(body, "Why it matters", card.why);
+
+    if (card.show?.length) {
+      const shots = h("div", `bq-shots${card.show.length === 1 ? " is-one" : ""}`);
+      for (const path of card.show.slice(0, 4)) {
+        const shot = button("bq-shot", "", "Click to see it big");
+        const img = h("img");
+        img.alt = "Picture for this quest";
+        shot.append(img);
+        if (!pictures.has(path)) pictures.set(path, api.picture(path));
+        void pictures.get(path)!.then((src) => { img.src = src; }).catch((error: unknown) => {
+          pictures.delete(path);
+          const missing = h("span", "bq-empty", "Picture unavailable");
+          missing.title = errorText(error, "The image could not be read");
+          shot.replaceWith(missing);
+        });
+        shot.addEventListener("click", () => {
+          if (img.src) zoom(veil, img.src);
+        });
+        shots.append(shot);
+      }
+      body.append(shots);
+    }
+
     if (card.goals?.length) {
       const box = h("section", "bq-part");
       box.append(h("h3", "", "Done when"));
@@ -850,13 +947,16 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         ol.append(li);
       }
       box.append(ol);
-      scroll.append(box);
+      body.append(box);
     }
-    part("What you will see", card.seen);
-    part("Already decided", card.decided);
-    part("The plan", card.direction, "is-quiet");
-    part("Cost if nobody does it", card.cost, "is-quiet");
+    part(body, "What you will see", card.seen);
+    part(body, "Already decided", card.decided);
 
+    // The builder's part stays folded: the owner reads the point, an agent reads the plan.
+    const more = h("details", "bq-more");
+    more.append(h("summary", "", "The plan and the fine print"));
+    part(more, "The plan", card.direction);
+    part(more, "Cost if nobody does it", card.cost);
     if (typeof card.confidence === "number") {
       const box = h("section", "bq-part");
       box.append(h("h3", "", "How sure the brief is"));
@@ -865,45 +965,36 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         h("b", "", `${card.confidence}%`));
       box.append(row);
       if (card.confidence < 70) box.append(h("small", "bq-note", "Under 70%: an agent asks you before it guesses."));
-      scroll.append(box);
+      more.append(box);
     }
-
     const meta: string[] = [];
     if (card.run_with) meta.push(`Built by ${card.run_with}`);
     if (card.bundle) meta.push(`Bundle ${card.bundle}`);
     if (card.recheck) meta.push(`Recheck ${shortDate(card.recheck)}`);
     if (card.after?.length) meta.push(`After ${card.after.map((n) => `#${n}`).join(", ")}`);
-    if (meta.length) scroll.append(h("p", "bq-meta", meta.join(" · ")));
+    if (meta.length) more.append(h("p", "bq-meta", meta.join(" · ")));
+    if (more.children.length > 1) body.append(more);
+    sheet.append(body);
 
-    if (card.show?.length) {
-      const preview = h("div", "bq-pictures");
-      for (const path of card.show.slice(0, 2)) {
-        const img = h("img", "bq-picture");
-        img.alt = "Picture for this quest";
-        if (!pictures.has(path)) pictures.set(path, api.picture(path));
-        void pictures.get(path)!.then((src) => { img.src = src; }).catch((error: unknown) => {
-          pictures.delete(path);
-          const missing = h("span", "bq-empty", "Picture unavailable");
-          missing.title = errorText(error, "The image could not be read");
-          img.replaceWith(missing);
-        });
-        preview.append(img);
-      }
-      scroll.append(preview);
-    }
-    drawer.append(scroll);
-
-    const foot = h("footer", "bq-drawer-foot");
+    const foot = h("footer", "bq-sheet-foot");
     const github = button("bq-primary", "", card.url);
     github.append(glyph("external"), document.createTextNode("Open on GitHub"));
     github.addEventListener("click", () => events.openUrl(card.url));
-    foot.append(github);
-    drawer.append(foot);
-    screen.append(drawer);
+    foot.append(github, h("small", "", "← → next quest · Esc closes"));
+    sheet.append(foot);
+    veil.append(sheet);
+    screen.append(veil);
+
     // A refresh rebuilds the brief after paint() has already dropped the old one. The place is kept live instead.
-    if (readAt.number === card.number) scroll.scrollTop = readAt.top;
-    scroll.addEventListener("scroll", () => { readAt = { number: card.number, top: scroll.scrollTop }; }, { passive: true });
-    if (hadFocus) drawer.focus();
+    if (readAt.number === card.number) {
+      more.open = readAt.more;
+      body.scrollTop = readAt.top;
+    }
+    const keep = (): void => { readAt = { number: card.number, top: body.scrollTop, more: more.open }; };
+    body.addEventListener("scroll", keep, { passive: true });
+    more.addEventListener("toggle", keep);
+    // A refresh drops the old sheet with focus inside it, so focus falls to the body. Take it back, or the keys stop.
+    if (hadFocus || document.activeElement === document.body || !document.activeElement) sheet.focus();
   }
 
   /* ------------------------------------------------------------ crew: builds and scouts */
@@ -1087,7 +1178,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       input.focus();
       if (caret !== null) input.setSelectionRange(caret, caret);
     }
-    paintDrawer();
+    paintBrief();
   }
 
   function paint(): void {
