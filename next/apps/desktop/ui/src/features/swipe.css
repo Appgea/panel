@@ -106,6 +106,23 @@
 .sw-track i { background: linear-gradient(90deg, #6c5cff, #2ee59d); }
 .sw-progress { display: grid; gap: 6px; justify-items: center; }
 .sw-progress-text { font-size: 13px; font-weight: 700; color: var(--sw-dim); font-variant-numeric: tabular-nums; }
+.sw-progress-row { display: flex; align-items: center; gap: 10px; }
+.sw-step {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 8px;
+  border: 1px solid var(--sw-line);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--sw-ink);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.sw-step:hover:not(:disabled) { background: rgba(255, 255, 255, 0.11); }
+.sw-step:disabled { opacity: 0.3; cursor: default; }
 .sw-hud-right { display: flex; justify-content: flex-end; align-items: center; gap: 8px; }
 .sw-chip {
   padding: 6px 10px;
@@ -300,17 +317,24 @@
   list-style: none;
   text-align: left;
 }
-.sw-orders li {
+.sw-order-open {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 4px 10px;
   align-items: baseline;
+  width: 100%;
   padding: 10px 12px;
+  border: 0;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.04);
+  color: inherit;
+  font: inherit;
   font-size: 13px;
+  text-align: left;
+  cursor: pointer;
 }
-.sw-orders li > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sw-order-open:hover { background: rgba(255, 255, 255, 0.09); }
+.sw-order-open > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sw-orders em { grid-column: 2; color: var(--sw-dim); font-style: normal; overflow-wrap: anywhere; }
 .sw-order-tag { padding: 2px 8px; border-radius: 99px; font-size: 11px; white-space: nowrap; background: rgba(255, 255, 255, 0.08); }
 .sw-order-tag.m-left { color: var(--sw-bad); }
@@ -481,6 +505,24 @@
   box-shadow: 0 6px 16px rgba(123, 92, 255, 0.5);
 }
 
+/* a card you already judged, shown again while you walk back */
+.sw-was {
+  position: absolute;
+  left: -8px;
+  top: -10px;
+  padding: 5px 10px;
+  border: 1px solid currentColor;
+  border-radius: 99px;
+  background: #171b36;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.sw-was.m-left { color: var(--sw-bad); }
+.sw-was.m-right { color: var(--sw-good); }
+.sw-was.m-up { color: var(--sw-star); }
+.sw-was.m-down { color: var(--sw-skip); }
+
 /* stamps while dragging */
 .sw-stamp {
   position: absolute;
@@ -519,6 +561,11 @@
   -webkit-user-select: text;
 }
 .sw-note-tip { font-size: 12px; color: var(--sw-faint); }
+.sw-note-ask { font-size: 13px; font-weight: 800; color: var(--sw-bad); }
+.sw-note.is-asking .sw-note-input {
+  border-color: var(--sw-bad);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--sw-bad) 22%, transparent);
+}
 .sw-note-saved {
   display: flex;
   align-items: center;
@@ -587,6 +634,7 @@
 .sw-act.t-skip .sw-act-icon, .sw-act-small .sw-act-icon { width: 48px; height: 48px; font-size: 19px; }
 .sw-act-small { color: #b9a8ff; }
 .sw-act-small.is-on .sw-act-icon { background: rgba(143, 125, 255, 0.25); }
+.sw-act.is-chosen .sw-act-icon { background: color-mix(in srgb, currentColor 20%, transparent); box-shadow: 0 0 0 2px currentColor; }
 .sw-mic.is-rec { color: var(--sw-bad); }
 .sw-mic.is-rec .sw-act-icon { animation: sw-pulse 1s ease-in-out infinite; }
 

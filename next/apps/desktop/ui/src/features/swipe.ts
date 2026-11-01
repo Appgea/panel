@@ -5,16 +5,21 @@
  * tinder. I should be able to comment ... after I am done ... an agent ... triggered with my comments.
  * I should also be able to record voice ... heavily gamified, with fullscreen."
  *
- * Nothing touches GitHub until the end card's Send. Until then every swipe undoes with Z, and a
- * closed deck resumes where it stopped. Send writes only what means a change (a note, a reopen, a
- * drop, a rush), then one agent terminal opens with your words.
+ * Nothing touches GitHub until the end card's Send. Until then Z and X walk back and forth through
+ * the cards you judged, and a swipe there changes the verdict. A closed deck resumes where it stopped.
+ * Send writes only what means a change (a note, a reopen, a drop, a rush), then one agent terminal
+ * opens with your words.
  *
- *   → good    ← redo / drop    ↑ love / rush    ↓ skip
- *   C note    V voice    Z undo    O open on GitHub    F fullscreen    M sound    Esc pause
+ * A ← reopens or drops an issue, and a drag can make one by accident. So ← counts only with a note:
+ * owner, 2026-11-01, "swiping left can be by accident ... swiping left, I have to give some notes".
+ *
+ *   → good    ← redo / drop, with a note    ↑ love / rush    ↓ skip
+ *   C note    V voice    Z back    X forward    O open on GitHub    F fullscreen    M sound    Esc pause
  *
  * The score rewards judging, not speed: a combo is a run of cards you decided, and a skip breaks it.
  */
 import { errorText } from "../errors";
+import { judge, needsNote } from "./swipe_judge";
 import "./swipe.css";
 
 export type Kind = "done" | "new" | "dropped";
@@ -243,6 +248,7 @@ const acted = (v: { note: string; kind: Kind; move: Move }): boolean =>
   Boolean(v.note) || v.move === "left" || (v.move === "up" && v.kind === "new");
 const NOW_WORD = { open: "Now open", closed: "Now closed", dropped: "Now dropped" } as const;
 type Draft = { saved: number; verdicts: Verdict[] };
+type Note = { text: string; voice: boolean };
 const DRAFT_DAYS = 3;
 const DRAFT = "panel.swipe.draft";
 const FILTER = "panel.swipe.filter";
@@ -270,8 +276,17 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   let failure = "";
   let filter = store.get<Record<string, boolean>>(FILTER, { done: true, new: true, dropped: true, workflow: true });
   let cards: ReviewCard[] = [];
+  /** verdicts[i] judges cards[i]. Always a prefix of the deck: you judge in order, and walking back changes one in place. */
   let verdicts: Verdict[] = [];
-  let note: { text: string; voice: boolean } | null = null;
+  /** The card on screen. Up to verdicts.length: the judged ones, then the first one still open. */
+  let at = 0;
+  /** Notes typed on a card not judged yet, kept while you walk back and forth. */
+  const loose = new Map<number, Note>();
+  /** A ← that waits for its note. Enter in the note box makes it. */
+  let asking: Move | null = null;
+  let note: Note | null = null;
+  /** The note as it stood when the box opened, so Esc gives it back. */
+  let noteWas: Note | null = null;
   let recording: { stop(): void; started: number } | null = null;
   let arming = false;
   let editing = false;
@@ -294,7 +309,15 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   const busy = (): boolean => flying || Boolean(recording) || transcribing || arming;
   const pictures = new Map<string, Promise<string>>();
 
-  const current = (): ReviewCard | null => cards[verdicts.length] ?? null;
+  const current = (): ReviewCard | null => cards[at] ?? null;
+  /** The verdict of the card on screen, when you already judged it. */
+  const judged = (): Verdict | null => verdicts[at] ?? null;
+  const noteAt = (i: number): Note | null => {
+    const v = verdicts[i];
+    if (v) return v.note ? { text: v.note, voice: v.voice } : null;
+    return cards[i] ? loose.get(cards[i].number) ?? null : null;
+  };
+  const pick = (all: ReviewCard[]): ReviewCard[] => all.filter((c) => filter[c.kind] && (filter.workflow || !c.workflow));
   const tally = (): Score => score(verdicts, cards.length);
   const saveDraft = (): void => store.set(DRAFT, { saved: Date.now(), verdicts } satisfies Draft);
   /** The swipes of a deck you left, while its first cards are still the same ones in the same order.
@@ -304,7 +327,8 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     if (!draft?.verdicts || !(Date.now() - (draft.saved ?? 0) < DRAFT_DAYS * 86_400_000)) return [];
     const kept: Verdict[] = [];
     for (const [i, v] of draft.verdicts.entries()) {
-      if (deal[i]?.number !== v.number) break;
+      // A bare ← from a draft saved before ← needed a note: show that card again instead of sending it.
+      if (deal[i]?.number !== v.number || needsNote(v.move, v.note)) break;
       kept.push(v);
     }
     return kept;
@@ -327,8 +351,10 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
 
   function deal(): void {
     if (!deck) return;
-    cards = deck.cards.filter((c) => filter[c.kind] && (filter.workflow || !c.workflow));
+    cards = pick(deck.cards);
     verdicts = resumed(cards);
+    at = verdicts.length;
+    note = noteAt(at);
     phase = cards.length && verdicts.length >= cards.length ? "end" : "play";
     paint();
   }
@@ -344,15 +370,29 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       if (!flying) toast("Finish the voice note first", "warn");
       return;
     }
+    const text = note?.text.trim() ?? "";
     const before = tally();
-    verdicts.push({ number: card.number, kind: card.kind, move, note: note?.text.trim() ?? "", voice: Boolean(note?.voice && note.text.trim()), priority: card.priority });
-    note = null;
+    const i = at;
+    const next = judge(verdicts, i, { number: card.number, kind: card.kind, move, note: text, voice: Boolean(note?.voice && text), priority: card.priority });
+    if (!next) {
+      // A bare ←: the card stays, and the note box asks why. Enter there makes the move, Esc drops it.
+      asking = move;
+      sound.play("tick");
+      openNote();
+      return;
+    }
+    verdicts = next;
+    asking = null;
+    loose.delete(card.number);
+    at = i + 1;
+    note = noteAt(at);
     editing = false;
     saveDraft();
     const after = tally();
     sound.play(move);
-    burst(move, after.gains[after.gains.length - 1] ?? 0, after.combo);
-    if (after.combo > 0 && after.combo % 5 === 0) {
+    burst(move, after.gains[i] ?? 0, after.combo);
+    // A combo is the run at the end of the deck; changing an older card does not extend it.
+    if (i === verdicts.length - 1 && after.combo > 0 && after.combo % 5 === 0) {
       sound.play("combo", after.combo);
       toast(`Combo ×${after.combo}`, "combo");
     }
@@ -374,7 +414,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     flying = true;
     flyOut(move, () => {
       flying = false;
-      if (verdicts.length >= cards.length) {
+      if (at >= cards.length) {
         phase = "end";
         confetti(120);
       }
@@ -382,21 +422,43 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     });
   }
 
-  function undo(): void {
-    if (!verdicts.length || (phase !== "play" && phase !== "end") || busy()) return;
-    if (reviewedUntil) {
-      cards = deck?.cards.filter((c) => filter[c.kind] && (filter.workflow || !c.workflow)) ?? cards;
-      reviewedUntil = null;
+  /** Writes the note box back to the card on screen. False when that would leave a ← without words. */
+  function keep(): boolean {
+    const text = note?.text.trim() ?? "";
+    const v = verdicts[at];
+    if (v) {
+      if (needsNote(v.move, text)) return false;
+      verdicts[at] = { ...v, note: text, voice: Boolean(note?.voice && text) };
+      saveDraft();
+    } else if (cards[at]) {
+      if (text) loose.set(cards[at].number, { text, voice: Boolean(note?.voice) });
+      else loose.delete(cards[at].number);
     }
-    const last = verdicts.pop()!;
-    note = last.note ? { text: last.note, voice: last.voice } : null;
-    editing = false;
-    saveDraft();
-    sound.play("undo");
-    phase = "play";
-    paint();
-    stage.querySelector(".sw-card.is-top")?.classList.add("sw-back");
+    return true;
   }
+
+  /** Shows card `i`: one you judged, or the first one still open. Nothing is judged or undone by walking. */
+  function walk(i: number): void {
+    if (busy() || sending || !cards.length) return;
+    if (phase === "end") {
+      if (reviewedUntil) {
+        cards = deck ? pick(deck.cards) : cards;
+        reviewedUntil = null;
+      }
+    } else if (phase !== "play") return;
+    else keep();
+    const was = at;
+    at = Math.max(0, Math.min(i, verdicts.length, cards.length));
+    note = noteAt(at);
+    editing = false;
+    asking = null;
+    phase = at >= cards.length ? "end" : "play";
+    if (phase === "play" && at !== was) sound.play("undo");
+    paint();
+    if (at < was) stage.querySelector(".sw-card.is-top")?.classList.add("sw-back");
+  }
+  const back = (): void => walk(phase === "end" ? verdicts.length - 1 : at - 1);
+  const forward = (): void => walk(at + 1);
 
   /* ---------------- voice */
 
@@ -442,6 +504,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     });
     recorder.start();
     recording = { stop: () => recorder.state !== "inactive" && recorder.stop(), started: Date.now() };
+    if (!editing) noteWas = note && { ...note };
     note ??= { text: "", voice: true };
     sound.play("tick");
     paint();
@@ -658,7 +721,15 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     const mid = h("div", "sw-progress");
     if (phase === "play" || phase === "end") {
       const done = verdicts.length;
-      mid.append(h("span", "sw-progress-text", `${Math.min(done + 1, cards.length)} / ${cards.length}`));
+      const row = h("div", "sw-progress-row");
+      const prev = btn("sw-step", "‹", "The card before (Z)");
+      prev.disabled = !done || (phase === "play" && at === 0);
+      prev.addEventListener("click", back);
+      const next = btn("sw-step", "›", "The card after (X)");
+      next.disabled = phase !== "play" || at >= done;
+      next.addEventListener("click", forward);
+      row.append(prev, h("span", "sw-progress-text", `${Math.min(at + 1, cards.length)} / ${cards.length}`), next);
+      mid.append(row);
       const track = h("div", "sw-track");
       const f = h("i");
       f.style.transform = `scaleX(${cards.length ? done / cards.length : 0})`;
@@ -722,8 +793,8 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       ranges.append(b);
     }
     box.append(ranges);
-    const size = deck.cards.filter((c) => filter[c.kind] && (filter.workflow || !c.workflow)).length;
-    const resuming = resumed(deck.cards.filter((c) => filter[c.kind] && (filter.workflow || !c.workflow))).length > 0;
+    const size = pick(deck.cards).length;
+    const resuming = resumed(pick(deck.cards)).length > 0;
     const go = btn("sw-go", size ? (resuming ? `Continue · ${size} cards` : `Start · ${size} cards`) : "Nothing to review");
     go.disabled = !size;
     go.addEventListener("click", deal);
@@ -753,7 +824,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
 
   function legend(): HTMLElement {
     const keys = h("div", "sw-legend");
-    for (const [k, t] of [["→", "good"], ["←", "redo / drop"], ["↑", "love / rush"], ["↓", "skip"], ["C", "note"], ["V", "voice"], ["Z", "undo"], ["H", "history"], ["F", "fullscreen"]]) {
+    for (const [k, t] of [["→", "good"], ["←", "redo / drop, with a note"], ["↑", "love / rush"], ["↓", "skip"], ["C", "note"], ["V", "voice"], ["Z", "back"], ["X", "forward"], ["H", "history"], ["F", "fullscreen"]]) {
       const item = h("span");
       item.append(h("kbd", "", k), document.createTextNode(` ${t}`));
       keys.append(item);
@@ -862,8 +933,14 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       box.append(saved);
       return box;
     }
+    const card = current();
+    const leftWord = card ? deck!.moves[card.kind].left : "";
+    if (asking && card) {
+      box.classList.add("is-asking");
+      box.append(h("div", "sw-note-ask", `${MOVE_KEY.left} ${leftWord} needs a note`));
+    }
     const area = h("textarea", "sw-note-input");
-    area.placeholder = "What should the agent do about this? Enter saves, Esc cancels.";
+    area.placeholder = asking ? `Why ${leftWord.toLowerCase()}? Tell the agent what to do.` : "What should the agent do about this? Enter saves, Esc cancels.";
     area.value = note?.text ?? "";
     area.rows = 3;
     area.addEventListener("input", () => { note = { text: area.value, voice: note?.voice ?? false }; });
@@ -871,20 +948,29 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       e.stopPropagation();
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
+        const empty = !note?.text.trim();
+        if (asking && empty) return toast("Write a few words first", "warn", "Or press Esc, and nothing is judged.");
         editing = false;
-        if (!note?.text.trim()) note = null;
-        paint();
+        if (empty) note = null;
         root.focus();
+        if (asking) return commit(asking);
+        if (!keep()) {
+          toast(`${leftWord} keeps its note`, "warn", "Swipe it another way to change the verdict.");
+          note = noteWas;
+        }
+        paint();
       } else if (e.key === "Escape") {
         e.preventDefault();
         editing = false;
-        note = null;
+        asking = null;
+        note = noteWas;
         paint();
         root.focus();
       }
     });
     box.append(area);
-    const tip = h("div", "sw-note-tip", note?.voice ? "🎙 From your voice · +40 XP when you swipe" : "+15 XP when you swipe · the agent gets these words");
+    const tip = h("div", "sw-note-tip", asking ? "Enter confirms · Esc cancels, nothing is judged"
+      : note?.voice ? "🎙 From your voice · +40 XP when you swipe" : "+15 XP when you swipe · the agent gets these words");
     box.append(tip);
     return box;
   }
@@ -900,8 +986,9 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
   function actions(card: ReviewCard): HTMLElement {
     const bar = h("div", "sw-actions");
     const moves = deck!.moves[card.kind];
+    const chosen = judged()?.move;
     const action = (move: Move, cls: string, icon: string): HTMLButtonElement => {
-      const b = btn(`sw-act ${cls}`, "", `${moves[move]} (${MOVE_KEY[move]})`);
+      const b = btn(`sw-act ${cls}${chosen === move ? " is-chosen" : ""}`, "", `${moves[move]} (${MOVE_KEY[move]})`);
       b.append(h("span", "sw-act-icon", icon), h("small", "", moves[move]));
       b.addEventListener("click", () => commit(move));
       return b;
@@ -920,6 +1007,7 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
 
   function openNote(): void {
     if (phase !== "play" || recording || transcribing || arming) return;
+    if (!editing) noteWas = note && { ...note };
     note ??= { text: "", voice: false };
     editing = true;
     paint();
@@ -957,24 +1045,27 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     }
     const notes = verdicts.filter(acted);
     if (notes.length) {
-      box.append(h("div", "sw-label", `${notes.length} for the agent`));
+      box.append(h("div", "sw-label", `${notes.length} for the agent · click one to change it`));
       const list = h("ul", "sw-orders");
       for (const v of notes) {
-        const c = cards.find((x) => x.number === v.number);
+        const i = verdicts.indexOf(v);
         const li = h("li");
-        li.append(h("b", `sw-order-tag m-${v.move}`, deck!.moves[v.kind][v.move]), h("span", "", `#${v.number} ${c?.title ?? ""}`));
-        if (v.note) li.append(h("em", "", `${v.voice ? "🎙 " : ""}${v.note}`));
+        const open = btn("sw-order-open", "", `Change #${v.number}`);
+        open.append(h("b", `sw-order-tag m-${v.move}`, deck!.moves[v.kind][v.move]), h("span", "", `#${v.number} ${cards[i]?.title ?? ""}`));
+        if (v.note) open.append(h("em", "", `${v.voice ? "🎙 " : ""}${v.note}`));
+        open.addEventListener("click", () => walk(i));
+        li.append(open);
         list.append(li);
       }
       box.append(list);
     } else box.append(h("p", "sw-sub", "No notes and no changes. Sending only records your streak."));
     const row = h("div", "sw-end-row");
-    const back = btn("sw-ghost", "Undo last · Z");
-    back.addEventListener("click", undo);
+    const again = btn("sw-ghost", "Back · Z");
+    again.addEventListener("click", back);
     const go = btn("sw-go", sending ? "Sending…" : notes.length ? "Send to agents" : "Finish");
     go.disabled = sending;
     go.addEventListener("click", () => void send());
-    row.append(back, go);
+    row.append(again, go);
     box.append(row);
     return box;
   }
@@ -1180,13 +1271,15 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
       const card = current();
       const table = h("div", "sw-table");
       const pile = h("div", "sw-pile");
-      const behind = cards.slice(verdicts.length + 1, verdicts.length + 3);
+      const behind = cards.slice(at + 1, at + 3);
       behind.reverse().forEach((c, i) => pile.append(cardView(c, behind.length - i)));
       if (card) {
         const top = cardView(card, 0);
         pile.append(top);
         draggable(top);
-        if (note) top.append(h("span", "sw-note-flag", note.voice ? "🎙 note" : "✎ note"));
+        if (note?.text.trim()) top.append(h("span", "sw-note-flag", note.voice ? "🎙 note" : "✎ note"));
+        const v = judged();
+        if (v) top.append(h("span", `sw-was m-${v.move}`, `Your call · ${MOVE_KEY[v.move]} ${deck!.moves[v.kind][v.move]}`));
       }
       table.append(pile);
       const nb = noteBox();
@@ -1237,8 +1330,9 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
     else if (paused) handled = false;
     else if (phase === "start" && key === "Enter") deal();
     else if (phase === "end" && key === "Enter") void send();
-    else if (key === "z" || key === "Backspace") undo();
+    else if (key === "z" || key === "Backspace" || (key === "ArrowLeft" && e.shiftKey)) back();
     else if (phase !== "play") handled = false;
+    else if (key === "x" || (key === "ArrowRight" && e.shiftKey)) forward();
     else if (KEYS[key]) { if (!e.repeat) commit(KEYS[key]); }
     else if (key === "c" || key === "Enter") openNote();
     else if (key === "v") void toggleVoice();
