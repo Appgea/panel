@@ -889,7 +889,14 @@ export function openSwipe(events: SwipeEvents): { close(): void } {
         img.title = "Click to see it big";
         img.draggable = false;
         if (!pictures.has(path)) pictures.set(path, api.picture(path));
-        void pictures.get(path)!.then((src) => { img.src = src; }).catch(() => img.remove());
+        // A picture that cannot be read or decoded leaves the card, not a broken icon.
+        const drop = (): void => {
+          pictures.delete(path);
+          img.remove();
+          if (!strip.querySelector("img")) strip.remove();
+        };
+        img.addEventListener("error", drop, { once: true });
+        void pictures.get(path)!.then((src) => { img.src = src; }).catch(drop);
         strip.append(img);
       }
       body.append(strip);

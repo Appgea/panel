@@ -919,12 +919,15 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         img.alt = "Picture for this quest";
         shot.append(img);
         if (!pictures.has(path)) pictures.set(path, api.picture(path));
-        void pictures.get(path)!.then((src) => { img.src = src; }).catch((error: unknown) => {
+        // A path that cannot be read, or a file that is not a picture, shows a plain line, not a broken icon.
+        const fail = (error: unknown): void => {
           pictures.delete(path);
           const missing = h("span", "bq-empty", "Picture unavailable");
           missing.title = errorText(error, "The image could not be read");
           shot.replaceWith(missing);
-        });
+        };
+        img.addEventListener("error", () => fail(null), { once: true });
+        void pictures.get(path)!.then((src) => { img.src = src; }).catch(fail);
         shot.addEventListener("click", () => {
           if (img.src) zoom(veil, img.src);
         });
