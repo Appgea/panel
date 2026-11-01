@@ -327,6 +327,16 @@ impl TerminalManager {
         }
     }
 
+    /// The terminal whose foreground process is `pid`. An agent typed into a plain Panel shell is
+    /// that shell's foreground job, so this finds it with no instance. The shell itself never
+    /// matches while it runs a job, so keys meant for the agent never reach the shell.
+    pub fn holding(&self, pid: u32) -> Option<String> {
+        self.sessions
+            .keys()
+            .find(|id| self.foreground_pid(id) == Some(pid))
+            .cloned()
+    }
+
     /// Whether this PTY still owns a process. Non-blocking: shutdown guards can inspect every
     /// session without waiting on one that is busy compiling, prompting, or running an agent.
     pub fn is_running(&mut self, terminal_id: &str) -> bool {

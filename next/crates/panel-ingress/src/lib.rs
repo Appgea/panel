@@ -209,6 +209,13 @@ impl Router {
 /// what it means; the ingress only checks that it is one.
 pub type LinkSink = Arc<dyn Fn(String) + Send + Sync>;
 
+/// Clears a Panel terminal's agent and then types `follow` into it, as the ops hook
+/// `third-compact.py` asks over `/panel/clear`. Args: instance, pid, follow. The instance names
+/// a session Panel launched. The pid names an agent typed into a plain Panel shell, which never
+/// got an instance: it is the foreground process of its terminal. False when no live terminal
+/// runs either.
+pub type ClearSink = Arc<dyn Fn(String, u32, String) -> bool + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Ingress {
     port: u16,
@@ -220,6 +227,7 @@ pub struct Ingress {
     /// uses this to open a live terminal instead of resuming the same conversation twice.
     conversations: Arc<Mutex<HashMap<String, String>>>,
     links: Arc<Mutex<Option<LinkSink>>>,
+    clears: Arc<Mutex<Option<ClearSink>>>,
     sink: EventSink,
 }
 
@@ -246,6 +254,7 @@ impl Ingress {
             skill_uses: Arc::new(Mutex::new(HashMap::new())),
             conversations: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(None)),
+            clears: Arc::new(Mutex::new(None)),
             sink,
         };
 
@@ -344,6 +353,12 @@ impl Ingress {
         *self.links.lock().unwrap() = Some(sink);
     }
 
+    /// Receive `/panel/clear` from a session's own hook: the owner asked for a clear after the
+    /// 3rd compact, and only the terminal can run `/clear`.
+    pub fn on_clear(&self, sink: ClearSink) {
+        *self.clears.lock().unwrap() = Some(sink);
+    }
+
     fn handle(&self, mut request: Request) {
         let url = request.url().to_string();
         let json_body = request.headers().iter().any(|header| {
@@ -361,6 +376,7 @@ impl Ingress {
                 "/panel/ask" => self.on_ask(&body),
                 "/panel/answer" => self.on_answer(&body),
                 "/panel/link" => self.on_link_request(&body, json_body),
+                "/panel/clear" => self.on_clear_request(&body, json_body),
                 _ => json!({"error": "unknown endpoint"}),
             }
         };
@@ -386,6 +402,27 @@ impl Ingress {
             return json!({"error": "Panel is still starting"});
         };
         sink(url.to_string());
+        json!({"ok": true})
+    }
+
+    /// JSON only, for the same reason as links: a web page cannot send it without a preflight.
+    /// `follow` is typed into a terminal, so it must be one short line with no control chars.
+    fn on_clear_request(&self, body: &Value, json_body: bool) -> Value {
+        if !json_body {
+            return json!({"error": "content type must be application/json"});
+        }
+        let instance = body["instance"].as_str().unwrap_or_default().trim();
+        let pid = body["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok()).filter(|pid| *pid > 1).unwrap_or(0);
+        let follow = body["follow"].as_str().unwrap_or_default().trim();
+        if (instance.is_empty() && pid == 0) || follow.is_empty() || follow.len() > 500 || follow.chars().any(char::is_control) {
+            return json!({"error": "needs an instance or pid and a short one-line follow"});
+        }
+        let Some(sink) = self.clears.lock().unwrap().clone() else {
+            return json!({"error": "Panel is still starting"});
+        };
+        if !sink(instance.to_string(), pid, follow.to_string()) {
+            return json!({"error": "no live terminal runs that instance or pid"});
+        }
         json!({"ok": true})
     }
 
@@ -563,7 +600,8 @@ impl Ingress {
             _ => {}
         }
 
-        // We inject nothing back into the model's context — Panel watches, it does not steer.
+        // We inject nothing back into the model's context. Panel watches. The one thing it types
+        // into a terminal is the `/panel/clear` the session's own hook asks for.
         json!({})
     }
 
@@ -1028,6 +1066,35 @@ mod tests {
             assert!(ingress.on_link_request(&body, json_body)["error"].is_string(), "{body}");
         }
         assert_eq!(*got.lock().unwrap(), vec!["appgeapanel://history?q=x".to_string()]);
+    }
+
+    /// A clear reaches the shell only as JSON, for a known instance or pid, with a one-line follow.
+    #[test]
+    fn a_clear_needs_json_a_live_instance_and_a_one_line_follow() {
+        let (ingress, _rx) = ingress();
+        let body = json!({"instance": "s1", "follow": "Go on with my last message."});
+        assert!(ingress.on_clear_request(&body, true)["error"].is_string(),
+            "before a handler is set the hook must hear that it failed");
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let seen = got.clone();
+        ingress.on_clear(Arc::new(move |instance, pid, follow| {
+            seen.lock().unwrap().push((instance.clone(), pid, follow));
+            instance == "s1" || pid == 4242
+        }));
+        assert_eq!(ingress.on_clear_request(&body, true)["ok"], true);
+        // An agent typed into a plain Panel shell has no instance, only its own pid.
+        assert_eq!(ingress.on_clear_request(&json!({"pid": 4242, "follow": "x"}), true)["ok"], true);
+        assert!(ingress.on_clear_request(&json!({"instance": "gone", "follow": "x"}), true)["error"].is_string());
+        for (body, json_body) in [
+            (body.clone(), false),
+            (json!({"instance": "s1", "follow": "go\rrm -rf ~"}), true),
+            (json!({"instance": "s1", "follow": "x".repeat(501)}), true),
+            (json!({"instance": "", "follow": "x"}), true),
+            (json!({"pid": 1, "follow": "x"}), true),
+        ] {
+            assert!(ingress.on_clear_request(&body, json_body)["error"].is_string(), "{body}");
+        }
+        assert_eq!(got.lock().unwrap().len(), 3, "only the three well-formed asks reach the shell");
     }
 
     /// History must know which conversation a live terminal holds, so it never resumes it twice.

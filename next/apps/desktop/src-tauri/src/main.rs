@@ -2304,6 +2304,55 @@ fn write_terminal(
         .map_err(|error| error.to_string())
 }
 
+/// The ops hook `third-compact.py` asks for this after a session's 3rd compact: type `/clear`
+/// into the agent's terminal, then `follow` once the fresh context is up. The hook already held
+/// the owner's prompt, so the terminal is idle. The instance finds a session Panel launched. The
+/// pid finds claude typed into a plain Panel shell. False when no live terminal runs either.
+fn clear_terminal(app: &tauri::AppHandle, instance: &str, pid: u32, follow: String) -> bool {
+    let Some(state) = app.try_state::<DesktopState>() else {
+        return false;
+    };
+    let launched = (!instance.is_empty())
+        .then(|| {
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .values()
+                .find(|session| session.instance == instance)
+                .map(|session| session.terminal_id.clone())
+        })
+        .flatten();
+    // On the pid route the PTY outlives claude. Keys must reach claude only, never the shell under it.
+    let guard = launched.is_none().then_some(pid);
+    let terminal_id = launched.or_else(|| (pid > 1).then(|| state.terminals.lock().unwrap().holding(pid)).flatten());
+    let Some(terminal_id) = terminal_id else {
+        return false;
+    };
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<DesktopState>();
+        let pause = |ms| std::thread::sleep(std::time::Duration::from_millis(ms));
+        // The hook blocks the owner's prompt only after this request returns. Wait so the TUI is idle.
+        pause(1500);
+        // Typed text, then Enter apart from it: a TUI reads text and \r in one chunk as a paste.
+        for (text, wait) in [("/clear", 300), ("\r", 1500), (follow.as_str(), 300), ("\r", 0)] {
+            let mut terminals = state.terminals.lock().unwrap();
+            if guard.is_some_and(|pid| terminals.foreground_pid(&terminal_id) != Some(pid)) {
+                eprintln!("panel clear: claude {guard:?} left terminal {terminal_id}, stopped typing");
+                return;
+            }
+            if let Err(error) = terminals.write(&terminal_id, text) {
+                eprintln!("panel clear: write to terminal {terminal_id} failed: {error}");
+                return;
+            }
+            drop(terminals);
+            pause(wait);
+        }
+    });
+    true
+}
+
 /// A pasted file is not keystrokes. The webview hands us the clipboard bytes; we park them in
 /// $TMPDIR/panel-paste and return the path, which the UI types into the PTY — a file path is the
 /// one thing every CLI agent already knows how to read, so this works for claude, codex and grok
@@ -4287,6 +4336,8 @@ fn main() {
             let ingress = Ingress::serve(event_sink(&app.handle().clone()))?;
             let links = app.handle().clone();
             ingress.on_link(Arc::new(move |url| queue_links(&links, [url])));
+            let clears = app.handle().clone();
+            ingress.on_clear(Arc::new(move |instance, pid, follow| clear_terminal(&clears, &instance, pid, follow)));
             for project in all_projects().into_iter().filter(|project| project.exists) {
                 ingress.register_project(&project.id, &project.path);
             }
