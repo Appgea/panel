@@ -101,7 +101,7 @@ def main():
         data=body,
         headers={"Content-Type": "application/json"},
     )
-    # Panel closed is not a lost report: its pictures still reach Slack below.
+    # Panel closed is not a lost report: a finished one still reaches Slack below.
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             result = json.loads(response.read().decode() or "{}")
@@ -110,9 +110,9 @@ def main():
     except OSError as error:
         print("Panel did not take it: %s" % error, file=sys.stderr)
         panel_ok = False
-    slack_ok = bool(payload.get("images")) and slack_mirror(payload)
+    slack_ok = slack_mirror(payload)
     if slack_ok:
-        print("pictures sent to Slack #desk")
+        print("sent to Slack #desk")
     if not panel_ok and not slack_ok:
         sys.exit(1)
 

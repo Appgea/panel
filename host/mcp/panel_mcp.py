@@ -328,11 +328,19 @@ def _call(name, args):
         if bad := voice_problems(payload):
             return ("Not sent anywhere. Its Slack copy would be refused, fix the title or first text line:\n"
                     + "\n".join("- " + b for b in bad))
-        r = _post("/panel/emit",
-                  {"instance": INSTANCE, "type": "message", "payload": keep_media(payload)}, 10)
-        # One flow, two places: the pictures also land in Slack #desk.
-        slack = " and its pictures to Slack #desk" if payload.get("images") and slack_mirror(payload) else ""
-        return "sent message %s%s" % (r.get("id") or "?", slack)
+        # Panel closed is not a lost report: a finished one still reaches Slack below.
+        try:
+            r = _post("/panel/emit",
+                      {"instance": INSTANCE, "type": "message", "payload": keep_media(payload)}, 10)
+            panel = "sent message %s" % (r.get("id") or "?")
+        except OSError as error:
+            panel = "Panel did not take it: %s" % error
+        # One flow, two places: a finished report and its pictures also land in Slack #desk.
+        if slack_mirror(payload):
+            return panel + ", and to Slack #desk"
+        if panel.startswith("Panel did not"):
+            raise OSError(panel)
+        return panel
     if name == "ask_user":
         timeout = float(args.get("timeout") or 280)
         spec = {k: args[k] for k in ("kind", "prompt", "title", "options", "fields", "handoff",
