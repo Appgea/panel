@@ -1471,7 +1471,8 @@ struct Reopen {
     conversation: Option<String>,
 }
 
-const OPENCODE_DEEPSEEK: &str = "opencode/deepseek-v4.1-flash-free";
+// Go plan only, never Zen. Owner, 2026-11-03: "make sure opencode uses the Go one only".
+const OPENCODE_DEEPSEEK: &str = "opencode-go/deepseek-v4.1-flash";
 
 /// The executable a kind execs, plus fixed args. Kinds name the binary directly — except the
 /// opencode model variants, which all run `opencode --model <model>` so the plain opencode kind
