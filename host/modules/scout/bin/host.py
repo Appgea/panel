@@ -199,10 +199,15 @@ def command(args, timeout, env=None):
             timed_out = True
         finally:
             # Scouts are one-shot jobs; descendants must not outlive the request.
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+            if hasattr(os, "killpg"):
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            elif process.poll() is None:
+                # Windows has no process groups, and os.killpg crashed every script scout there (2026-11-03).
+                # taskkill /T ends the tree while its root still runs.
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
             process.wait()
         out.seek(0)
         err.seek(0)
@@ -324,6 +329,18 @@ def builds_dir():
 def pid_alive(pid):
     if type(pid) is not int or pid <= 0:
         return False
+    if os.name == "nt":
+        # On Windows os.kill(pid, 0) sends a Ctrl+C event, it does not probe. Ask for the exit code instead.
+        import ctypes
+        kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+        handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return ctypes.get_last_error() == 5  # access denied: it exists
+        code = ctypes.c_ulong()
+        try:
+            return bool(kernel.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == 259  # STILL_ACTIVE
+        finally:
+            kernel.CloseHandle(handle)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
