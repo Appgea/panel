@@ -118,7 +118,8 @@ export type GitEvents = {
  * edit one tree and the lead model commits finished files in batches, so the log, not Panel's own
  * turns, knows who holds each file. `flow` is false when the repo has no log: the per-turn view stays.
  */
-type WipFile = { path: string; who: string; state: "busy" | "done" | "unlogged" | "stray"; t: number; summary?: string; issue?: string | null };
+// "dead": the session that held it has crashed or closed. The next batch carries it.
+type WipFile = { path: string; who: string; state: "busy" | "done" | "dead" | "unlogged" | "stray"; t: number; summary?: string; issue?: string | null };
 type Wip = { flow?: boolean; due?: boolean; why?: string; files?: WipFile[] };
 /** A busy file untouched this long counts as left behind, as `wip` batches it (IDLE_H in wip.py). */
 const WIP_IDLE_MS = 2 * 3600_000;
@@ -403,15 +404,16 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
       // One card per session and state: what it finished, and what it still holds. A Panel turn of the same
       // session lends its prompt, so the card reads as the ask, not as a session id.
       const turns = events.turns();
-      const groups = new Map<string, { who: string; done: boolean; live: boolean; summary: string; changes: Change[] }>();
+      const groups = new Map<string, { who: string; done: boolean; dead: boolean; live: boolean; summary: string; changes: Change[] }>();
       const held = new Map((wip.files ?? []).filter((f) => f.who !== "?").map((f) => [clean(f.path), f]));
       for (const change of changes) {
         const f = taken.has(change.path) ? undefined : held.get(clean(change.path));
         if (!f) continue;
         const done = f.state === "done";
-        const key = `${f.who}:${done ? "done" : "busy"}`;
-        const group = groups.get(key) ?? { who: f.who, done, live: false, summary: f.summary ?? "", changes: [] };
-        group.live ||= !done && Date.now() - f.t * 1000 < WIP_IDLE_MS;
+        const dead = f.state === "dead";
+        const key = `${f.who}:${done ? "done" : dead ? "dead" : "busy"}`;
+        const group = groups.get(key) ?? { who: f.who, done, dead, live: false, summary: f.summary ?? "", changes: [] };
+        group.live ||= !done && !dead && Date.now() - f.t * 1000 < WIP_IDLE_MS;
         group.changes.push(change);
         groups.set(key, group);
         taken.add(change.path);
@@ -423,7 +425,8 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
         out.push({
           id: `wip:${key}`,
           kind: "turn",
-          title: firstLine(prompt, 64) || (group.done ? "Finished work" : "Work in progress"),
+          title: group.dead ? `Session stopped: ${firstLine(prompt, 48) || "its edits go in the next batch"}`
+            : firstLine(prompt, 64) || (group.done ? "Finished work" : "Work in progress"),
           agent: turn?.agent ?? group.who,
           prompt,
           live: group.live,
