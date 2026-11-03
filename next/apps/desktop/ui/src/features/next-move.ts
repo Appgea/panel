@@ -99,17 +99,18 @@ export function nextMove({ exists, work, why, running, git }: MoveInput): NextMo
     };
   }
   if (git && repo && git.dirty > 0) {
-    const heavy = git.dirty >= 10;
+    // Sessions share one checkout and the lead model commits in batches (ops `wip`, `land`), so a full
+    // tree is the normal state, never a call for the owner. Owner, 2026-11-03.
     return {
       ...move,
-      title: "Review the work in progress",
-      detail: `${plural(git.dirty, "changed file", "changed files")} not committed yet.`,
-      short: `${plural(git.dirty, "file", "files")} uncommitted`,
+      title: "Work in progress",
+      detail: `${plural(git.dirty, "changed file", "changed files")}. Sessions commit them in batches.`,
+      short: `${plural(git.dirty, "file", "files")} in progress`,
       action: "Review changes",
       door: "git",
-      mood: heavy ? "warn" : "mute",
-      verdict: heavy ? "needs you" : "in progress",
-      verdictMood: heavy ? "warn" : "mute",
+      mood: "mute",
+      verdict: "in progress",
+      verdictMood: "mute",
     };
   }
   if (git && repo && git.ahead > 0) {

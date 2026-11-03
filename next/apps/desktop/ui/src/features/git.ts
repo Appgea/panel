@@ -113,6 +113,16 @@ export type GitEvents = {
   openProject(path: string): void;
 };
 
+/**
+ * The shared edit log of a main-checkout repo (git-manager /wip, from ops `wip list --json`). Sessions
+ * edit one tree and the lead model commits finished files in batches, so the log, not Panel's own
+ * turns, knows who holds each file. `flow` is false when the repo has no log: the per-turn view stays.
+ */
+type WipFile = { path: string; who: string; state: "busy" | "done" | "unlogged" | "stray"; t: number; summary?: string; issue?: string | null };
+type Wip = { flow?: boolean; due?: boolean; why?: string; files?: WipFile[] };
+/** A busy file untouched this long counts as left behind, as `wip` batches it (IDLE_H in wip.py). */
+const WIP_IDLE_MS = 2 * 3600_000;
+
 type Card = {
   id: string;
   kind: "conflict" | "turn" | "yours";
@@ -265,6 +275,7 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
   let repo = "";
   let status: Status = {};
   let graph: Graph = {};
+  let wip: Wip = {};
   let spine: Spine = { stones: [], incoming: [], lineAt: 0, upstream: null };
   let cards: Card[] = [];
   let pick: Pick = null;
@@ -388,8 +399,40 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
       });
     }
     const taken = new Set<string>(conflicts.map((change) => change.path));
+    if (wip.flow) {
+      // One card per session and state: what it finished, and what it still holds. A Panel turn of the same
+      // session lends its prompt, so the card reads as the ask, not as a session id.
+      const turns = events.turns();
+      const groups = new Map<string, { who: string; done: boolean; live: boolean; summary: string; changes: Change[] }>();
+      const held = new Map((wip.files ?? []).filter((f) => f.who !== "?").map((f) => [clean(f.path), f]));
+      for (const change of changes) {
+        const f = taken.has(change.path) ? undefined : held.get(clean(change.path));
+        if (!f) continue;
+        const done = f.state === "done";
+        const key = `${f.who}:${done ? "done" : "busy"}`;
+        const group = groups.get(key) ?? { who: f.who, done, live: false, summary: f.summary ?? "", changes: [] };
+        group.live ||= !done && Date.now() - f.t * 1000 < WIP_IDLE_MS;
+        group.changes.push(change);
+        groups.set(key, group);
+        taken.add(change.path);
+      }
+      for (const [key, group] of groups) {
+        const sid = group.who.replace(/^claude-/, "");
+        const turn = turns.find((t) => t.session.startsWith(sid));
+        const prompt = group.summary || turn?.prompt || null;
+        out.push({
+          id: `wip:${key}`,
+          kind: "turn",
+          title: firstLine(prompt, 64) || (group.done ? "Finished work" : "Work in progress"),
+          agent: turn?.agent ?? group.who,
+          prompt,
+          live: group.live,
+          changes: group.changes,
+        });
+      }
+    }
     // A file edited in two turns belongs to the latest one — that is the turn you are judging.
-    for (const turn of events.turns()) {
+    for (const turn of wip.flow ? [] : events.turns()) {
       const wanted = new Set(turn.files.map(clean));
       const mine = changes.filter((change) => {
         if (taken.has(change.path)) return false;
@@ -505,6 +548,19 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     }
     const live = cards.find((card) => card.live);
     const ready = cards.filter((card) => card.kind !== "conflict" && !card.live && card.changes.length);
+    const logged = ready.filter((card) => card.kind === "turn");
+    if (wip.flow && (logged.length || live)) {
+      // The sessions commit their own batch at `land`. The move here is to look, never to pack a turn.
+      // Unlogged "Your edits" never ride the batch by themselves, so they keep the plain move below.
+      const first = logged[0] ?? live!;
+      const why = wip.why ?? "files waiting";
+      return {
+        tone: wip.due ? "work" : "wait",
+        text: wip.due ? `Batch due: ${why}. The next lead session commits it.` : `Batch building: ${why}. Sessions commit it when it fills.`,
+        act: `review-card:${first.id}`,
+        label: "Review changes",
+      };
+    }
     if (ready.length) {
       const card = ready[0];
       const who = card.kind === "turn" ? `${card.agent}’s turn` : "You";
@@ -546,6 +602,7 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     repo = "";
     status = {};
     graph = {};
+    wip = {};
     cards = [];
     spine = { stones: [], incoming: [], lineAt: 0, upstream: null };
     pick = null;
@@ -609,9 +666,13 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     readError = "";
     renderActivity();
     try {
-      const next = await gitRead(invoke<GitOverview>("git_overview", { repo, limit: 160 }));
+      const [next, log] = await Promise.all([
+        gitRead(invoke<GitOverview>("git_overview", { repo, limit: 160 })),
+        moduleGet<Wip>(`${M}/wip?repo=${encodeURIComponent(repo)}`).catch((error): Wip => { console.warn("git: /wip failed", error); return {}; }),
+      ]);
       if (serial !== refreshSerial) return;
       if (next.status.error) throw new Error(next.status.error);
+      wip = log;
       status = next.status;
       graph = next.graph;
       ++diffRevision;

@@ -12,6 +12,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 
 # Panel's project registry lives outside the signed bundle. The environment override is shared
@@ -308,6 +309,25 @@ def pushable_repos(fetch=False):
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(6, len(projects) or 1)) as pool:
         return [result for result in pool.map(inspect, projects) if result is not None]
+
+
+def wip_state(repo):
+    """The shared edit log of a main-checkout repo, from the `wip` CLI (Appgea ops, `wip list --json`):
+    who holds each uncommitted file, done or still busy, and whether the batch commit is due.
+    {"flow": False} when the CLI or the log is absent, so the Git tab keeps its per-turn view."""
+    exe = shutil.which("wip") or os.path.expanduser("~/.local/bin/wip")
+    if not _is_repo(repo) or not os.path.exists(exe):
+        return {"flow": False}
+    try:
+        # Short timeout: the Git tab waits on this next to its own status read.
+        r = subprocess.run([exe, "list", "--json"], cwd=repo, capture_output=True, text=True, timeout=3)
+        if r.returncode:
+            raise ValueError(r.stderr.strip() or "exit %d" % r.returncode)
+        out = json.loads(r.stdout or "{}")
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        print("git-manager /wip: %s" % e, file=sys.stderr)
+        return {"flow": False}
+    return out if isinstance(out, dict) else {"flow": False}
 
 
 def git_status(repo):

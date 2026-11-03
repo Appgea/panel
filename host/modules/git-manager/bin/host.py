@@ -99,6 +99,8 @@ def main():
             return _respond(200, gitops.sync_progress(qs("repo")))
         if path == "/status":
             return _respond(200, gitops.git_status(qs("repo")))
+        if path == "/wip":
+            return _respond(200, gitops.wip_state(qs("repo")))
         if path == "/graph":
             return _respond(200, gitops.git_graph(qs("repo"), int(qs("limit", "150"))))
         if path == "/commit":
