@@ -215,7 +215,10 @@ def last_line(text):
 
 def file_finding(scout_id, title, body, labels, deadline):
     """`board file` one finding. Returns why it failed, or None."""
-    body = (body.strip() + "\n" if body.strip() else "") + "Found by scout %s." % scout_id
+    # A FOUND line is one line, but `board file` reads each field only at a line start. Mid-line `Why:` failed
+    # every main-build P0 and the keeps-failing issue (2026-11-03).
+    body = re.sub(r"(?<=[.!?`)])[ \t]+(Why|Checked):", r"\n\1:", body.strip())
+    body = (body + "\n" if body else "") + "Found by scout %s." % scout_id
     flags = [arg for label in labels if label.strip() for arg in ("--label", label.strip())]
     filed, _, error, expired = command(
         board_command() + ["file", title.strip(), "--body", body, *flags], deadline - time.monotonic())
