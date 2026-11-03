@@ -97,7 +97,7 @@ test("done honours the window, and layout is stable and keeps old places", () =>
 });
 
 test("ops lines read as one plain headline", () => {
-  const done = (text) => buildGraph(data({ done: [{ date: "2026-10-27", kind: "decision", tags: [], text, path: "d.md", line: 1 }] }), 14, () => null).done[0].title;
+  const done = (text) => buildGraph(data({ done: [{ date: "2026-10-27", kind: "log", tags: [], text, path: "d.md", line: 1 }] }), 14, () => null).done[0].title;
   assert.equal(done("D-0042 · No app sells in China mainland (ICP filing); new apps leave CHN unchecked"),
     "No app sells in China mainland");
   assert.equal(done("The signing certificate ends 2026-10-26. Renewing means a new one."),

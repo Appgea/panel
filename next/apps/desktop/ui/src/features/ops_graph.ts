@@ -29,7 +29,7 @@ export type MapApp = {
 };
 export type OpenItem = { section: string; tags: string[]; owner: string; text: string; line: number; edited: number };
 export type Rollout = { id: string; summary: string; apps: string[]; done_when: string; path: string };
-export type DoneEntry = { date: string; kind: "log" | "decision"; tags: string[]; text: string; path: string; line: number };
+export type DoneEntry = { date: string; kind: "log"; tags: string[]; text: string; path: string; line: number };
 export type OpsMapData = { today: string; ops: string; apps: MapApp[]; open: OpenItem[]; rollouts: Rollout[]; done: DoneEntry[] };
 
 export type Tone = "risk" | "warn" | "work" | "std" | "ok" | "quiet";
@@ -58,7 +58,7 @@ export type Thread = {
 export type DoneRow = {
   id: string;
   date: string;
-  kind: "log" | "decision";
+  kind: "log";
   title: string;
   detail: string;
   nodes: string[];

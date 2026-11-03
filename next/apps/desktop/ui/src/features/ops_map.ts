@@ -550,10 +550,9 @@ export function mountOpsMap(root: HTMLElement, events: OpsMapEvents): OpsMapHand
 
   function doneRow(done: DoneRow): HTMLElement {
     const sub: Node[] = [];
-    if (done.kind === "decision") sub.push(text("Decision", "om-who"));
     const who = names(done.nodes);
     if (who) sub.push(text(who));
-    return row("done", done.id, done.kind === "decision" ? "decision" : "ok", done.title, sub, done.detail, done.path, done.line, () => doneLit(done));
+    return row("done", done.id, "ok", done.title, sub, done.detail, done.path, done.line, () => doneLit(done));
   }
 
   function section(title: string, rows: HTMLElement[], tone = "", caption = ""): HTMLElement | null {

@@ -55,7 +55,7 @@ const PORTFOLIO_EVENT: &str = "panel-portfolio-changed";
 /// screen itself. The plan is agent-written by design, so the screen must never be the last to
 /// know what the plan says.
 const SPRINTS_EVENT: &str = "panel-sprints-changed";
-/// `now.md`, the log, a rollout, a decision or the portfolio changed. The Ops map repaints.
+/// `now.md`, the log, a rollout or the portfolio changed. The Ops map repaints.
 const OPS_EVENT: &str = "panel-ops-changed";
 
 /// One live terminal on a project — any coding agent (`claude`, `codex`, `grok`, `kimi`, `glm`,
@@ -925,7 +925,7 @@ fn watch_ops(app: AppHandle) {
         let Ok(mut watcher) = notify::recommended_watcher(tx) else {
             return;
         };
-        let watched = [ops.clone(), ops.join("log"), ops.join("rollouts"), ops.join("decisions")];
+        let watched = [ops.clone(), ops.join("log"), ops.join("rollouts")];
         for dir in watched.iter().filter(|dir| dir.is_dir()) {
             let _ = notify::Watcher::watch(&mut watcher, dir, notify::RecursiveMode::NonRecursive);
         }

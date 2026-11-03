@@ -1,7 +1,7 @@
 //! The ops tree as one packet, for the Ops map screen.
 //!
 //! Everything here is a read of files the manager and the human write by hand: `now.md` for what
-//! is open, `log/<year>.md` and the decisions index for what finished, `rollouts/` for the changes
+//! is open, `log/<year>.md` for what finished, `rollouts/` for the changes
 //! that span many apps, `portfolio.yaml` for the apps themselves. Nothing is stored and nothing is
 //! judged. Which line is stuck, which app is quiet, which date has passed: the screen decides that
 //! from these facts, so the rule lives in one place.
@@ -64,11 +64,11 @@ pub struct Rollout {
     pub path: String,
 }
 
-/// A finished thing: a log line or a decision.
+/// A finished thing: a log line. Directions live as rules in the files they shape, so no decisions index.
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Done {
     pub date: String,
-    /// log | decision
+    /// log
     pub kind: String,
     /// What the line names before its text: app keys, rollout ids, owners. Unresolved tags are
     /// the screen's to drop.
@@ -108,10 +108,6 @@ pub fn read() -> Result<OpsMap, String> {
                 done.extend(log_entries(&text, &path.to_string_lossy()));
             }
         }
-    }
-    let index = ops.join("decisions").join("index.md");
-    if let Ok(text) = fs::read_to_string(&index) {
-        done.extend(decision_entries(&text, &index.to_string_lossy()));
     }
 
     let mut rollouts = Vec::new();
@@ -299,29 +295,6 @@ fn log_entries(text: &str, path: &str) -> Vec<Done> {
         open = true;
     }
     out
-}
-
-/// `- D-0042 | 2026-10-22 | active | title | ref | file`.
-fn decision_entries(text: &str, path: &str) -> Vec<Done> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(at, row)| {
-            let entry = row.strip_prefix("- ")?;
-            let fields: Vec<&str> = entry.split(" | ").map(str::trim).collect();
-            let [id, date, _status, title, reference, ..] = fields.as_slice() else {
-                return None;
-            };
-            leading_date(date)?;
-            Some(Done {
-                date: date.to_string(),
-                kind: "decision".into(),
-                tags: split_tags(reference),
-                text: format!("{id} · {title}"),
-                path: path.to_string(),
-                line: at + 1,
-            })
-        })
-        .collect()
 }
 
 fn rollout(id: &str, text: &str, path: &str) -> Rollout {
