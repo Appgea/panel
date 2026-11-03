@@ -8,6 +8,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -175,6 +176,19 @@ class ScoutTests(unittest.TestCase):
         code, _, _, expired = host.command(["bash", "-c", "sleep 30 & wait"], 0.05)
         self.assertTrue(expired)
         self.assertNotEqual(code, 0)
+
+    def test_a_child_left_behind_dies_with_the_run(self):
+        # The scout exits at once and leaves a child running: the run must end it, on the Mac and on Windows.
+        pidfile = self.root / "child.pid"
+        spawn = ("import subprocess, sys, time; p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']);"
+                 "open(sys.argv[1], 'w').write(str(p.pid)); time.sleep(0.3)")
+        self.ops.mkdir(exist_ok=True)
+        host.command([sys.executable, "-c", spawn, str(pidfile)], 10)
+        pid = int(pidfile.read_text())
+        deadline = time.monotonic() + 3
+        while host.pid_alive(pid) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertFalse(host.pid_alive(pid))
 
     def test_record_cli(self):
         self.state.mkdir()

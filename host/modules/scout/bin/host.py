@@ -186,12 +186,33 @@ def board_command():
     return shlex.split(command) if command else ["python3", str(ops_path() / "runbooks/board.py")]
 
 
+def windows_job(process):
+    """A Windows job holding the process, so ending the job ends everything it started. None when it fails.
+    Children join their parent's job by themselves; only what starts before the assign can slip out."""
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateJobObjectW.restype = wintypes.HANDLE
+    kernel.CreateJobObjectW.argtypes = (wintypes.LPVOID, wintypes.LPCWSTR)
+    kernel.AssignProcessToJobObject.argtypes = (wintypes.HANDLE, wintypes.HANDLE)
+    kernel.TerminateJobObject.argtypes = (wintypes.HANDLE, wintypes.UINT)
+    kernel.CloseHandle.argtypes = (wintypes.HANDLE,)
+    handle = kernel.CreateJobObjectW(None, None)
+    if not handle:
+        return None
+    if not kernel.AssignProcessToJobObject(handle, int(process._handle)):
+        kernel.CloseHandle(handle)
+        return None
+    return kernel, handle
+
+
 def command(args, timeout, env=None):
     state_path().mkdir(parents=True, exist_ok=True)
     # Files avoid pipe deadlocks when a shell leaves descendants holding stdout.
     with tempfile.TemporaryFile(dir=state_path()) as out, tempfile.TemporaryFile(dir=state_path()) as err:
         process = subprocess.Popen(args, cwd=ops_path(), env=env, stdin=subprocess.DEVNULL,
                                    stdout=out, stderr=err, start_new_session=True)
+        job = None if hasattr(os, "killpg") else windows_job(process)
         timed_out = False
         try:
             process.wait(timeout=max(0.001, timeout))
@@ -204,9 +225,13 @@ def command(args, timeout, env=None):
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-            elif process.poll() is None:
+            elif job:
                 # Windows has no process groups, and os.killpg crashed every script scout there (2026-11-03).
-                # taskkill /T ends the tree while its root still runs.
+                # The job holds every process the scout started, even after the scout itself exited.
+                kernel, handle = job
+                kernel.TerminateJobObject(handle, 1)
+                kernel.CloseHandle(handle)
+            elif process.poll() is None:
                 subprocess.run(["taskkill", "/F", "/T", "/PID", str(process.pid)], capture_output=True)
             process.wait()
         out.seek(0)
