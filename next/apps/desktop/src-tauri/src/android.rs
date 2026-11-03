@@ -584,8 +584,10 @@ pub fn application_id(root: &Path) -> Option<String> {
         }
     }
     // Flutter keeps Gradle under android/app. A native Android repository keeps app directly
-    // under its root. They are the same fact in two layouts, so inspect both here.
-    for app in [root.join("app"), root.join("android/app")] {
+    // under its root. They are the same fact in two layouts, so inspect both here. A native app's
+    // Android twin may sit at a custom `android.path`, so that folder comes first.
+    let twin = crate::sim::native_android_dir(root).map(|dir| dir.join("app"));
+    for app in twin.into_iter().chain([root.join("app"), root.join("android/app")]) {
         for name in ["build.gradle.kts", "build.gradle"] {
             let Ok(text) = std::fs::read_to_string(app.join(name)) else {
                 continue;

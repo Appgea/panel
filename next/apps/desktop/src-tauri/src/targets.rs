@@ -108,16 +108,19 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
         "native" => {
             let platforms = sim::native_platforms(&dir);
             let mut families = Vec::new();
-            if !apple_tooling() {
-                return families;
+            if apple_tooling() {
+                if platforms.contains(&"ios") {
+                    families.push("iphone");
+                    families.push("ipad");
+                    families.push("ios");
+                }
+                if platforms.contains(&"macos") {
+                    families.push("macos");
+                }
             }
-            if platforms.contains(&"ios") {
-                families.push("iphone");
-                families.push("ipad");
-                families.push("ios");
-            }
-            if platforms.contains(&"macos") {
-                families.push("macos");
+            // A native app can keep its Compose twin beside the Xcode project, like Cardly's android/.
+            if sim::native_android_dir(root).is_some() && android::available() {
+                families.push("android");
             }
             families
         }

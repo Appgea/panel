@@ -546,6 +546,16 @@ fn claim_holds(kind: &str, dir: &Path) -> bool {
     }
 }
 
+/// The Android project of a native app: `android.path` in `appgea.json`, else `android/`.
+pub fn native_android_dir(root: &Path) -> Option<PathBuf> {
+    let declared = std::fs::read_to_string(root.join("appgea.json"))
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|manifest| manifest["android"]["path"].as_str().map(|p| root.join(p)));
+    let dir = declared.unwrap_or_else(|| root.join("android"));
+    is_native_android(&dir).then_some(dir)
+}
+
 fn is_native_android(dir: &Path) -> bool {
     (dir.join("gradlew").is_file()
         || dir.join("settings.gradle").is_file()
@@ -830,6 +840,14 @@ pub fn plan(root: &Path, device: &str, family: &str) -> Result<SimRun, String> {
         .ok_or_else(|| {
             "not a Flutter, native iOS, native Android, Godot, or Electron project".to_string()
         })?;
+    // A native app's Android row runs its Gradle twin, not the Xcode project detect() found.
+    let (kind, cwd) = if kind == "native" && family == "android" {
+        let dir = native_android_dir(root)
+            .ok_or_else(|| "this native app has no Android project".to_string())?;
+        ("android", dir)
+    } else {
+        (kind, cwd)
+    };
     if kind == "native" && !matches!(family, "iphone" | "ipad" | "ios" | "macos") {
         return Err(format!("a native Xcode project cannot run on {family}"));
     }
@@ -862,6 +880,7 @@ pub fn plan(root: &Path, device: &str, family: &str) -> Result<SimRun, String> {
                 .ok_or_else(|| "this project has no server block in appgea.json".to_string())?;
             format!("{}exec {}", stale_server_preamble(root, spec.port), spec.command)
         }
+        // The project root, not the Android folder: the app id is read from its appgea.json first.
         "android" => native_android_script(root, device)?,
         // Whatever the shared runner decided. It prints what it is doing, so the
         // pane reads the same as every other run.
@@ -1924,6 +1943,35 @@ package/unique_name="com.example.game"
         assert!(run.args[1].contains(":app:assembleDebug"));
         assert!(run.args[1].contains("com.appgea.clearday"));
         assert!(run.args[1].contains("logcat --pid"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn native_app_runs_its_android_twin_on_an_android_row() {
+        let root =
+            std::env::temp_dir().join(format!("panel-native-twin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("ios")).unwrap();
+        std::fs::create_dir_all(root.join("android/app")).unwrap();
+        std::fs::write(
+            root.join("appgea.json"),
+            r#"{"appType":"native","ios":{"path":"ios"},"android":{"path":"android"}}"#,
+        )
+        .unwrap();
+        std::fs::write(root.join("ios/project.yml"), "name: Cardly\n").unwrap();
+        std::fs::write(root.join("android/gradlew"), "#!/bin/sh\n").unwrap();
+        std::fs::write(
+            root.join("android/app/build.gradle.kts"),
+            "defaultConfig { applicationId = \"com.appgea.cardly\" }",
+        )
+        .unwrap();
+
+        assert_eq!(kind_of(&root), Some("native"));
+        let run = plan(&root, "emulator-5554", "android").unwrap();
+        assert_eq!(run.kind, "android");
+        assert_eq!(run.cwd, root.join("android"));
+        assert!(run.args[1].contains("com.appgea.cardly"));
 
         let _ = std::fs::remove_dir_all(&root);
     }
