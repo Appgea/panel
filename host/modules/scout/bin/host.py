@@ -17,6 +17,9 @@ import time
 from urllib.parse import urlsplit, parse_qs
 
 
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+
 def now():
     return datetime.now().astimezone()
 
@@ -106,7 +109,7 @@ def read_scout(path):
     elif not fields.get("run", fields.get("agent")):
         errors.append("run or agent must not be empty")
     every = fields.get("every", "manual")
-    if every not in ("daily", "sunday", "manual") and not re.fullmatch(r"[1-9][0-9]*h", every):
+    if every not in ("daily", "manual", *WEEKDAYS) and not re.fullmatch(r"[1-9][0-9]*h", every):
         errors.append("invalid every")
     try:
         after = int(fields.get("after", "8"))
@@ -141,21 +144,22 @@ def schedule(scout, last, current):
         return target <= current, target.isoformat() if target > current else None
     ran_today = at is not None and at.date() == current.date()
     target = current.replace(hour=scout["after"], minute=0, second=0, microsecond=0)
-    eligible = every == "daily" or current.weekday() == 6
+    day = WEEKDAYS.index(every) if every in WEEKDAYS else None
+    eligible = every == "daily" or current.weekday() == day
     if eligible and not ran_today and current >= target:
         return True, None
-    if every == "sunday" and at is not None:
-        # Missed Sunday because Panel was closed: catch up on the next open, not a week later.
-        sunday = target - timedelta(days=(current.weekday() + 1) % 7)
-        if sunday > current:
-            sunday -= timedelta(days=7)
-        if at < sunday:
+    if day is not None and at is not None:
+        # Missed its day because Panel was closed: catch up on the next open, not a week later.
+        last_day = target - timedelta(days=(current.weekday() - day) % 7)
+        if last_day > current:
+            last_day -= timedelta(days=7)
+        if at < last_day:
             return True, None
     if every == "daily":
         if ran_today or current >= target:
             target += timedelta(days=1)
     else:
-        days = (6 - current.weekday()) % 7
+        days = (day - current.weekday()) % 7
         if days == 0 and (ran_today or current >= target):
             days = 7
         target += timedelta(days=days)
@@ -170,6 +174,11 @@ def listing():
         scout.pop("run")
         last = records.get(scout["id"])
         scout["due"], scout["next_at"] = schedule(scout, last, current)
+        if scout["kind"] == "agent":
+            # An agent scout is a routine: `ops/runbooks/routines.py` files it as a GitHub issue when due, so every
+            # computer sees it and only a session the owner started takes it. Owner, 2026-11-04: "sessions must not
+            # start without me ... routines must be created as new tasks on github". Panel's Run button still works.
+            scout["due"] = False
         if last and last["status"] == "running":
             # A script cannot outlive Panel's 60 s call. An agent gets two hours.
             limit = 120 if scout["kind"] == "script" else 7200
