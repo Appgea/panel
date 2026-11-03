@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 from urllib.parse import urlsplit, parse_qs
+import urllib.request
 
 
 def now():
@@ -162,6 +163,25 @@ def schedule(scout, last, current):
     return False, target.isoformat()
 
 
+def browser_connected():
+    """True when Chrome's Appgea Browser extension talks to its bridge. A bridge alone is not enough: `web` starts it
+    before it looks for Chrome."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:4720/publish.json", timeout=1) as reply:
+            return json.load(reply).get("connected") is True
+    except Exception:  # Any odd reply means no browser. A probe must never break the listing.
+        return False
+
+
+def missing(scout):
+    """What this machine lacks to run the scout, or None. `web` starts Chrome only on the Mac, so elsewhere a browser
+    scout waits for a connected extension. Why: on 2026-11-03 the Windows PC was handed tp-audience by `board next`
+    and had no browser to run it."""
+    if scout.get("needs") == "browser" and sys.platform != "darwin" and not browser_connected():
+        return "no Appgea Browser on this machine"
+    return None
+
+
 def listing():
     current = now()
     records = read_json(state_path() / "runs.json", {})
@@ -169,7 +189,8 @@ def listing():
     for scout in items:
         scout.pop("run")
         last = records.get(scout["id"])
-        scout["due"], scout["next_at"] = schedule(scout, last, current)
+        scout["missing"] = missing(scout)
+        scout["due"], scout["next_at"] = (False, None) if scout["missing"] else schedule(scout, last, current)
         if last and last["status"] == "running":
             # A script cannot outlive Panel's 60 s call. An agent gets two hours.
             limit = 120 if scout["kind"] == "script" else 7200
@@ -490,7 +511,9 @@ def main():
             if scout["kind"] != "agent" or not isinstance(d.get("session"), str) or not d["session"].strip():
                 raise ValueError("/start requires an agent scout and session")
             # `board next` sends if_due: of two sessions asking at once, only the first gets it.
-            due = (lambda last: schedule(scout, last, now())[0]) if d.get("if_due") else None
+            # The browser probe runs before the lock, so a slow bridge never holds up other writers.
+            absent = d.get("if_due") and missing(scout)
+            due = (lambda last: not absent and schedule(scout, last, now())[0]) if d.get("if_due") else None
             began = record(scout["id"], "running", session=d["session"], when=due)
             return _respond(200, began) if began else _respond(409, {"error": "not due"})
         except ValueError as error:

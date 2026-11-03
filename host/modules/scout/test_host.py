@@ -90,6 +90,13 @@ class ScoutTests(unittest.TestCase):
                 self.assertTrue(scout["error"])
                 self.assertEqual(host.schedule(scout, None, self.current), (False, None))
 
+    def test_browser_scout_waits_for_a_browser_off_the_mac(self):
+        self.scout("web", "agent: claude\nevery: daily\nneeds: browser")
+        for platform, up, due in (("win32", False, False), ("win32", True, True), ("darwin", False, True)):
+            with self.subTest(platform=platform, up=up), patch.object(host.sys, "platform", platform), \
+                    patch.object(host, "browser_connected", return_value=up), patch.object(host, "now", return_value=self.current):
+                self.assertEqual(host.listing()["scouts"][0]["due"], due)
+
     def test_listing_and_stale(self):
         self.scout("zebra")
         self.scout("alpha", "agent: codex\nevery: 3h")
