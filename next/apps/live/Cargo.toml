@@ -26,7 +26,6 @@ bevy = { version = "0.19.1", default-features = false, features = [
   "bevy_window",
   "bevy_render",
   "bevy_core_pipeline",
-  "bevy_post_process",
   "bevy_sprite_render",
   "webgl2",
   "web",

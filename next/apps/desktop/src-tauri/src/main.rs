@@ -1065,8 +1065,14 @@ async fn live_stop(pid: u32) -> Result<(), String> {
         if !live::stoppable(pid) {
             return Err(format!("{pid} is not an agent or a job Live shows"));
         }
+        // Before the kill: a scan that runs as the agent exits must already read it as Stopped.
+        // A kill that fails leaves a mark the next scan prunes once the pid is gone.
+        live::stopped_by_owner(pid);
         let status = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).status().map_err(|e| e.to_string())?;
-        if status.success() { Ok(()) } else { Err(format!("kill exited {status}")) }
+        if !status.success() {
+            return Err(format!("kill exited {status}"));
+        }
+        Ok(())
     })
     .await
 }

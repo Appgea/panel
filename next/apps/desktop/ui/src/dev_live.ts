@@ -69,13 +69,13 @@ const jobs: LiveJob[] = [
 
 const ember = (e: Partial<LiveEmber> & Pick<LiveEmber, "id" | "room">): LiveEmber => ({
   name: "Terra 0a51", harness: "codex", headless: true, roomName: e.room, model: "gpt-6.1-terra", session: null, cwd: "", task: null,
-  result: "Released #1162 with the unfinished HUD changes recorded.", outcome: "finished", files: [], steps: [step(30, "Released #1162", "ship")], stepCount: 46,
+  result: "Released #1162 with the unfinished HUD changes recorded.", outcome: "done", files: [], steps: [step(30, "Released #1162", "ship")], stepCount: 46,
   parentName: null, via: "fleet", startedMs: min(70), endedMs: min(25), ...e,
 });
 const embers: LiveEmber[] = [
   ember({ id: "pid:90@1", room: "interbellum", endedMs: min(12) }),
   ember({ id: "pid:91@1", room: "interbellum", name: "Terra 8840", endedMs: min(48), result: "Air borders now use the thin dashed stroke." }),
-  ember({ id: "pid:92@1", room: "tavla", name: "Sol 31bc", outcome: "cut", result: null, endedMs: min(90) }),
+  ember({ id: "pid:92@1", room: "tavla", name: "Sol 31bc", outcome: "crashed", result: null, endedMs: min(90) }),
   ember({ id: "pid:93@1", room: "pillow_app", name: "Haiku 12", harness: "claude", model: "claude-haiku-4-5", endedMs: min(200), result: "Sleep timer survives a background kill." }),
   ember({ id: "pid:94@1", room: "pillow_app", name: "Haiku 13", harness: "claude", model: "claude-haiku-4-5", endedMs: min(260) }),
 ];
@@ -96,7 +96,7 @@ let world: LiveWorld = {
   jobs,
   embers,
   rooms,
-  mac: { load: 11.2, cores: 14, hot: false, bays: [{ agent: "pid:105", holder: "vk make" }, { agent: "pid:103", holder: "node shoot.mjs" }] },
+  mac: { load: 11.2, cores: 14, hot: false, bays: [{ agent: "pid:105", holder: "vk make" }, { agent: "pid:103", holder: "node shoot.mjs" }], quota: [{ harness: "Claude", used: 46 }] },
   scannedMs: T,
 };
 

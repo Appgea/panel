@@ -44,6 +44,8 @@ export type Card = {
   url?: string;
   pictures?: string[];
   agent?: string;
+  /** Done and Decided list what they cover, newest first. The card shows four. */
+  items?: string[];
 };
 
 export type BoardIssue = {
@@ -150,7 +152,8 @@ export function buildCards(
       kind: "decide",
       room,
       title: i.ask?.trim() || i.title,
-      lines: [i.ask ? `#${i.number} ${i.title}` : `#${i.number}`, i.why ? clip(i.why, 220) : ""].filter(Boolean),
+      // The card's who line already names the issue number.
+      lines: [i.why ? clip(i.why, 220) : i.ask ? i.title : ""].filter(Boolean),
       options,
       talk: { to: "board", number: i.number },
       arrivedMs: ms(i.created_at, now),
@@ -193,12 +196,14 @@ export function buildCards(
   }
   for (const [room, list] of byRoom) {
     const first = Math.min(...list.map((i) => ms(i.closed_at, now)));
+    const newest = [...list].sort((a, b) => ms(b.closed_at, 0) - ms(a.closed_at, 0));
     cards.push({
       id: `done:${room}`,
       kind: "done",
       room,
-      title: `${roomName(room)}: ${list.length} done`,
-      lines: [...list.slice(0, 4).map((i) => `#${i.number} ${clip(i.title, 90)}`), ...(list.length > 4 ? [`and ${list.length - 4} more`] : [])],
+      title: `${list.length} done in ${roomName(room)}`,
+      lines: [],
+      items: newest.map((i) => `#${i.number} ${clip(i.title, 90)}`),
       options: [{ label: "Seen", act: { do: "seen" } }, { label: "Open First", act: { do: "url", url: list[0].url } }],
       talk: { to: "manager" },
       arrivedMs: first,
@@ -219,8 +224,9 @@ export function buildCards(
       id: `decided:${room}`,
       kind: "decided",
       room,
-      title: `${roomName(room)}: ${list.length === 1 ? "1 call" : `${list.length} calls`} made for you`,
-      lines: list.slice(0, 4).map((i) => `#${i.number} ${clip(i.decided!.trim(), 160)}`),
+      title: `${list.length === 1 ? "1 call" : `${list.length} calls`} made for you in ${roomName(room)}`,
+      lines: [],
+      items: list.map((i) => `#${i.number} ${clip(i.decided!.trim(), 160)}`),
       options: [{ label: list.length === 1 ? "Keep It" : "Keep All", act: { do: "seen" } }],
       talk: { to: "manager" },
       // The board does not say when the call was made, and the issue's age overstates it: an
@@ -257,6 +263,14 @@ export function buildCards(
   return cards;
 }
 
+/** Why a card is in front, in its own numbers: "Tavla ×3 · Decide ×3 · waited 40 min · about 1 min of you → 15.00". */
+export function scoreLine(card: Card, now: number, roomName: string): string {
+  const k = KIND[card.kind];
+  const wait = Math.max(0, (now - card.arrivedMs) / 60_000);
+  const waited = wait < 1 ? "under 1 min" : `${Math.round(wait)} min`;
+  return `${roomName} ×${card.stake / k.weight} · ${k.label} ×${k.weight} · waited ${waited} · about ${card.minutes} min of you → ${priority(card, now).toFixed(2)}`;
+}
+
 /** "6 cards · about 7 min". */
 export function queueLine(cards: Card[]): string {
   if (!cards.length) return "Nothing needs you. You can leave.";
@@ -267,5 +281,5 @@ export function queueLine(cards: Card[]): string {
 /** What the Manager gets when he talks about a card that has no agent of its own. */
 export function managerBrief(card: Card, words: string): string {
   const head = `About this ${KIND[card.kind].label} card in Panel Live: ${card.title}`;
-  return [head, ...card.lines.map((l) => `- ${l}`), card.url ? `Issue: ${card.url}` : "", "", `Owner: ${words}`].filter((l, i) => l || i > 0).join("\n");
+  return [head, ...[...card.lines, ...(card.items ?? [])].map((l) => `- ${l}`), card.url ? `Issue: ${card.url}` : "", "", `Owner: ${words}`].filter((l, i) => l || i > 0).join("\n");
 }

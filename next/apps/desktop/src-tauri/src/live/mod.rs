@@ -7,6 +7,7 @@
 //! stopped agents are stored (embers.rs). The rest is read fresh, so it never outlives a poll.
 
 mod embers;
+pub use embers::stopped_by_owner;
 mod jobs;
 mod mac;
 mod track;

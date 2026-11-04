@@ -5,7 +5,7 @@ import { transformWithOxc } from "vite";
 
 const source = await readFile(new URL("../src/features/live_cards.ts", import.meta.url), "utf8");
 const { code } = await transformWithOxc(source, "live_cards.ts");
-const { buildCards, order } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+const { buildCards, order, scoreLine } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 
 const now = Date.parse("2026-11-04T18:00:00Z");
 const ago = (min) => new Date(now - min * 60_000).toISOString();
@@ -32,6 +32,8 @@ test("cards line up by value per minute, and the card in front stays in front", 
   // He is reading the Done card. A new, more urgent ask arrives: it lines up behind it.
   const front = order(cards, now, "done:tavla", {}).map((c) => c.id);
   assert.equal(front[0], "done:tavla");
+  // The card says why it is in front, in its own numbers.
+  assert.equal(scoreLine(cards.find((c) => c.id === "decide:1"), now, "Tavla"), "Tavla ×3 · Decide ×3 · waited 40 min · about 1 min of you → 15.00");
   // Later sends a card to the back until its time is up.
   assert.equal(order(cards, now, null, { "decide:1": now + 60_000 }).at(-1).id, "decide:1");
 });

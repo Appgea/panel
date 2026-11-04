@@ -1,0 +1,17 @@
+/* The words in the base. Sizes copy `drawBase` in the concept page, lines 919 to 937. */
+
+.live-mac-name, .live-mac-line, .live-meter, .live-bay, .live-left { position: absolute; left: 0; top: 0; }
+.live-mac-name { font: 600 12px/16px var(--l-sans); color: var(--l-ink); }
+.live-mac-line { font: 400 11px/14px var(--l-mono); color: var(--l-ink-2); white-space: nowrap; }
+.live-mac-line.is-hot { color: var(--l-turn); }
+.live-meter { width: 100px; height: 4px; border-radius: 2px; background: var(--l-line); overflow: hidden; }
+.live-meter.is-short { width: 60px; }
+.live-meter-fill { height: 100%; border-radius: 2px; background: var(--l-ink-3); }
+.live-meter-fill.is-hot { background: var(--l-turn); }
+.live-bay { display: grid; align-content: center; gap: 1px; padding: 0 9px; box-sizing: border-box; pointer-events: none; }
+.live-bay-name { font: 500 10px/12px var(--l-sans); color: var(--l-ink-3); }
+.live-bay-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/14px var(--l-mono); color: var(--l-ink-3); }
+.live-bay.is-held .live-bay-who { color: var(--l-ink); }
+.live-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.live-left-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/14px var(--l-mono); color: var(--l-turn); }
+.live-left .opt { padding: 4px 8px; font-size: 12px; }

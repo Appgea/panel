@@ -1,0 +1,70 @@
+/* The panel beside a dot, an ember or a room, and the peek. Copied from `.apanel` and `.peek` in
+   the concept page CSS, lines 75 to 105. */
+
+.apanel {
+  position: absolute;
+  z-index: 3;
+  max-height: 520px;
+  overflow-y: auto;
+  padding: 14px 14px 12px;
+  border: 1px solid var(--l-line-2);
+  border-radius: 12px;
+  background: var(--l-raise);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.apanel[hidden] { display: none; }
+.ph { display: flex; align-items: flex-start; gap: 10px; }
+.pdot { width: 12px; height: 12px; margin-top: 5px; flex: none; border-radius: 50%; background: var(--c, var(--l-idle)); box-shadow: 0 0 10px var(--c, var(--l-idle)); }
+.pt { min-width: 0; flex: 1; }
+.pname { font: 600 15px/1.3 var(--l-sans); overflow-wrap: anywhere; }
+.psub { font-size: 12px; color: var(--l-ink-2); }
+.pclose { flex: none; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--l-ink-2); font: 400 20px/1 var(--l-sans); cursor: pointer; }
+.pclose:hover { color: var(--l-ink); }
+.pstate { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--l-ink-3); }
+.chip { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--c); border-radius: 999px; color: var(--c); font: 500 11.5px/1 var(--l-mono); }
+.prows { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 10px; margin: 12px 0 0; }
+.prows dt { padding-top: 1px; color: var(--l-ink-3); font-size: 12px; }
+.prows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.pfam { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.psec { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--l-line); font-size: 12px; color: var(--l-ink-3); }
+.pdone { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; max-height: 156px; overflow: auto; font: 400 12px/1.4 var(--l-mono); color: var(--l-ink-2); }
+.pdone li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; }
+.pdone li > :last-child { min-width: 0; overflow-wrap: anywhere; }
+.pdone time { color: var(--l-ink-3); }
+.presult { margin: 10px 0 0; font-size: 14px; color: var(--l-ink); }
+.pact { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.apanel .reply { margin-top: 12px; }
+.plink { padding: 0; border: 0; background: none; color: var(--l-ink); font: inherit; text-align: left; text-decoration: underline; text-decoration-color: var(--l-line-2); text-underline-offset: 3px; cursor: pointer; overflow-wrap: anywhere; }
+.rlist { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.rowbtn { display: grid; grid-template-columns: 10px auto minmax(0, 1fr); align-items: center; gap: 8px; width: 100%; padding: 5px 6px; border: 0; border-radius: 6px; background: none; color: var(--l-ink-2); font: 400 12.5px/1.35 var(--l-sans); text-align: left; cursor: pointer; }
+.rowbtn:hover { background: var(--l-deck); }
+.rowbtn i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.rowbtn b { color: var(--l-ink); font-weight: 500; white-space: nowrap; }
+.rowbtn span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.muted { padding: 5px 6px; color: var(--l-ink-3); font-size: 12.5px; }
+.pnote { margin: 10px 0 0; font-size: 12px; color: var(--l-ink-3); }
+
+/* Hold to Stop: a red bar fills under the button over the hold. */
+.live-hold { position: relative; overflow: hidden; }
+.live-hold::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--l-stuck); transform: scaleX(0); transform-origin: left; }
+.live-hold.is-holding::after { transform: scaleX(1); transition: transform 0.9s linear; }
+
+.peek {
+  position: absolute;
+  z-index: 4;
+  max-width: min(340px, 92%);
+  overflow: hidden;
+  padding: 6px 10px;
+  border: 1px solid var(--l-line-2);
+  border-radius: 8px;
+  background: var(--l-raise);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  color: var(--l-ink);
+  font: 400 12px/1.3 var(--l-sans);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.peek[hidden] { display: none; }

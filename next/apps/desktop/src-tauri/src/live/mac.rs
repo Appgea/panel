@@ -15,6 +15,44 @@ pub struct Mac {
     /// macOS recorded a thermal or performance warning, or slowed the CPU.
     pub hot: bool,
     pub bays: Vec<Bay>,
+    /// Each harness's weekly quota, where this Mac keeps a local record of it.
+    pub quota: Vec<Quota>,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Quota {
+    pub harness: String,
+    /// Percent of the week's limit used.
+    pub used: f32,
+}
+
+/// A record older than this may sit across a weekly reset, so it is not shown.
+const QUOTA_FRESH_S: f64 = 6.0 * 3600.0;
+
+/// Claude Code's status line writes the session's `seven_day` use to `quota.jsonl` once a
+/// minute (ops/runbooks/sinks.py `quota_tick`). Codex keeps no local record, so it has none.
+fn quota(now_s: f64) -> Vec<Quota> {
+    let path = crate::paths::user_root().join("state").join("quota.jsonl");
+    use std::io::{Read, Seek, SeekFrom};
+    // Only the tail: the file grows by a line a minute per session, and this runs every poll.
+    let Ok(mut f) = std::fs::File::open(&path) else { return Vec::new() };
+    let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut raw = Vec::new();
+    if f.seek(SeekFrom::Start(len.saturating_sub(64 * 1024))).and_then(|_| f.read_to_end(&mut raw)).is_err() {
+        return Vec::new();
+    }
+    let tail = String::from_utf8_lossy(&raw).into_owned();
+    claude_week(&tail, now_s).map(|used| vec![Quota { harness: "Claude".into(), used }]).unwrap_or_default()
+}
+
+fn claude_week(lines: &str, now_s: f64) -> Option<f32> {
+    lines.lines().rev().find_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).ok()?;
+        let ts = v.get("ts")?.as_f64()?;
+        let used = v.get("seven_day")?.as_f64()?;
+        (now_s - ts < QUOTA_FRESH_S).then_some(used as f32)
+    })
 }
 
 #[derive(Debug, Serialize)]
@@ -33,7 +71,8 @@ pub fn read(procs: &HashMap<u32, super::Proc>, agent_pids: &HashMap<u32, String>
         .unwrap_or(0.0);
     let cores = sysctl("hw.ncpu").and_then(|s| s.parse().ok()).unwrap_or(0);
     let therm = Command::new("pmset").args(["-g", "therm"]).output().map(|o| String::from_utf8_lossy(&o.stdout).to_string()).unwrap_or_default();
-    Mac { load, cores, hot: hot(&therm), bays: bays(procs, agent_pids) }
+    let now_s = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
+    Mac { load, cores, hot: hot(&therm), bays: bays(procs, agent_pids), quota: quota(now_s) }
 }
 
 fn hot(therm: &str) -> bool {
@@ -86,5 +125,13 @@ mod tests {
     fn a_quiet_mac_is_not_hot() {
         assert!(!super::hot("Note: No thermal warning level has been recorded\nNote: No performance warning level has been recorded"));
         assert!(super::hot("CPU_Speed_Limit = 70"));
+    }
+
+    #[test]
+    fn the_newest_fresh_week_reading_wins() {
+        let lines = "{\"ts\": 1000, \"seven_day\": 40}\n{\"ts\": 2000, \"seven_day\": 46}\n{\"ts\": 2100, \"seven_day\": null}\n";
+        assert_eq!(super::claude_week(lines, 2200.0), Some(46.0));
+        // Older than six hours: it may be from before the weekly reset.
+        assert_eq!(super::claude_week(lines, 2000.0 + 7.0 * 3600.0), None);
     }
 }

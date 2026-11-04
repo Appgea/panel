@@ -17,13 +17,41 @@ const MAX: usize = 300;
 /// An agent seen for less than this, with no step, is a blip: a `claude --version`, a quick probe.
 const BLIP_MS: u64 = 20_000;
 
+/// How an agent ended. `Failed` comes from a board result that says failed, which this scan does
+/// not read yet, so nothing sets it here.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Outcome {
-    /// It ended between steps, after saying its last word.
-    Finished,
-    /// It ended in the middle of a step: killed, crashed or cut off.
-    Cut,
+    /// It ended waiting for its owner, after saying its last word.
+    #[serde(alias = "finished")]
+    Done,
+    Failed,
+    /// Live's hold-to-stop ended it.
+    Stopped,
+    /// It vanished with no last message, or in the middle of a step.
+    #[serde(alias = "cut")]
+    Crashed,
+    /// It ended while Live showed it stuck.
+    Stuck,
+}
+
+/// What the last scan knew of an agent at its end. The order of the checks is the rule.
+fn outcome(last: &Agent, stopped: bool) -> Outcome {
+    if stopped {
+        Outcome::Stopped
+    } else if last.state == State::Stuck {
+        Outcome::Stuck
+    } else if last.last_text.is_none() || (last.now.is_some() && last.state != State::Turn) {
+        Outcome::Crashed
+    } else {
+        Outcome::Done
+    }
+}
+
+/// Live's Stop asked this process to end. Its ember then says Stopped, not Crashed.
+pub fn stopped_by_owner(pid: u32) {
+    let mut s = shelf().lock().unwrap_or_else(|p| p.into_inner());
+    s.stopped.push(pid);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -56,6 +84,8 @@ struct Shelf {
     loaded: bool,
     seen: HashMap<String, (Agent, u64)>,
     embers: Vec<Ember>,
+    /// Pids Live's Stop signalled, until their ember is written.
+    stopped: Vec<u32>,
 }
 
 fn shelf() -> &'static Mutex<Shelf> {
@@ -98,7 +128,7 @@ pub fn update(agents: &[Agent], now: u64) -> Vec<Ember> {
             cwd: last.cwd.clone(),
             task: last.task.clone(),
             result: last.last_text.clone(),
-            outcome: if last.now.is_some() && last.state != State::Turn { Outcome::Cut } else { Outcome::Finished },
+            outcome: outcome(last, last.pid.is_some_and(|p| s.stopped.contains(&p))),
             files: last.files.clone(),
             steps: last.steps.clone(),
             step_count: last.step_count,
@@ -110,6 +140,8 @@ pub fn update(agents: &[Agent], now: u64) -> Vec<Ember> {
     }
     let firsts: HashMap<String, u64> = s.seen.iter().map(|(id, (_, t))| (id.clone(), *t)).collect();
     s.seen = agents.iter().map(|a| (a.id.clone(), (a.clone(), firsts.get(&a.id).copied().unwrap_or(now)))).collect();
+    let alive: std::collections::HashSet<u32> = agents.iter().filter_map(|a| a.pid).collect();
+    s.stopped.retain(|p| alive.contains(p));
     s.embers.extend(gone);
     s.embers.retain(|e| now.saturating_sub(e.ended_ms) < KEEP_MS);
     s.embers.sort_by(|a, b| b.ended_ms.cmp(&a.ended_ms));
@@ -118,6 +150,54 @@ pub fn update(agents: &[Agent], now: u64) -> Vec<Ember> {
         save(&s.embers);
     }
     s.embers.clone()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::live::track::Station;
+
+    fn agent(state: State, said: Option<&str>, mid_step: bool) -> Agent {
+        Agent {
+            id: "pid:7".into(),
+            pid: Some(7),
+            harness: Harness::Claude,
+            headless: false,
+            name: None,
+            session: None,
+            cwd: String::new(),
+            room: "hq".into(),
+            room_name: "HQ".into(),
+            parent: None,
+            via: None,
+            started_ms: None,
+            busy: false,
+            state,
+            state_ms: None,
+            model: None,
+            task: None,
+            now: mid_step.then(|| Step { at_ms: 0, label: "Run the tests".into(), station: Station::Check, file: None, helper: false, asks: false }),
+            steps: Vec::new(),
+            step_count: 3,
+            last_text: said.map(Into::into),
+            helpers: 0,
+            files: Vec::new(),
+            panel: None,
+            issue: None,
+        }
+    }
+
+    #[test]
+    fn an_ending_gets_one_of_five_outcomes() {
+        assert_eq!(outcome(&agent(State::Turn, Some("Shipped."), false), false), Outcome::Done);
+        assert_eq!(outcome(&agent(State::Work, Some("Running"), true), true), Outcome::Stopped);
+        assert_eq!(outcome(&agent(State::Stuck, Some("Running"), true), false), Outcome::Stuck);
+        assert_eq!(outcome(&agent(State::Work, None, false), false), Outcome::Crashed);
+        assert_eq!(outcome(&agent(State::Work, Some("Running"), true), false), Outcome::Crashed);
+        // A shelf saved before the five outcomes still reads.
+        assert_eq!(serde_json::from_str::<Outcome>("\"finished\"").unwrap(), Outcome::Done);
+        assert_eq!(serde_json::from_str::<Outcome>("\"cut\"").unwrap(), Outcome::Crashed);
+    }
 }
 
 fn save(embers: &[Ember]) {
