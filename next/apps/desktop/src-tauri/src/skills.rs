@@ -334,35 +334,48 @@ pub fn read_document(path: String) -> Result<SkillDocument, String> {
     })
 }
 
-/// Only Markdown references immediately inside the selected skill are editable here.
+/// A file inside the selected skill's folder. No `..`, no hidden parts, no symlink on the way:
+/// the browser may read any of them, so none may lead outside the folder.
 fn reference_target(item: &Known, relative: &str) -> Result<PathBuf, String> {
     let parts: Vec<_> = Path::new(relative).components().collect();
-    if parts.len() != 2 || !matches!(parts[0], std::path::Component::Normal(p) if p == "references" || p == "reference")
-        || !matches!(parts[1], std::path::Component::Normal(_))
-        || !relative.ends_with(".md") {
-        return Err("Use references/topic.md".into());
+    if parts.is_empty() || !parts.iter().all(|part| matches!(part,
+        std::path::Component::Normal(p) if !p.to_string_lossy().starts_with('.'))) {
+        return Err("Use a path inside the skill folder, like references/topic.md".into());
     }
     let base = item.target.parent().ok_or("Invalid skill path")?;
     let target = base.join(relative);
-    let parent = target.parent().ok_or("Invalid reference path")?;
-    if fs::symlink_metadata(parent).is_ok() && parent.canonicalize().map_err(|e| e.to_string())? != parent {
-        return Err("Reference folders cannot be symlinks".into());
+    // The nearest folder that exists must be its own real path. A new subfolder is made under it.
+    let existing = target.ancestors().skip(1).find(|dir| fs::symlink_metadata(dir).is_ok())
+        .ok_or("Invalid reference path")?;
+    if existing.canonicalize().map_err(|e| e.to_string())? != existing {
+        return Err("Skill folders cannot be symlinks".into());
     }
     if fs::symlink_metadata(&target).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err("Reference files cannot be symlinks".into());
+        return Err("Skill files cannot be symlinks".into());
     }
     Ok(target)
 }
 
+const SKIP_DIRS: [&str; 4] = ["__pycache__", "node_modules", "target", "venv"];
+
+/// Every file in the skill's folder, relative to it, so the browser can show the whole skill.
 pub fn resources(path: String) -> Result<Vec<String>, String> {
     let item = authorized(&path)?;
-    let base = item.target.parent().ok_or("Invalid skill path")?;
+    let base = item.target.parent().ok_or("Invalid skill path")?.to_path_buf();
     let mut files = Vec::new();
-    for folder in ["references", "reference"] {
-        if let Ok(entries) = fs::read_dir(base.join(folder)) {
-            for entry in entries.take(MAX_ENTRIES).flatten() {
-                let relative = format!("{folder}/{}", entry.file_name().to_string_lossy());
-                if reference_target(&item, &relative).is_ok_and(|p| p.is_file()) { files.push(relative); }
+    let mut stack = vec![(base.clone(), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.take(MAX_ENTRIES).flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Ok(kind) = entry.file_type() else { continue };
+            if name.starts_with('.') || kind.is_symlink() { continue; }
+            if kind.is_dir() {
+                if depth < 6 && !SKIP_DIRS.contains(&name.as_str()) { stack.push((entry.path(), depth + 1)); }
+            } else if kind.is_file() && files.len() < MAX_ENTRIES {
+                if let Ok(relative) = entry.path().strip_prefix(&base) {
+                    files.push(relative.to_string_lossy().into_owned());
+                }
             }
         }
     }
@@ -372,6 +385,7 @@ pub fn resources(path: String) -> Result<Vec<String>, String> {
 
 pub fn resource_read(path: String, relative: String) -> Result<String, String> {
     bounded_read(&reference_target(&authorized(&path)?, &relative)?)
+        .map_err(|e| if e.contains("utf-8") || e.contains("UTF-8") { "Not a text file".into() } else { e })
 }
 
 pub fn resource_save(path: String, relative: String, content: String, expected: Option<String>) -> Result<(), String> {
@@ -379,6 +393,11 @@ pub fn resource_save(path: String, relative: String, content: String, expected: 
     let item = authorized(&path)?;
     if !item.entry.editable { return Err("Plugin references are read-only".into()); }
     if content.len() as u64 > MAX_BYTES { return Err("Reference exceeds 512 KiB".into()); }
+    // SKILL.md goes through `save`, which keeps its header and discovery links right.
+    // macOS volumes ignore case, so `skill.md` is the same file as SKILL.md.
+    if !relative.ends_with(".md") || relative.eq_ignore_ascii_case("SKILL.md") {
+        return Err("Only Markdown files other than SKILL.md are edited here".into());
+    }
     let target = reference_target(&item, &relative)?;
     let parent = target.parent().ok_or("Invalid reference path")?;
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;

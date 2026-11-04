@@ -238,11 +238,15 @@ One private Markdown file (`~/.appgea/notes.md`) with Obsidian-style live previe
 
 ---
 
-## 10. Skills and shared workflows
+## 10. Skills
 
-Open **Skills** from a Claude/Codex terminal header, the session strip, or Settings → Agents → *Manage skills*.
-- The library lists local skill definitions with provider and path, grouped Company / Legal / Design / General with department filters. Plugin entries are read-only disk inventory (may include inactive cached versions).
-- **Create a shared workflow:** name, description, trigger, steps, expected output → stored as `SKILL.md` under `~/.appgeapanel/skills/` and linked into Claude's personal skills, Codex's legacy personal skills and `~/.agents/skills`. Edit, archive (removes only Panel's links), restore, or **stage** into a terminal (staging never submits a prompt). Supporting Markdown files can be added/edited beside the instructions.
+Open **Skills** from the sidebar Desk group, a Claude/Codex terminal header, the session strip, or Settings → Agents → *Manage skills*. It is a browser for the skill library.
+- **Overview** (the *Skills* crumb): routers that hand work to many skills, the skills others rely on most, and stand-alone skills nobody names.
+- **Skill page:** the rendered instructions. A skill name in backticks or a relative file link is clickable and opens that skill or file. The right rail shows *Hands off to*, *Called from* and the skill's whole file tree.
+- **Navigate:** Back / Forward (`⌘[` `⌘]`, or `⌥←` `⌥→`), the breadcrumb, `/` or `⌘F` to search. Search matches names and descriptions first, then the instruction text. Enter opens the first hit.
+- The sidebar groups skills Company / Legal / Design / General, with area and source filters. Plugin entries are read-only disk inventory (may include inactive cached versions).
+- **Edit** any `SKILL.md` or Markdown file in place. Saves refuse if the file changed on disk meanwhile. Other files are read-only. **New file** adds Markdown inside the skill folder.
+- **New skill:** name, description, trigger, steps, expected output → stored as `SKILL.md` under `~/.appgeapanel/skills/` and linked into Claude's personal skills, Codex's legacy personal skills and `~/.agents/skills`. *Copy as new skill* prefills it. Archive (removes only Panel's links), restore, or **stage** into a terminal (staging never submits a prompt).
 - **Per-session** Default / Enabled / Disabled settings stay *pending* until **Apply and resume** restarts that terminal (Claude gets a `skillOverrides` overlay; Codex gets `skills.config` overrides). Global skill files are never touched. The resume picker lets you choose which saved conversation to continue.
 - **Used this session** evidence comes from Claude's successful Skill hooks; Codex usage is shown as unknown. Staged requests and on-disk definitions are never claimed as active context.
 - Consolidate scattered personal skills: `python3 next/scripts/consolidate_skills.py` (preview) then `--apply`.

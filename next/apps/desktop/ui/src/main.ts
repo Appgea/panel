@@ -4460,6 +4460,7 @@ async function boot(): Promise<void> {
   el("notebookButton").addEventListener("click", () => showNotebook());
   el("sprintButton").addEventListener("click", () => showSprint());
   el("opsMapButton").addEventListener("click", () => showOpsMap());
+  el("skillsButton").addEventListener("click", () => showSkills());
   el("boardButton").addEventListener("click", () => showBoard());
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
