@@ -5,28 +5,16 @@ import { transformWithOxc } from "vite";
 
 const source = await readFile(new URL("../src/features/board_score.ts", import.meta.url), "utf8");
 const { code } = await transformWithOxc(source, "board_score.ts");
-const { score, splitTitle, engineOf, NO_ESTIMATE_XP } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+const { days, splitTitle, engineOf } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 
 const now = new Date(2026, 10, 1, 15, 0);
 const on = (daysBack, hour = 12) => new Date(2026, 10, 1 - daysBack, hour).toISOString();
 
-test("XP is one point per estimated minute, and a close with no estimate counts as a small one", () => {
-  const s = score([{ closed_at: on(0), estimate: 40 }, { closed_at: on(0) }, { closed_at: on(0), estimate: 99, dropped: true }], now);
-  assert.deepEqual(s.today, { date: "2026-11-01", count: 2, xp: 40 + NO_ESTIMATE_XP });
-  assert.equal(s.dropped, 1);
-});
-
-test("the streak counts back from today, and a today with nothing yet does not break it", () => {
-  const days = [1, 2, 3, 5].map((back) => ({ closed_at: on(back), estimate: 10 }));
-  assert.equal(score(days, now).streak, 3);
-  assert.equal(score([...days, { closed_at: on(0), estimate: 10 }], now).streak, 4);
-  assert.equal(score([{ closed_at: on(2) }], now).streak, 0);
-});
-
-test("this week and last week split the fourteen days at seven", () => {
-  const s = score([{ closed_at: on(6), estimate: 30 }, { closed_at: on(7), estimate: 20 }, { closed_at: on(13), estimate: 5 }, { closed_at: on(14), estimate: 999 }], now);
-  assert.equal(s.days.length, 14);
-  assert.deepEqual([s.week, s.lastWeek], [30, 25]);
+test("closes count per local day, a dropped issue is not done, and older closes fall off", () => {
+  const d = days([{ closed_at: on(0) }, { closed_at: on(0) }, { closed_at: on(0), dropped: true }, { closed_at: on(3) }, { closed_at: on(14) }], now);
+  assert.deepEqual(d.today, { date: "2026-11-01", count: 2 });
+  assert.equal(d.days.length, 14);
+  assert.equal(d.days.reduce((n, day) => n + day.count, 0), 3);
 });
 
 test("a title loses an app prefix the tile already shows, and keeps a kind prefix as a tag", () => {

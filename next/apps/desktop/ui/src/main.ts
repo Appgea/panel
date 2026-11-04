@@ -43,7 +43,7 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
-import type { BoardData, BoardHandle, BuildList, Scout, ScoutList, ScoutRun } from "./features/board";
+import type { BoardData, BoardHandle, Scout } from "./features/board";
 import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
@@ -1468,27 +1468,14 @@ function setupBoard(on: boolean): void {
   const loading = import("./features/board").then(({ mountBoard }) => {
     board = mountBoard(el("boardScreen"), {
       api: {
-        scouts: () => moduleGet<ScoutList>("/m/scout/scouts"),
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
-        builds: () => moduleGet<BuildList>("/m/scout/builds"),
         picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
-        run: (id) => modulePost<ScoutRun>("/m/scout/run", { id }),
-        prompt: (id) =>
-          moduleGet<{ prompt: string }>(`/m/scout/prompt?id=${encodeURIComponent(id)}`).then((answer) => answer.prompt),
-        start: (id, session) => modulePost<ScoutRun>("/m/scout/start", { id, session }),
-        record: (id, status, note) => modulePost<ScoutRun>("/m/scout/record", { id, status, found: 0, note }),
       },
       appIcon: (dir) => {
         const project = [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`));
         return project ? projectIconUrl(project.project.id) : null;
       },
       openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
-      launch: launchScout,
-      showSession: (id) => {
-        showTerminals();
-        return terminals.reveal(id);
-      },
-      isLive: (id) => Boolean(sessionById(id)) && !exited.has(id),
       openSwipe: () => void openSwipeReview(),
     });
     return board;
@@ -2148,14 +2135,17 @@ function jumpToSession(projectId: string, sessionId: string): void {
   });
 }
 
-/** The sidebar's Workspace group. Its two rows are doors to tabs of ONE screen, so the lit
- *  state is the group's, not any row's: the whole area is where you are, or Home is, or a project
- *  is. Which tab is up is the tab strip's job to show — saying it twice would read as two places.
- *  Home is a group of one, lit by the same rule, because it is a screen on its own now. */
+/** Marks the one sidebar row for the screen on the glass. */
 function paintNav(): void {
   el("homeNav").classList.toggle("is-active", homeActive);
+  el("homeButton").classList.toggle("is-on", homeActive);
   el("projectsSection").classList.toggle("home-up", homeActive);
   el("workspaceNav").classList.toggle("is-active", terminalsActive);
+  // The sidebar marks one row, the way a Mac sidebar does. A group tab other than Runs is still
+  // the wall's area, so Terminals carries it.
+  const runsUp = terminalsActive && runnerActive;
+  el("runButton").classList.toggle("is-on", runsUp);
+  el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
   // and only the row you are actually on carries the accent.
   el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || historyActive);
@@ -2201,7 +2191,7 @@ function paintChatNav(): void {
   paintManagerNav();
   for (const [id, section] of [["chatButton", "reports"], ["cpoButton", "manager"]] as const) {
     const button = el(id);
-    const on = selected === section;
+    const on = chatActive && selected === section;
     button.classList.toggle("is-on", on);
     button.setAttribute("aria-pressed", String(on));
     if (on) button.setAttribute("aria-current", "page");
@@ -3038,7 +3028,7 @@ function paintProjects(): void {
   projectLive.querySelector("b")!.textContent = String(liveCount);
   // Collapsed the label says what the rows ARE, and the order chip goes with it: there is no
   // rule to choose while the list is "the ones you were just in".
-  projectsLabel.textContent = collapsed ? "RECENT" : "PROJECTS";
+  projectsLabel.textContent = collapsed ? "Recent" : "Projects";
   projectSort.hidden = collapsed;
   projectSort.textContent = SORT_LABEL[sortMode];
   projectSort.title = SORT_HINT[sortMode];
@@ -4400,10 +4390,12 @@ async function boot(): Promise<void> {
         show: () => {
           runnerActive = true;
           runner.open(runnerProjects());
+          paintNav();
         },
         hide: () => {
           runnerActive = false;
           runner.clear();
+          paintNav();
         },
         closeActive: () => runner.closeActive(),
         // This tab shows every run in full, so the build bar stands down over it.

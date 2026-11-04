@@ -1,49 +1,26 @@
 /**
- * Board — the quest board. Every open issue in Appgea/ops as a card. Your move is a wide band on top,
- * then the lanes: in play, ready, waiting, done. Each card says one thing under its title: your call,
- * or the problem. Click a card and its brief opens as a sheet in the middle of the screen, the point
- * first: your call or the problem, then why, the pictures and the goals. ← and → walk the board.
+ * Board — every open issue in Appgea/ops as a card. Needs you is a wide band on top, then the lanes:
+ * working, ready, waiting, done. Each card says one thing under its title: your call, or the problem.
+ * Click a card and its brief opens as a sheet in the middle of the screen, the point first: your call
+ * or the problem, then why, the pictures and the goals. ← and → walk the board.
  * Owner, 2026-11-01: "I should enjoy looking at it and understand them at once", and later the same
  * day, of the old drawer: "my head is stuck reading it on right side … I should be getting the point
  * as fast as possible".
  *
- * The Crew tab holds the scouts that find the work and the builds that do it.
+ * No XP, streaks, quests or Crew tab. Owner, 2026-11-04, of the game layer: "remove them. We will
+ * make a Live broadcasting system to observe the agents." Watching agents belongs to that system.
  *
  * One screen, read from the `scout` extension. With it absent the Board does not exist. There is no
- * strip on other screens: Owner, 2026-10-30, "it is an antipattern".
- *
- * Scouts never start on their own here. `board next` runs due scouts as part of the work, and the
- * Run button runs one now. Nothing polls: a read happens on focus, on session and report events,
- * and once more when the next scout falls due, so it reads as due.
+ * strip on other screens: Owner, 2026-10-30, "it is an antipattern". Nothing polls: a read happens
+ * on focus and on session and report events.
  */
 import { errorText } from "../errors";
 import { icon, type IconName } from "../icons";
-import { dayKey, engineOf, score, splitTitle, xpOf, type Score } from "./board_score";
+import { dayKey, days, engineOf, splitTitle } from "./board_score";
 import "./board.css";
 
-export type ScoutRun = {
-  at: string;
-  status: "running" | "done" | "failed" | "stale";
-  found: number;
-  note: string;
-  session: string | null;
-};
-export type Scout = {
-  id: string;
-  title: string;
-  every: string;
-  after: number;
-  kind: "script" | "agent";
-  agent: string | null;
-  model: string | null;
-  needs: string | null;
-  summary: string;
-  error: string | null;
-  due: boolean;
-  next_at: string | null;
-  last: ScoutRun | null;
-};
-export type ScoutList = { now: string; next_due_at: string | null; scouts: Scout[] };
+/** Who a launched terminal is for. The swipe review opens its agent through main.ts `launchScout`. */
+export type Scout = { id: string; agent: string | null; model?: string | null };
 export type Goal = { goal: string; check?: string };
 /** One open issue. Every part past `priority` is cut from the brief by `board json`, and may be missing. */
 export type BoardCard = {
@@ -97,53 +74,16 @@ export type BoardData = {
   error?: string;
   apps?: Record<string, { name: string; dir: string }>;
 };
-export type RunningBuild = {
-  pid: number;
-  builder: string;
-  effort: string;
-  kind: string;
-  repo: string;
-  task: string;
-  session: string;
-  started: string;
-};
-/** A finished row of builds.tsv. Every cell is text; "-" means not known yet. */
-export type BuildRow = {
-  date: string;
-  builder: string;
-  effort: string;
-  repo: string;
-  minutes: string;
-  exit: string;
-  session: string;
-  kind: string;
-  verdict: string;
-  task: string;
-};
-export type BuildList = { running: RunningBuild[]; recent: BuildRow[]; at?: string; error?: string };
-
 /** The extension's routes, behind one seam so the dev harness can stand in for it. */
 export type BoardApi = {
-  scouts(): Promise<ScoutList>;
   board(fresh: boolean): Promise<BoardData>;
-  builds(): Promise<BuildList>;
   picture(path: string): Promise<string>;
-  run(id: string): Promise<ScoutRun>;
-  prompt(id: string): Promise<string>;
-  start(id: string, session: string): Promise<ScoutRun>;
-  record(id: string, status: "done" | "failed", note: string): Promise<ScoutRun>;
 };
 
 export type BoardEvents = {
   api: BoardApi;
   appIcon(dir: string): string | null;
   openUrl(url: string): void;
-  /** Open a visible terminal for an agent scout and type its prompt. `started` runs before the
-   *  prompt is typed. The session id, or null. */
-  launch(scout: Scout, prompt: string, started: (session: string) => Promise<unknown>): Promise<string | null>;
-  /** Bring a scout's terminal forward. False when it is gone. */
-  showSession(session: string): boolean;
-  isLive(session: string): boolean;
   /** The full-screen swipe review of what the board did since you last looked (swipe.ts). */
   openSwipe(): void;
 };
@@ -208,9 +148,6 @@ const dayName = (date: string, today: string, yesterday: string): string =>
     : new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 const number = (n: number): string => n.toLocaleString();
 
-const EVERY: Record<string, string> = { daily: "Daily", sunday: "Sundays", manual: "On demand" };
-const cadence = (every: string): string => EVERY[every] ?? `Every ${every.replace(/h$/, " hours")}`;
-
 /** Priority as a tier. The word says it; the colour only repeats it. */
 const TIERS = ["Critical", "High", "Normal", "Low"];
 const tier = (p: number): string => TIERS[Math.min(Math.max(p, 0), 3)];
@@ -218,33 +155,12 @@ const KIND_WORD: Record<string, string> = {
   speed: "Speed", redesign: "Redesign", "bug-report": "Bug", question: "Question", guide: "Guide",
 };
 
-/** One word for a scout's state, and the tone it wears. Due wins over the last run: it is what happens next. */
-const scoutState = (scout: Scout, live: boolean): { tone: string; word: string } => {
-  if (scout.error) return { tone: "t-risk", word: "broken" };
-  if (scout.last?.status === "running" && (scout.kind === "script" || live)) return { tone: "t-work", word: "running" };
-  if (scout.due) return { tone: "t-warn", word: "due" };
-  if (scout.last?.status === "failed") return { tone: "t-risk", word: "failed" };
-  if (scout.last?.status === "stale" || scout.last?.status === "running") return { tone: "t-quiet", word: "stopped" };
-  if (scout.last?.status === "done") return { tone: scout.last.found ? "t-warn" : "t-ok", word: scout.last.found ? `${scout.last.found} filed` : "done" };
-  return { tone: "t-quiet", word: "not run" };
-};
-
-/** Tone and verdict word for a finished build. A bad exit or a wrong verdict outranks a good one. */
-const buildState = (row: BuildRow): { tone: string; word: string } => {
-  if (row.verdict === "wrong") return { tone: "t-risk", word: "wrong" };
-  if (row.exit !== "0" && row.exit !== "-") return { tone: "t-risk", word: row.verdict === "-" ? `exit ${row.exit}` : row.verdict };
-  if (row.verdict === "ship") return { tone: "t-ok", word: "ship" };
-  if (row.verdict === "fix") return { tone: "t-warn", word: "fix" };
-  return { tone: "t-quiet", word: "no verdict yet" };
-};
-
 type Lane = "you" | "now" | "ready" | "waiting";
-type Tab = "quests" | "crew";
 const LANES: { key: Lane; title: string; hint: string; tone: string; icon: IconName; empty: string }[] = [
-  { key: "you", title: "Your move", hint: "Only you can unblock these", tone: "t-warn", icon: "flag", empty: "Nothing waits on you." },
-  { key: "now", title: "In play", hint: "An agent is on it right now", tone: "t-work", icon: "play", empty: "Nobody is on a quest. Type work in a terminal." },
-  { key: "ready", title: "Ready", hint: "Free to take, best first", tone: "t-ready", icon: "inbox", empty: "No free quests." },
-  { key: "waiting", title: "Waiting", hint: "Back on a date, or after another quest", tone: "t-quiet", icon: "clock", empty: "Nothing is parked." },
+  { key: "you", title: "Needs you", hint: "Only you can unblock these", tone: "t-warn", icon: "flag", empty: "Nothing waits on you." },
+  { key: "now", title: "Working", hint: "An agent is on it right now", tone: "t-work", icon: "play", empty: "No agent is working. Type work in a terminal." },
+  { key: "ready", title: "Ready", hint: "Free to take, best first", tone: "t-ready", icon: "inbox", empty: "No free issues." },
+  { key: "waiting", title: "Waiting", hint: "Back on a date, or after another issue", tone: "t-quiet", icon: "clock", empty: "Nothing is parked." },
 ];
 const NO_APP = "_ops";
 
@@ -274,17 +190,13 @@ const remember = (key: string, value?: string): string => {
 
 export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandle {
   const { api } = events;
-  let list: ScoutList | null = null;
   let board: BoardData | null = null;
-  let builds: BuildList = { running: [], recent: [] };
   let failure = "";
   let busy = false;
   let again = false;
   let againFresh = false;
-  let timer = 0;
   let visible = false;
   let lastFresh = 0;
-  let tab: Tab = remember("tab") === "crew" ? "crew" : "quests";
   let appFilter = remember("app");
   let query = "";
   let selected: number | null = null;
@@ -310,8 +222,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     }
   });
 
-  const live = (scout: Scout): boolean => Boolean(scout.last?.session && events.isLive(scout.last.session));
-
   /* ------------------------------------------------------------ the clock */
 
   async function refresh(fresh = false): Promise<void> {
@@ -329,21 +239,13 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     busy = true;
     screen.classList.add("bq-busy");
     try {
-      const [scouts, read, builtList] = await Promise.all([
-        api.scouts(),
-        api.board(fresh).catch((error: unknown): BoardData => ({ error: errorText(error, "the scout extension did not answer") })),
-        // Builds are extra. A failure here shows in their section and never breaks the board.
-        api.builds().catch((error: unknown): BuildList => ({ running: [], recent: [], error: errorText(error, "builds could not be read") })),
-      ]);
-      list = scouts;
-      builds = builtList;
+      const read = await api.board(fresh).catch((error: unknown): BoardData => ({ error: errorText(error, "the scout extension did not answer") }));
       // A failed read keeps the last good board on screen, with the error above it.
       board = read.error && board && !board.error ? { ...board, error: read.error } : tidy(read);
       const paths = new Set(openCards().flatMap((card) => card.show ?? []));
       for (const path of pictures.keys()) if (!paths.has(path)) pictures.delete(path);
       failure = "";
       paint();
-      schedule();
     } catch (error) {
       failure = errorText(error, "the scout extension did not answer");
       paint();
@@ -356,43 +258,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         void refresh(next);
       }
     }
-  }
-
-  async function runScript(scout: Scout): Promise<void> {
-    scout.last = { at: new Date().toISOString(), status: "running", found: 0, note: "", session: null };
-    scout.due = false;
-    paint();
-    try {
-      scout.last = await api.run(scout.id);
-    } catch (error) {
-      scout.last = { ...scout.last, status: "failed", note: errorText(error, "the scout extension did not answer") };
-    }
-    // It may have filed issues. The next board read is fresh.
-    if (scout.last.found) board = await api.board(true).then(tidy).catch(() => board);
-    paint();
-  }
-
-  async function launch(scout: Scout): Promise<void> {
-    scout.due = false;
-    try {
-      let began: ScoutRun | null = null;
-      const session = await events.launch(scout, await api.prompt(scout.id), async (id) => {
-        began = await api.start(scout.id, id);
-      });
-      // A terminal that never opened still counts as a run, so the scout reads as failed, not due.
-      scout.last = session && began ? began : await api.record(scout.id, "failed", "the terminal did not take its prompt");
-    } catch (error) {
-      scout.last = await api.record(scout.id, "failed", errorText(error, "the scout extension did not answer")).catch(() => scout.last);
-    }
-    paint();
-  }
-
-  function schedule(): void {
-    window.clearTimeout(timer);
-    if (!list?.next_due_at) return;
-    // A second past the hour, so the scout reads as due. Capped, because a sleeping Mac stretches timers.
-    const wait = new Date(list.next_due_at).getTime() - Date.now() + 1000;
-    timer = window.setTimeout(() => void refresh(), Math.min(Math.max(wait, 5000), 6 * 3_600_000));
   }
 
   /* ------------------------------------------------------------ the data, as lanes */
@@ -436,13 +301,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     return el;
   }
 
-  function xpChip(card: { estimate?: number }, prefix = ""): HTMLElement {
-    const chip = h("span", "bq-xp");
-    chip.append(glyph("bolt"), document.createTextNode(`${prefix}${xpOf(card)} XP`));
-    chip.title = card.estimate ? `${card.estimate} min estimated. 1 XP per minute.` : "No estimate. Counts as a small quest.";
-    return chip;
-  }
-
   function waitReason(card: BoardCard): string {
     const openNums = new Set(openCards().map((c) => c.number));
     const blockers = (card.after ?? []).filter((n) => openNums.has(n));
@@ -465,7 +323,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     return bar;
   }
 
-  /* ------------------------------------------------------------ a quest card */
+  /* ------------------------------------------------------------ an issue card */
 
   const appsLabel = (card: { apps: string[] }): string => (card.apps.length ? card.apps.map(appName).join(" + ") : "Ops");
   const titleOf = (card: BoardCard): { title: string; tag: string } =>
@@ -512,7 +370,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       const kind = kindOf(card, split.tag);
       if (kind) foot.append(h("span", "bq-kind", kind));
     }
-    foot.append(h("span", "bq-gap"), xpChip(card));
+    if (card.estimate) foot.append(h("span", "bq-gap"), h("span", "bq-est", `${card.estimate} min`));
     el.append(foot);
 
     // Time held against the estimate, as a line along the card's bottom edge.
@@ -529,82 +387,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
     el.addEventListener("click", () => openBrief(card.number));
     return el;
-  }
-
-  /* ------------------------------------------------------------ the score */
-
-  function scoreStrip(s: Score): HTMLElement {
-    const strip = h("section", "bq-score");
-    strip.setAttribute("aria-label", "Score");
-
-    const tile = (cls: string, iconName: IconName, value: string, label: string, sub: string | HTMLElement): HTMLElement => {
-      const el = h("div", `bq-stat ${cls}`);
-      const text = h("div", "bq-stat-text");
-      const line = h("div", "bq-stat-line");
-      line.append(h("b", "bq-stat-value", value), h("span", "bq-stat-label", label));
-      text.append(line, typeof sub === "string" ? h("small", "", sub) : sub);
-      el.append(glyph(iconName, "bq-glyph bq-stat-icon"), text);
-      return el;
-    };
-
-    // GitHub did not send the closes. A zero here would read as a lost streak, so the score says it is unread.
-    const unread = board?.done === null;
-    const show = (value: number): string => (unread ? "–" : number(value));
-    const later = "Unread, next refresh tries";
-
-    strip.append(tile("is-today", "trophy", show(s.today.count), "Done today",
-      unread ? later : s.today.count ? `+${number(s.today.xp)} XP earned` : "No close yet"));
-
-    const beat = s.week - s.lastWeek;
-    const weekSub = h("div", "bq-stat-sub");
-    if (unread) weekSub.append(h("small", "", later));
-    else weekSub.append(meter(s.week, Math.max(s.week, s.lastWeek, 1), beat >= 0 ? "is-win" : "", "This week against last week"),
-      h("small", "", s.lastWeek === 0 ? "Last week had none"
-        : beat >= 0 ? `Beat last week by ${number(beat)} XP` : `${number(-beat)} XP to beat last week`));
-    strip.append(tile("is-week", "bolt", show(s.week), "XP in 7 days", weekSub));
-
-    strip.append(tile(s.streak >= 3 ? "is-hot" : "", "flame", show(s.streak), "Day streak",
-      unread ? later : s.streak >= 14 ? "Every day for two weeks" : s.today.count ? "Today counts" : "Close one today to keep it"));
-
-    const you = lane("you").length, now = lane("now").length, ready = lane("ready").length, waiting = lane("waiting").length;
-    strip.append(tile("is-open", "target", number(board?.open ?? you + now + ready + waiting), "Open quests",
-      `${now} in play · ${ready} ready`));
-
-    strip.append(chart(s));
-    return strip;
-  }
-
-  /** XP per day for two weeks. One series, so no legend: the title names it. */
-  function chart(s: Score): HTMLElement {
-    const box = h("div", "bq-chart");
-    const head = h("div", "bq-stat-head");
-    head.append(glyph("analytics"), h("span", "", "XP per day, 14 days"));
-    box.append(head);
-    const bars = h("div", "bq-bars");
-    bars.setAttribute("role", "list");
-    const max = Math.max(...s.days.map((d) => d.xp), 1);
-    const tip = h("div", "bq-tip");
-    tip.hidden = true;
-    s.days.forEach((day, i) => {
-      const col = h("div", `bq-bar${i === s.days.length - 1 ? " is-today" : ""}`);
-      col.setAttribute("role", "listitem");
-      const label = `${new Date(`${day.date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}: ${day.count} done, ${number(day.xp)} XP`;
-      col.setAttribute("aria-label", label);
-      col.tabIndex = -1;
-      const fill = h("i");
-      fill.style.height = `${day.xp ? Math.max(6, (day.xp / max) * 100) : 0}%`;
-      col.append(fill);
-      const show = (): void => {
-        tip.textContent = label;
-        tip.hidden = false;
-        tip.style.left = `${((i + 0.5) / s.days.length) * 100}%`;
-      };
-      col.addEventListener("mouseenter", show);
-      col.addEventListener("mouseleave", () => { tip.hidden = true; });
-      bars.append(col);
-    });
-    box.append(bars, tip);
-    return box;
   }
 
   /* ------------------------------------------------------------ the lanes */
@@ -678,7 +460,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const col = h("section", "bq-lane t-ok bq-done");
     col.setAttribute("aria-label", "Done");
     const all = (board?.done ?? []).filter(matches);
-    const s = score(board?.done ?? []);
+    const s = days(board?.done ?? []);
     const head = h("header", "bq-lane-head");
     head.append(laneTitle("check", "Done", all.filter((d) => !d.dropped).length), h("small", "", "Closed in the last 14 days"));
     const body = h("div", "bq-lane-body");
@@ -696,7 +478,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       if (date !== lastDay) {
         const day = byDate.get(date);
         const group = h("h3", "bq-day", date ? dayName(date, today, yesterday) : "Earlier");
-        if (day && !appFilter && !query) group.append(h("span", "", `${day.count} · ${number(day.xp)} XP`));
+        if (day && !appFilter && !query) group.append(h("span", "", String(day.count)));
         body.append(group);
         lastDay = date;
       }
@@ -706,13 +488,13 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       text.append(h("span", "", splitTitle(card.title, [...card.apps, ...card.apps.map(appName)]).title));
       text.append(h("small", "", `#${card.number}${card.apps.length ? ` · ${card.apps.map(appName).join(" + ")}` : ""}`));
       row.append(text);
-      row.append(card.dropped ? h("span", "bq-dropped", "Dropped") : xpChip(card, "+"));
+      if (card.dropped) row.append(h("span", "bq-dropped", "Dropped"));
       row.addEventListener("click", () => events.openUrl(card.url));
       body.append(row);
       shown++;
     }
     if (!all.length) body.append(h("p", "bq-empty", board?.done ? "Nothing closed yet."
-      : board?.done === null ? "GitHub did not send the closes. The next refresh tries again." : "The score needs a newer board read."));
+      : board?.done === null ? "GitHub did not send the closes. The next refresh tries again." : "Done needs a newer board read."));
     else if (all.length > shown) body.append(h("p", "bq-empty", `${all.length - shown} more on GitHub.`));
     col.append(head, body);
     return col;
@@ -726,9 +508,9 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     search.append(glyph("search"));
     const input = h("input");
     input.type = "search";
-    input.placeholder = "Find a quest";
+    input.placeholder = "Find an issue";
     input.value = query;
-    input.setAttribute("aria-label", "Find a quest by words or number");
+    input.setAttribute("aria-label", "Find an issue by words or number");
     input.addEventListener("input", () => {
       query = input.value.trim();
       paintLanes();
@@ -782,7 +564,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   /* ------------------------------------------------------------ the brief, a sheet in the middle */
 
-  /** The quests in the order the board shows them, so ← and → walk the board. */
+  /** The issues in the order the board shows them, so ← and → walk the board. */
   const shownCards = (): BoardCard[] => LANES.flatMap((l) => lane(l.key).filter(matches));
 
   function openBrief(n: number): void {
@@ -811,7 +593,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const big = button("bq-zoom", "", "Click or Esc to close");
     const img = h("img");
     img.src = src;
-    img.alt = "Picture for this quest, full size";
+    img.alt = "Picture for this issue, full size";
     big.append(img);
     big.addEventListener("click", unzoom);
     host.append(big);
@@ -827,7 +609,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const old = screen.querySelector(".bq-focus");
     const hadFocus = Boolean(old?.contains(document.activeElement));
     old?.remove();
-    const found = selected === null || tab !== "quests" ? undefined
+    const found = selected === null ? undefined
       : LANES.map((l) => ({ l, card: lane(l.key).find((c) => c.number === selected) })).find((x) => x.card);
     if (!found?.card) selected = null;
     // The board behind the sheet takes no clicks, keys or focus while it is open.
@@ -847,7 +629,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     sheet.dataset.number = String(card.number);
     sheet.setAttribute("role", "dialog");
     sheet.setAttribute("aria-modal", "true");
-    sheet.setAttribute("aria-label", `Quest #${card.number}`);
+    sheet.setAttribute("aria-label", `Issue #${card.number}`);
 
     const top = h("header", "bq-sheet-top");
     const where = h("div", "bq-sheet-where");
@@ -870,8 +652,8 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     close.append(glyph("close"));
     close.setAttribute("aria-label", "Close");
     close.addEventListener("click", closeBrief);
-    nav.append(walk(-1, "Previous quest"), h("small", "bq-pos", at >= 0 ? `${at + 1} of ${order.length}` : ""),
-      walk(1, "Next quest"), close);
+    nav.append(walk(-1, "Previous issue"), h("small", "bq-pos", at >= 0 ? `${at + 1} of ${order.length}` : ""),
+      walk(1, "Next issue"), close);
     top.append(where, nav);
     sheet.append(top);
 
@@ -896,7 +678,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       el.append(glyph(name), document.createTextNode(text));
       facts.append(el);
     };
-    fact("bolt", `${xpOf(card)} XP${card.estimate ? ` · ${card.estimate} min of work` : ""}`, "is-xp");
+    if (card.estimate) fact("clock", `${card.estimate} min of work`);
     if (card.holder) fact("agent", `${engineOf(card.holder).name} on it · ${held(card.claimed_at) || "just now"}`);
     else if (l.key === "waiting") fact("clock", waitReason(card));
     if (card.created_at) fact("inbox", `Filed ${held(card.created_at)} ago`);
@@ -916,7 +698,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       for (const path of card.show.slice(0, 4)) {
         const shot = button("bq-shot", "", "Click to see it big");
         const img = h("img");
-        img.alt = "Picture for this quest";
+        img.alt = "Picture for this issue";
         shot.append(img);
         if (!pictures.has(path)) pictures.set(path, api.picture(path));
         // A path that cannot be read, or a file that is not a picture, shows a plain line, not a broken icon.
@@ -983,7 +765,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const github = button("bq-primary", "", card.url);
     github.append(glyph("external"), document.createTextNode("Open on GitHub"));
     github.addEventListener("click", () => events.openUrl(card.url));
-    foot.append(github, h("small", "", "← → next quest · Esc closes"));
+    foot.append(github, h("small", "", "← → next issue · Esc closes"));
     sheet.append(foot);
     veil.append(sheet);
     screen.append(veil);
@@ -1000,128 +782,19 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     if (hadFocus || document.activeElement === document.body || !document.activeElement) sheet.focus();
   }
 
-  /* ------------------------------------------------------------ crew: builds and scouts */
-
-  function section(title: string, count: number | null, rows: HTMLElement[], empty: string): HTMLElement {
-    const box = h("section", "bd-section");
-    const head = h("h2", "", title);
-    if (count !== null) head.append(h("span", "bd-count", String(count)));
-    box.append(head);
-    if (rows.length) box.append(...rows);
-    else box.append(h("p", "bd-empty", empty));
-    return box;
-  }
-
-  function buildRow(build: RunningBuild | BuildRow): HTMLElement {
-    const running = "pid" in build;
-    const state = running ? { tone: "t-work", word: "" } : buildState(build);
-    const row = h("div", `bd-build ${state.tone}`);
-    // core:pulse — alive. Only a running build's dot moves.
-    row.append(h("i", running ? "bd-dot mo-pulse" : "bd-dot"));
-    // The builder sits where an issue's number sits, so titles line up down the screen.
-    const who = h("b", "bd-num", build.builder);
-    who.title = build.builder;
-    row.append(who);
-    const text = h("div", "bd-text");
-    const title = h("span", "bd-title", build.task && build.task !== "-" ? build.task : "(no title)");
-    title.title = title.textContent ?? "";
-    text.append(title);
-    const facts = running
-      ? [build.effort, build.kind, build.repo]
-      : [build.effort, state.word, build.exit === "4" ? "out of scope" : "", build.repo];
-    const line = h("small", "", facts.filter((f) => f && f !== "-").join(" · "));
-    line.title = line.textContent ?? "";
-    text.append(line);
-    row.append(text);
-    const took = running ? held(build.started) : build.minutes !== "-" ? `${build.minutes}m` : "";
-    row.append(h("span", "bd-kind", took));
-    return row;
-  }
-
-  function scoutRow(scout: Scout): HTMLElement {
-    const isLive = live(scout);
-    const state = scoutState(scout, isLive);
-    const row = h("div", `bd-scout ${state.tone}`);
-    // core:pulse — alive. Only a running scout loops; every other state is still.
-    row.append(h("i", state.word === "running" ? "bd-dot mo-pulse" : "bd-dot"));
-    const text = h("div", "bd-text");
-    const title = h("span", "bd-title", scout.title);
-    title.title = scout.summary;
-    text.append(title);
-    const facts: string[] = [state.word];
-    if (scout.error) facts.push(scout.error);
-    else if (scout.last && scout.last.status !== "running") facts.push(when(scout.last.at), scout.last.note);
-    if (scout.next_at) facts.push(`next ${when(scout.next_at)}`);
-    if (scout.needs) facts.push(`needs ${scout.needs}`);
-    const line = h("small", "", facts.filter(Boolean).join(" · "));
-    line.title = line.textContent ?? "";
-    text.append(line);
-    row.append(text);
-    const kind = h("span", "bd-kind", scout.kind === "script" ? "script" : scout.agent ?? "agent");
-    kind.title = scout.kind === "script" ? "Runs a script. No AI." : `Opens a ${scout.agent} terminal you can watch`;
-    row.append(kind);
-    if (isLive && scout.last?.session) {
-      const show = button("bd-act", "Show", "Bring its terminal forward");
-      show.addEventListener("click", () => events.showSession(scout.last!.session!));
-      row.append(show);
-    } else if (!scout.error) {
-      const run = button("bd-act", "Run", scout.kind === "script" ? "Run it now" : "Open its terminal now");
-      run.disabled = scout.last?.status === "running" && scout.kind === "script";
-      run.addEventListener("click", () => {
-        run.disabled = true;
-        // Then a full read: the list may have been replaced while this ran.
-        void (scout.kind === "script" ? runScript(scout) : launch(scout)).finally(() => void refresh());
-      });
-      row.append(run);
-    }
-    return row;
-  }
-
-  function crew(): HTMLElement {
-    const rows = [...builds.running.map(buildRow), ...builds.recent.map(buildRow)];
-    const empty = builds.error ? `Builds could not be read: ${builds.error}` : "No builds yet. Say orchestrate in a terminal.";
-    const buildBox = section("Builds", builds.running.length, rows, empty);
-    if (builds.error) buildBox.querySelector(".bd-empty")?.classList.add("bd-error-line");
-    const work = h("div", "bd-work");
-    work.append(buildBox);
-
-    const scouts = h("aside", "bd-scouts");
-    scouts.append(h("h2", "", "Scouts"));
-    const groups = new Map<string, Scout[]>();
-    for (const scout of list?.scouts ?? []) {
-      const key = cadence(scout.every);
-      groups.set(key, [...(groups.get(key) ?? []), scout]);
-    }
-    for (const [name, members] of groups) scouts.append(h("h3", "", name), ...members.map(scoutRow));
-    if (!list?.scouts.length) scouts.append(h("p", "bd-empty", "No scouts yet. Add a file to ops/scouts."));
-
-    const body = h("div", "bd-body");
-    body.append(work, scouts);
-    return body;
-  }
-
   /* ------------------------------------------------------------ the screen */
 
   function header(): HTMLElement {
     const head = h("header", "bq-header");
     const left = h("div", "bq-heading");
     left.append(h("h1", "", "Board"));
-    const tabs = h("div", "bq-tabs");
-    tabs.setAttribute("role", "tablist");
-    const running = builds.running.length + (list?.scouts.filter((s) => s.last?.status === "running" && (s.kind === "script" || live(s))).length ?? 0);
-    for (const [key, label] of [["quests", "Quests"], ["crew", running ? `Crew · ${running} running` : "Crew"]] as const) {
-      const t = button(`bq-tab${tab === key ? " is-on" : ""}`, label);
-      t.setAttribute("role", "tab");
-      t.setAttribute("aria-selected", String(tab === key));
-      t.addEventListener("click", () => {
-        if (tab === key) return;
-        tab = key;
-        remember("tab", tab);
-        paint();
-      });
-      tabs.append(t);
+    // One plain count. GitHub not sending the closes reads as unknown, never as zero.
+    if (board && board.done !== undefined) {
+      const done = board.done === null ? "–" : number(days(board.done).today.count);
+      const count = h("span", "bq-today", `${done} done today`);
+      if (board.done === null) count.title = "GitHub did not send the closes. The next refresh tries again.";
+      left.append(count);
     }
-    left.append(tabs);
     const actions = h("div", "bq-actions");
     if (board?.at) {
       const stamp = h("small", "bq-stamp", `Read ${when(board.at)}`);
@@ -1130,7 +803,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     }
     const swipe = button("bq-action is-swipe", "Swipe review", "Judge what was shipped and filed since your last review, one card at a time");
     swipe.addEventListener("click", () => events.openSwipe());
-    const reread = button("bq-action", "Refresh", "Read the board and the scouts again");
+    const reread = button("bq-action", "Refresh", "Read the board again");
     reread.addEventListener("click", () => void refresh(true));
     actions.append(swipe, reread);
     if (board?.repo) {
@@ -1144,19 +817,13 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   function paintScreen(): void {
     if (!visible) return;
-    if (!list && !failure && !board) {
+    if (!failure && !board) {
       screen.replaceChildren(h("p", "bq-loading", "Reading the board…"));
       return;
     }
     const parts: HTMLElement[] = [header()];
     const error = failure || board?.error;
     if (error) parts.push(h("p", "bq-error", `The board could not be read: ${error}`));
-    if (tab === "crew") {
-      lanesHost = filterHost = null;
-      parts.push(crew());
-      screen.replaceChildren(...parts);
-      return;
-    }
     const hasBoard = board && (board.now || board.ready || board.next);
     if (!hasBoard) {
       lanesHost = filterHost = null;
@@ -1167,7 +834,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const caret = focusedSearch ? (document.activeElement as HTMLInputElement).selectionStart : null;
     saveScroll();
     const main = h("div", "bq-main");
-    main.append(scoreStrip(score(board!.done ?? [])));
     filterHost = filterBar();
     main.append(filterHost);
     lanesHost = h("div", "bq-lanes-host");
@@ -1205,7 +871,6 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       void refresh(fresh);
     },
     dispose() {
-      window.clearTimeout(timer);
       screen.replaceChildren();
     },
   };
