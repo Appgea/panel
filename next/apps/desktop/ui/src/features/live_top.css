@@ -1,14 +1,10 @@
-/* The bar over the stage, the legend and the toast. Copied from `.bar`, `.legend` and `.toast` in
-   the concept page CSS. */
+/* The bar over the stage and the toast. Copied from `.bar` and `.toast` in the concept page CSS. */
 
-.live-bar { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0 10px; }
+.live-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0 10px; }
 .live-onair { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--l-ink); box-shadow: 0 0 10px var(--l-ink); animation: live-onair 1.6s ease-in-out infinite; }
 .live.is-reduced .live-onair { animation: none; }
 @keyframes live-onair { 50% { opacity: 0.3; } }
 .live-narr { min-width: 0; font: 500 13px/1.4 var(--l-mono); color: var(--l-ink); overflow-wrap: anywhere; }
-.live-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; padding-bottom: 12px; font-size: 12.5px; color: var(--l-ink-2); }
-.live-legend span { display: inline-flex; align-items: center; gap: 7px; }
-.live-legend i { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); }
 
 .live-toast {
   position: absolute;

@@ -1,6 +1,6 @@
 /** Live's words: names, times and counts, and the small DOM makers every Live file shares. */
 
-import type { EmberOutcome, Harness, State } from "./live_types";
+import type { EmberOutcome, Harness, LiveAgent, State } from "./live_types";
 
 export const HARNESS: Record<Harness, string> = { claude: "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode", gemini: "Gemini", kimi: "Kimi" };
 export const LETTER: Record<Harness, string> = { claude: "C", codex: "X", grok: "G", opencode: "O", gemini: "M", kimi: "K" };
@@ -21,6 +21,22 @@ export const OUTCOME_COLOUR: Record<EmberOutcome, string> = { done: "var(--l-don
 /** Board titles start with their app, "Tavla: …". The row already names the room. */
 export function withoutRoom(title: string, room: string): string {
   return title.toLowerCase().startsWith(`${room.toLowerCase()}: `) ? title.slice(room.length + 2) : title;
+}
+
+/** What an agent is doing, in one line. */
+export function doing(a: LiveAgent): string {
+  switch (a.state) {
+    case "work":
+      return a.now?.label ?? "Working";
+    case "think":
+      return a.steps[0] ? `Planning after ${a.steps[0].label}` : "Planning";
+    case "turn":
+      return a.lastText ?? "Wants to talk";
+    case "stuck":
+      return `Stuck on ${a.now?.label ?? "a step"}`;
+    default:
+      return "Idle";
+  }
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {
@@ -84,16 +100,12 @@ export function button(cls: string, text: string, onClick: () => void): HTMLButt
   return el;
 }
 
-/** Puts an absolutely placed element at a stage box. */
-export function placeAt(el: HTMLElement, x: number, y: number, w?: number, h?: number): void {
-  el.style.transform = `translate(${x}px, ${y}px)`;
-  if (w !== undefined) el.style.width = `${w}px`;
-  if (h !== undefined) el.style.height = `${h}px`;
-}
-
 const HOLD_MS = 900;
 
-/** Stop needs a one-second hold, so a slip never kills an agent. */
+/**
+ * Stop needs a one-second hold, so a slip never kills an agent. A view holding one skips its
+ * repaint while `.is-holding` is on the page, so the poll never drops a real hold.
+ */
 export function holdButton(label: string, fire: () => void): HTMLButtonElement {
   const b = button("opt live-hold is-danger", label, () => undefined);
   let t: number | null = null;
@@ -105,8 +117,10 @@ export function holdButton(label: string, fire: () => void): HTMLButtonElement {
   b.addEventListener("pointerdown", () => {
     b.classList.add("is-holding");
     t = window.setTimeout(() => {
+      // A repaint that swapped the button out mid-hold took its pointerup with it: no fire.
+      const held = b.isConnected && b.classList.contains("is-holding");
       cancel();
-      fire();
+      if (held) fire();
     }, HOLD_MS);
   });
   for (const ev of ["pointerup", "pointerleave", "pointercancel"]) b.addEventListener(ev, cancel);

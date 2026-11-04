@@ -1,11 +1,11 @@
-//! The agents' dots. Copied from `drawDots` (line 1002) and `moveDots` (line 1059) in the
-//! concept page.
+//! The agents, as small electrons.
 //!
 //! A dot lives as long as its agent, keyed by id, so it can glide: each frame it moves toward
-//! its target by k = 1 − e^(−dt × 3.2). Its glow follows its state: Working 0.8, Planning 0.55,
-//! Idle 0.2 and smaller, Wants to talk blinks, Stuck blinks slower. Big dots leave their letter
-//! to HTML. Small ones get a white core. Helpers circle it. With reduced motion nothing blinks,
-//! glides or circles.
+//! its target by k = 1 − e^(−dt × 3.2), leaving a short trail of light. Its glow follows its
+//! state: Working 0.8, Planning 0.55, Idle 0.2 and smaller, Wants to talk blinks, Stuck blinks
+//! slower. A white core sits in each. Helpers circle it on tilted orbits, like electrons around
+//! a nucleus. A crate it carries floats over it. With reduced motion nothing blinks, glides,
+//! trails or circles.
 
 use crate::draw::{phase, srgba, Frame, Kit, Pace, Shape, BLINKING, FAIL, IDLE, INK, MOVING, THINK, WAIT, WORK};
 use crate::{Current, Dot, State, Step};
@@ -31,6 +31,7 @@ struct Look {
     helpers: u32,
     selected: bool,
     hovered: bool,
+    carry: Option<u32>,
 }
 
 /// A helper circling its agent, the `i`th of `n`.
@@ -41,6 +42,17 @@ struct Helper {
     r: f32,
 }
 
+/// A bit of trail left by a moving dot. It shrinks away.
+#[derive(Component)]
+struct Puff {
+    born: f32,
+    size: f32,
+}
+
+/// Most helpers drawn as electrons. A bigger swarm still reads as a swarm.
+const MAX_HELPERS: u32 = 12;
+const PUFF_LIFE: f32 = 0.45;
+
 #[derive(Resource, Default)]
 struct Dots(HashMap<String, Entity>);
 
@@ -48,7 +60,7 @@ const Z: f32 = 0.4;
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<Dots>()
-        .add_systems(Update, (sync.run_if(resource_changed::<Current>), glide, shine, circle).chain().in_set(Step::Draw));
+        .add_systems(Update, (sync.run_if(resource_changed::<Current>), glide, fade_puffs, shine, circle).chain().in_set(Step::Draw));
 }
 
 fn colour(s: State) -> u32 {
@@ -102,7 +114,8 @@ fn sync(
         false
     });
     for d in &current.0.dots {
-        let look = Look { r: d.r, state: d.state, helpers: d.helpers.min(6), selected: d.selected, hovered: d.hovered };
+        let carry = d.carry.as_deref().map(|c| crate::hex(Some(c)));
+        let look = Look { r: d.r, state: d.state, helpers: d.helpers.min(MAX_HELPERS), selected: d.selected, hovered: d.hovered, carry };
         let target = Vec2::new(d.x, d.y);
         if let Some(&e) = index.0.get(&d.id) {
             if let Ok((mut a, mut tf)) = agents.get_mut(e) {
@@ -142,8 +155,13 @@ fn build(commands: &mut Commands, e: Entity, kit: &mut Kit, meshes: &mut Assets<
         (glow.clone(), glow_mat, Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(gr))),
         (circle.clone(), kit.paint(mats, col, 1.0), Transform::from_scale(Vec3::splat(d.r))),
     ];
-    if d.r < 7.0 {
-        parts.push((circle.clone(), kit.paint(mats, 0xFFFFFF, 0.55), Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::splat(d.r * 0.38))));
+    parts.push((circle.clone(), kit.paint(mats, 0xFFFFFF, 0.8), Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::splat(d.r * 0.4))));
+    if let Some(c) = d.carry.as_deref().map(|c| crate::hex(Some(c))) {
+        let square = kit.shape(meshes, Shape::Square);
+        let lift = d.r + 9.0;
+        let tilt = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+        parts.push((glow.clone(), kit.paint(mats, c, 0.6), Transform::from_xyz(0.0, lift, -0.05).with_scale(Vec3::splat(16.0))));
+        parts.push((square, kit.paint(mats, c, 1.0), Transform::from_xyz(0.0, lift, 0.03).with_rotation(tilt).with_scale(Vec3::new(6.0, 6.0, 1.0))));
     }
     if d.selected || d.hovered {
         let rr = d.r + 5.0;
@@ -154,19 +172,38 @@ fn build(commands: &mut Commands, e: Entity, kit: &mut Kit, meshes: &mut Assets<
         for (mesh, mat, tf) in parts {
             p.spawn((Mesh2d(mesh), MeshMaterial2d(mat), tf));
         }
-        let n = d.helpers.min(6);
+        let n = d.helpers.min(MAX_HELPERS);
+        // Three orbit planes, like the shells drawn around an atom.
+        let shells = kit.shape(meshes, Shape::Ellipse(crate::draw::tenth(d.r + 11.0), crate::draw::tenth((d.r + 11.0) * 0.36), 6));
+        for s in 0..n.min(3) {
+            p.spawn((Mesh2d(shells.clone()), MeshMaterial2d(kit.paint(mats, col, 0.22)), Transform::from_xyz(0.0, 0.0, -0.02).with_rotation(Quat::from_rotation_z(s as f32 * std::f32::consts::FRAC_PI_3))));
+        }
         for i in 0..n {
             p.spawn((Transform::from_xyz(0.0, 0.0, 0.005), Visibility::default(), Helper { i, n, r: d.r })).with_children(|h| {
-                h.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(mats, col, 0.7)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(8.0))));
-                h.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(mats, col, 1.0)), Transform::from_scale(Vec3::splat(2.6))));
+                h.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(mats, col, 0.7)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(7.0))));
+                h.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(mats, col, 1.0)), Transform::from_scale(Vec3::splat(1.6))));
             });
         }
     });
 }
 
-/// Each dot moves toward its pad. While any moves, frames come at 33 ms.
-fn glide(time: Res<Time>, frame: Res<Frame>, current: Res<Current>, mut pace: ResMut<Pace>, mut agents: Query<(&Agent, &mut Transform)>) {
-    let k = if current.0.reduced { 1.0 } else { 1.0 - (-time.delta_secs() * 3.2).exp() };
+/// Each dot moves toward its target, leaving puffs of light. While any moves, frames come at
+/// 33 ms.
+#[allow(clippy::too_many_arguments)]
+fn glide(
+    mut commands: Commands,
+    mut kit: ResMut<Kit>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut mats: ResMut<Assets<ColorMaterial>>,
+    time: Res<Time>,
+    frame: Res<Frame>,
+    current: Res<Current>,
+    mut pace: ResMut<Pace>,
+    mut agents: Query<(&Agent, &mut Transform)>,
+) {
+    let reduced = current.0.reduced;
+    let k = if reduced { 1.0 } else { 1.0 - (-time.delta_secs() * 3.2).exp() };
+    let glow = kit.shape(&mut meshes, Shape::Glow);
     for (a, mut tf) in &mut agents {
         let to = frame.at(a.target.x, a.target.y, Z);
         let d = to - tf.translation;
@@ -174,8 +211,27 @@ fn glide(time: Res<Time>, frame: Res<Frame>, current: Res<Current>, mut pace: Re
             tf.translation = to;
             continue;
         }
-        tf.translation += d * k;
+        let step = d * k;
+        if !reduced && step.truncate().length() > 0.8 {
+            let size = a.look.r * 3.2;
+            let paint = kit.paint(&mut mats, colour(a.look.state), 0.5);
+            commands.spawn((Mesh2d(glow.clone()), MeshMaterial2d(paint), Transform::from_translation(tf.translation.with_z(Z - 0.05)).with_scale(Vec3::splat(size)), Puff { born: time.elapsed_secs(), size }));
+        }
+        tf.translation += step;
         pace.ask(MOVING);
+    }
+}
+
+fn fade_puffs(mut commands: Commands, time: Res<Time>, mut pace: ResMut<Pace>, mut puffs: Query<(Entity, &Puff, &mut Transform)>) {
+    let now = time.elapsed_secs();
+    for (e, p, mut tf) in &mut puffs {
+        let u = (now - p.born) / PUFF_LIFE;
+        if u >= 1.0 {
+            commands.entity(e).despawn();
+            continue;
+        }
+        pace.ask(MOVING);
+        tf.scale = Vec3::splat(p.size * (1.0 - u) * (1.0 - u));
     }
 }
 
@@ -197,7 +253,7 @@ fn shine(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, mut mat
     }
 }
 
-/// Helpers circle at (r + 10, r + 8), 1.8 radians a second.
+/// Helpers circle on three tilted ellipses, 2.4 radians a second.
 fn circle(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, agents: Query<&Agent>, mut helpers: Query<(&Helper, &ChildOf, &mut Transform)>) {
     let reduced = current.0.reduced;
     let t = if reduced { 0.0 } else { time.elapsed_secs() };
@@ -206,8 +262,14 @@ fn circle(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, agents
             pace.ask(MOVING);
         }
         let ph = agents.get(parent.parent()).map(|a| a.phase).unwrap_or(0.0);
-        let an = t * 1.8 + h.i as f32 * std::f32::consts::TAU / h.n as f32 + ph;
-        tf.translation.x = an.cos() * (h.r + 10.0);
-        tf.translation.y = an.sin() * (h.r + 8.0);
+        let shell = h.i % 3;
+        let per_shell = h.n.div_ceil(3).max(1);
+        let an = t * (2.4 - 0.3 * shell as f32) + (h.i / 3) as f32 * std::f32::consts::TAU / per_shell as f32 + ph + shell as f32;
+        let (rx, ry) = (h.r + 11.0, (h.r + 11.0) * 0.36);
+        let p = Vec2::new(an.cos() * rx, an.sin() * ry);
+        let tilt = shell as f32 * std::f32::consts::FRAC_PI_3;
+        let (s, c) = tilt.sin_cos();
+        tf.translation.x = p.x * c - p.y * s;
+        tf.translation.y = p.x * s + p.y * c;
     }
 }

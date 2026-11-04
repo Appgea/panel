@@ -1057,6 +1057,12 @@ async fn live_world(state: State<'_, DesktopState>) -> Result<live::World, Strin
     Ok(world)
 }
 
+/// Deletes one animation from Live's catalog. The next agent doing that verb gets a new one.
+#[tauri::command]
+async fn live_catalog_delete(verb: String) -> Result<(), String> {
+    off_main(move || live::catalog::delete(&verb)).await
+}
+
 /// Live's hold-to-stop. Only a process the scan lists right now as an agent or a job, never a
 /// service, so a stale or forged pid cannot reach anything else. SIGTERM lets it clean up.
 #[tauri::command]
@@ -4416,6 +4422,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             live_world,
             live_stop,
+            live_catalog_delete,
             launch_context,
             manager_project,
             main_folder_project,

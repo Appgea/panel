@@ -1,15 +1,16 @@
 /** The shapes Live passes between its files. The backend's types first, then the screen's state. */
 
 import type { BoardFeed, BoardIssue, Card } from "./live_cards";
-import type { Layout } from "./live_layout";
-import type { Play } from "./live_playbook";
+import type { FxOut, Pt, Script } from "./live_script";
+import type { World } from "./live_world";
 
 export type Harness = "claude" | "codex" | "grok" | "opencode" | "gemini" | "kimi";
 export type State = "work" | "think" | "turn" | "idle" | "stuck";
 export type Station = "plan" | "build" | "check" | "ship";
 /** How an agent ended (src-tauri/src/live/embers.rs). */
 export type EmberOutcome = "done" | "failed" | "stopped" | "crashed" | "stuck";
-export type Step ={ atMs: number; label: string; station: Station; file?: string; helper?: boolean; asks?: boolean };
+/** `verb` names the kind of work and picks its animation (src-tauri/src/live/verbs.rs). */
+export type Step = { atMs: number; label: string; station: Station; file?: string; helper?: boolean; asks?: boolean; verb?: string };
 
 export type LiveAgent = {
   id: string;
@@ -90,6 +91,8 @@ export type LiveWorld = {
     /** Weekly quota per harness, where this Mac keeps a record. Claude only, for now. */
     quota?: { harness: string; used: number }[];
   };
+  /** One animation script per verb (src-tauri/src/live/catalog.rs). */
+  catalog?: Script[];
   scannedMs: number;
 };
 
@@ -108,6 +111,8 @@ export type LiveEvents = {
   openFile(path: string): void;
   openHistory(session: string): void;
   stop(pid: number): Promise<void>;
+  /** Removes one animation from the catalog. The next agent doing that verb gets a new one. */
+  deleteAnimation(verb: string): Promise<void>;
 };
 
 /** What `apps/live` exports after wasm-bindgen. */
@@ -115,13 +120,17 @@ export type BevyView = {
   default: () => Promise<unknown>;
   start: (canvas: string) => void;
   set_scene: (json: string) => void;
+  set_camera: (x: number, y: number, zoom: number) => void;
   set_paused: (paused: boolean) => void;
 };
 
 export type Selection = { kind: "agent" | "ember" | "room"; id: string } | null;
 
-/** A light on its way along a card's thread: a new card flies in, an answer flies out. */
+/** A light between a district and the desk: a new card flies in, an answer flies out. */
 export type Flight = { dir: "in" | "out"; room: string; agent: string | null };
+
+/** The world point at the stage's centre, and world pixels to CSS pixels. */
+export type Camera = { x: number; y: number; zoom: number };
 
 /** Everything Live remembers between polls. Only live.ts replaces `world` and `board`. */
 export type LiveState = {
@@ -129,7 +138,18 @@ export type LiveState = {
   board: BoardFeed | null;
   boardNote: string;
   boardRead: boolean;
-  layout: Layout | null;
+  layout: World | null;
+  /** District slots by key, kept across polls so a district never jumps. */
+  slots: Map<string, number>;
+  camera: Camera;
+  /** The owner moved the camera. Until then it fits the map on its own. */
+  cameraHeld: boolean;
+  /** What running scripts change: where an agent walked, what it carries, what it says. */
+  walks: Map<string, Pt>;
+  carries: Map<string, string>;
+  bubbles: Map<string, string>;
+  /** File tiles a script lit, by path, until a time. */
+  lights: Map<string, { color: string; until: number }>;
   selection: Selection;
   /** The dot under the pointer, by agent id. */
   hover: string | null;
@@ -140,7 +160,7 @@ export type LiveState = {
   answered: Set<string>;
   seen: Record<string, number>;
   talkCard: string | null;
-  pendingFx: Play[];
+  pendingFx: FxOut[];
   pendingFlights: Flight[];
   reduced: boolean;
 };
@@ -160,6 +180,8 @@ export type LiveCtx = {
   select(next: Selection): void;
   /** Lays out and sends a new scene to Bevy. */
   draw(): void;
+  /** A world point on the stage, in CSS pixels. */
+  toScreen(p: Pt): Pt;
   paintQueue(): void;
   poll(): void;
   /** A short line for the owner, gone after a few seconds. */

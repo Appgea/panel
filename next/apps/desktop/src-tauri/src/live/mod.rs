@@ -6,11 +6,13 @@
 //! their own. Claude transcripts say what each agent does (track.rs). Only the reports of
 //! stopped agents are stored (embers.rs). The rest is read fresh, so it never outlives a poll.
 
+pub mod catalog;
 mod embers;
 pub use embers::stopped_by_owner;
 mod jobs;
 mod mac;
 mod track;
+mod verbs;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -128,6 +130,8 @@ pub struct World {
     pub embers: Vec<embers::Ember>,
     pub rooms: Vec<Room>,
     pub mac: mac::Mac,
+    /// The animation scripts, one per verb (catalog.rs).
+    pub catalog: Vec<serde_json::Value>,
     pub scanned_ms: u64,
 }
 
@@ -270,7 +274,10 @@ pub fn scan() -> World {
         };
     }
     let rooms = rooms.rooms();
-    World { agents, jobs, embers, rooms, mac, scanned_ms: now }
+    // The steps of the last poll window, newest first: any verb among them without a script gets one.
+    let seen: Vec<(String, String)> = agents.iter().flat_map(|a| a.now.iter().chain(a.steps.iter().take(5))).map(|s| (s.verb.clone(), s.label.clone())).collect();
+    catalog::write_missing(&seen);
+    World { agents, jobs, embers, rooms, mac, catalog: catalog::read(), scanned_ms: now }
 }
 
 /// One worker a `board work --fleet` run started, from its `board-work-fleet-<pid>.json`.

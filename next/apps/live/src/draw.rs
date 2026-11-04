@@ -83,15 +83,9 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// The page measures from the top left in CSS pixels. Bevy's 2D camera centres on the
-    /// origin with y up.
+    /// The page's world has y growing down. Bevy's has y up. The camera does the rest.
     pub fn at(&self, x: f32, y: f32, z: f32) -> Vec3 {
-        Vec3::new(x - self.w / 2.0, self.h / 2.0 - y, z)
-    }
-
-    /// A unit square stretched over a box given from its top left.
-    pub fn boxed(&self, x: f32, y: f32, w: f32, h: f32, z: f32) -> Transform {
-        Transform::from_translation(self.at(x + w / 2.0, y + h / 2.0, z)).with_scale(Vec3::new(w, h, 1.0))
+        Vec3::new(x, -y, z)
     }
 }
 
@@ -121,11 +115,6 @@ pub fn dashes(frame: Frame, a: Vec2, b: Vec2, z: f32, width: f32, dash: f32, gap
     out
 }
 
-/// A point on a cubic bezier, `u` from 0 to 1.
-pub fn bezier(p: [Vec2; 4], u: f32) -> Vec2 {
-    let v = 1.0 - u;
-    p[0] * (v * v * v) + p[1] * (3.0 * v * v * u) + p[2] * (3.0 * v * u * u) + p[3] * (u * u * u)
-}
 
 /// Ease in and out, as the concept's flights use.
 pub fn ease(u: f32) -> f32 {

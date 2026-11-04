@@ -4265,6 +4265,7 @@ async function boot(): Promise<void> {
     openFile: (path) => void openFullPath({ path }, false, null).catch((error: unknown) => console.warn("[panel] live", error)),
     openHistory: (session) => showHistory({ session }),
     stop: (pid) => invoke("live_stop", { pid }),
+    deleteAnimation: (verb) => invoke("live_catalog_delete", { verb }),
   });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,

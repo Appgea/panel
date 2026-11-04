@@ -1,26 +1,17 @@
 /**
- * The panel beside a dot, an ember or a room, and the peek on hover. Copied from the concept
- * page: `agentHTML` line 1153, `reportHTML` line 1162, `roomHTML` line 1172, `placePanel`
- * line 1207, `showPeek` line 1239, and `.apanel` and `.peek` in its CSS.
+ * The panel for a dot, an ember or a district, docked at the top right of the map. Copied from
+ * the concept page: `agentHTML` line 1153, `reportHTML` line 1162, `roomHTML` line 1172, and
+ * `.apanel` in its CSS.
  */
 
 import { errorText } from "../errors";
-import { doing } from "./live_rooms";
-import { ago, button, clock, div, HARNESS, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, short, since, span, STATE_RANK, STATE_WORD } from "./live_text";
+import { ago, button, clock, div, doing, HARNESS, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, short, since, span, STATE_RANK, STATE_WORD } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber, Step } from "./live_types";
 import "./live_panel.css";
 
-const WIDTH = 304;
+export type Panel = { paint(): void };
 
-export type Line = { x1: number; y1: number; x2: number; y2: number };
-export type Panel = {
-  paint(): void;
-  place(): void;
-  tether(): Line | null;
-  peek(agentId: string | null): void;
-};
-
-export function mountPanel(ctx: LiveCtx, el: HTMLElement, peekEl: HTMLElement): Panel {
+export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
   const s = ctx.s;
   let talking = false;
   let shown = "";
@@ -48,6 +39,8 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement, peekEl: HTMLElement): 
   }
 
   function render(key: string, nodes: HTMLElement[]): void {
+    // A hand on Hold to Stop keeps this panel as it is until it lets go.
+    if (key === shown && el.querySelector(".is-holding")) return;
     if (key !== shown) talking = false;
     shown = key;
     const steps = el.querySelector(".pdone");
@@ -64,7 +57,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement, peekEl: HTMLElement): 
       if (focused || talking) reply.focus();
     }
     el.hidden = false;
-    place();
   }
 
   function hide(): void {
@@ -252,85 +244,5 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement, peekEl: HTMLElement): 
     }
   }
 
-  /** Where the open panel points: its dot, its ember, or its room's right edge. */
-  function anchor(): { x: number; y: number; box?: { x: number; y: number; w: number; h: number } } | null {
-    const l = s.layout;
-    const sel = s.selection;
-    if (!l || !sel) return null;
-    const at = sel.kind === "agent" ? l.dots.get(sel.id) : sel.kind === "ember" ? l.embers.get(sel.id) : undefined;
-    if (at) return { x: at.x, y: at.y };
-    if (sel.kind !== "room") return null;
-    const r = l.rooms.find((x) => x.key === sel.id);
-    if (r) return { x: r.x + r.w, y: r.y + 10, box: r };
-    const q = l.quiet.find((x) => x.key === sel.id);
-    return q ? { x: q.x + q.w / 2, y: q.y + q.h } : null;
-  }
-
-  /** Beside the dot and inside the stage, never over the dot. */
-  function place(): void {
-    const l = s.layout;
-    const A = anchor();
-    if (el.hidden || !l || !A) return;
-    const W = l.w;
-    const H = Math.max(l.h, ctx.stage.clientHeight);
-    const pw = l.phone ? W - 24 : WIDTH;
-    el.style.width = `${pw}px`;
-    const ph = el.offsetHeight;
-    let left: number;
-    let top: number;
-    if (l.phone) {
-      left = 12;
-      top = A.y + 22;
-      if (top + ph > H - 8) top = Math.max(8, A.y - 22 - ph);
-    } else if (A.box) {
-      left = A.box.x + A.box.w + 10;
-      if (left + pw > W - 10) left = A.box.x - 10 - pw;
-      left = clamp(left, 10, W - pw - 10);
-      top = clamp(A.box.y, 10, Math.max(10, H - ph - 10));
-    } else {
-      left = A.x + 26;
-      if (left + pw > W - 10) left = A.x - 26 - pw;
-      left = clamp(left, 10, W - pw - 10);
-      top = clamp(A.y - 44, 10, Math.max(10, H - ph - 10));
-    }
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-  }
-
-  /** The thin line from the selected dot to the panel's nearest edge, level with the dot. */
-  function tether(): Line | null {
-    const sel = s.selection;
-    if (el.hidden || sel?.kind !== "agent") return null;
-    const d = s.layout?.dots.get(sel.id);
-    if (!d) return null;
-    const l = el.offsetLeft;
-    const t = el.offsetTop;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    if (d.x >= l && d.x <= l + w && d.y >= t && d.y <= t + h) return null;
-    const px = d.x < l ? l : d.x > l + w ? l + w : d.x;
-    return { x1: d.x, y1: d.y, x2: px, y2: clamp(d.y, t + 18, t + h - 18) };
-  }
-
-  function peek(agentId: string | null): void {
-    const a = agentId ? ctx.agentById(agentId) : undefined;
-    const d = agentId ? s.layout?.dots.get(agentId) : undefined;
-    const open = s.selection?.kind === "agent" && s.selection.id === agentId;
-    if (!a || !d || open) {
-      peekEl.hidden = true;
-      return;
-    }
-    peekEl.textContent = [ctx.nameOf(a), STATE_WORD[a.state], a.now?.label].filter(Boolean).join(" · ");
-    peekEl.hidden = false;
-    const w = peekEl.offsetWidth;
-    const W = s.layout!.w;
-    peekEl.style.left = `${clamp(d.x - w / 2, 6, Math.max(6, W - w - 6))}px`;
-    peekEl.style.top = `${Math.max(6, d.y - d.r - 40)}px`;
-  }
-
-  return { paint, place, tether, peek };
-}
-
-function clamp(v: number, a: number, b: number): number {
-  return Math.max(a, Math.min(b, v));
+  return { paint };
 }

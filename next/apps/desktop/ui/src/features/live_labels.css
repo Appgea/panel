@@ -1,0 +1,93 @@
+/* The words on the map. Each element sits at its world point by a transform from live_labels.ts
+   and centres itself on it. */
+
+.live-fixed, .live-agents { position: absolute; inset: 0; pointer-events: none; }
+.live-fixed > *, .live-agents > * { position: absolute; left: 0; top: 0; pointer-events: auto; }
+
+.live-sign {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  padding: 3px 8px;
+  margin: 0;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+  translate: -50% calc(-100% - 8px);
+}
+.live-sign:hover .live-sign-name { text-decoration: underline; text-decoration-color: var(--l-line-2); text-underline-offset: 3px; }
+.live-sign:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 2px; }
+.live-sign-name { font: 600 13.5px/1.25 var(--l-sans); color: var(--l-ink); }
+.live-sign-meta { font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.live-sign-meta.is-card { color: var(--l-turn); }
+.live-sign-meta.is-stuck { color: var(--l-stuck); }
+
+.live-hub { display: grid; gap: 1px; pointer-events: none; white-space: nowrap; }
+.live-hub-name { overflow: hidden; text-overflow: ellipsis; font: 600 12.5px/1.3 var(--l-sans); color: var(--l-ink); }
+.live-hub-line { overflow: hidden; text-overflow: ellipsis; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-2); }
+.live-hub.is-small .live-hub-line { display: none; }
+.live-hub-line.is-hot { color: var(--l-turn); }
+.live-bay { display: grid; gap: 1px; pointer-events: none; }
+.live-bay-name { font: 500 10px/1.2 var(--l-sans); color: var(--l-ink-3); }
+.live-bay-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.live-bay.is-held .live-bay-who { color: var(--l-ink); }
+
+.live-left { display: flex; align-items: center; gap: 10px; max-width: 360px; translate: -50% 0; }
+.live-left[hidden] { display: none; }
+.live-left-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/14px var(--l-mono); color: var(--l-turn); }
+.live-left .opt { flex: none; padding: 4px 8px; font-size: 12px; }
+
+.live-mark {display: grid; justify-items: center; gap: 1px; pointer-events: none; white-space: nowrap; translate: -50% 0; }
+.live-mark-name { font: 600 12.5px/1.3 var(--l-sans); color: var(--l-ink-2); }
+.live-mark-line { font: 400 10.5px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.live-mark.is-desk .live-mark-name { color: var(--l-turn); }
+
+/* An agent: an invisible hit circle on its dot, its name under it, its bubble over it. */
+.live-agent {
+  width: 26px;
+  height: 26px;
+  margin: -13px 0 0 -13px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+  transition: transform 1.05s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.is-panning .live-agent, .is-reduced .live-agent { transition: none; }
+.live-agent:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 2px; }
+.live-tag {
+  position: absolute;
+  left: 50%;
+  top: 22px;
+  translate: -50% 0;
+  white-space: nowrap;
+  font: 500 10.5px/1.2 var(--l-mono);
+  color: var(--l-ink-2);
+  pointer-events: none;
+}
+.live-agent.is-turn .live-tag { color: var(--l-turn); }
+.live-agent.is-stuck .live-tag { color: var(--l-stuck); }
+.live-bubble {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  translate: -50% 0;
+  width: max-content;
+  max-width: 210px;
+  padding: 4px 8px;
+  border: 1px solid var(--l-line-2);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--l-raise) 92%, transparent);
+  font: 400 11.5px/1.35 var(--l-sans);
+  color: var(--l-ink);
+  text-align: left;
+  pointer-events: none;
+  animation: live-bubble-in 0.25s ease-out;
+}
+.live-bubble[hidden], .live-tag[hidden] { display: none; }
+@keyframes live-bubble-in { from { opacity: 0; translate: -50% 4px; } }

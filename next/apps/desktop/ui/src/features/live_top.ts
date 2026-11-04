@@ -1,7 +1,7 @@
 /**
- * The bar over the stage: an on-air dot, the narrator line, the colour legend, and the toast.
- * Copied from the concept page: the bar and legend markup at line 192, `narr()` at line 1286,
- * and `.toast` in its CSS.
+ * The bar over the map: an on-air dot, the narrator line, and the toast. Copied from the
+ * concept page: the bar markup at line 192, `narr()` at line 1286, and `.toast` in its CSS.
+ * No colour legend: every agent's words say what it does.
  */
 
 import { queueLine } from "./live_cards";
@@ -10,23 +10,12 @@ import type { LiveCtx } from "./live_types";
 import "./live_top.css";
 
 const TOAST_MS = 3000;
-const LEGEND: [string, string][] = [
-  ["var(--l-work)", "Working"],
-  ["var(--l-think)", "Planning"],
-  ["var(--l-turn)", "Wants to talk"],
-  ["var(--l-idle)", "Idle"],
-  ["var(--l-stuck)", "Stuck"],
-  ["var(--l-done)", "Done, then an ember"],
-];
 
 export const TOP_HTML = `
   <header class="live-bar">
     <span class="live-onair" aria-hidden="true"></span>
     <span class="live-narr" data-narr>Looking for agents</span>
-  </header>
-  <div class="live-legend" aria-label="What the colours mean">
-    ${LEGEND.map(([c, w]) => `<span><i style="--c:${c}"></i>${w}</span>`).join("")}
-  </div>`;
+  </header>`;
 
 export type Top = { paint(): void; toast(text: string, bad?: boolean): void; say(text: string): void };
 
@@ -50,7 +39,7 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
     const parts: string[] = [];
     if (!working.length) parts.push(`${agents.length} ${plural(agents.length, "agent")}, none working.`);
     else if (rooms.size === 1 && busiest) parts.push(`${busiest[1]} ${plural(busiest[1], "agent")} working in ${ctx.roomName(busiest[0])}.`);
-    else parts.push(`${working.length} agents working in ${rooms.size} rooms.`);
+    else parts.push(`${working.length} agents working in ${rooms.size} projects.`);
     const stuck = agents.filter((a) => a.state === "stuck").length;
     if (stuck) parts.push(`${stuck} stuck.`);
     const cards = ctx.s.cards;

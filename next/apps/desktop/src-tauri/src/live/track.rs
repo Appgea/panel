@@ -53,6 +53,9 @@ pub struct Step {
     /// The agent asked the owner a question and waits for the answer.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub asks: bool,
+    /// The kind of work, like `git.push`, which picks its animation (verbs.rs).
+    #[serde(default)]
+    pub verb: String,
 }
 
 /// One transcript folded so far.
@@ -213,14 +216,15 @@ impl Track {
                     if let Some(label) = self.last_text.clone() {
                         self.steps += 1;
                         let station = station_of(&label);
-                        self.finish(Step { at_ms: at, label: clip(&label, 90), station, file: None, helper: false, asks: false });
+                        self.finish(Step { at_ms: at, label: clip(&label, 90), station, file: None, helper: false, asks: false, verb: "think".into() });
                     }
                 }
             }
             ("response_item", "custom_tool_call" | "function_call" | "local_shell_call") => {
                 let id = p["call_id"].as_str().unwrap_or_default().to_string();
                 let station = self.done.back().map(|s| s.station).unwrap_or(Station::Build);
-                let step = Step { at_ms: at, label: CODEX_COMMAND.into(), station, file: None, helper: false, asks: false };
+                let verb = super::verbs::of_tool(p["name"].as_str().unwrap_or("shell"), codex_command(p).as_deref());
+                let step = Step { at_ms: at, label: CODEX_COMMAND.into(), station, file: None, helper: false, asks: false, verb };
                 if !id.is_empty() && !self.open.iter().any(|(o, _)| *o == id) {
                     self.open.push((id, step));
                 }
@@ -288,7 +292,16 @@ fn step(name: &str, input: &Value, at_ms: u64) -> Option<Step> {
         | "ScheduleWakeup" | "EnterPlanMode" | "ExitPlanMode" | "Monitor" | "ListAgents" => return None,
         other => (other.to_string(), Station::Build),
     };
-    Some(Step { at_ms, label: clip(&label, 90), station, file, helper, asks })
+    let verb = super::verbs::of_tool(name, s("command"));
+    Some(Step { at_ms, label: clip(&label, 90), station, file, helper, asks, verb })
+}
+
+/// The shell text of a Codex call: `arguments` is a JSON string with `cmd` or a `command`
+/// list, and a local shell call keeps the list under `action`.
+fn codex_command(p: &Value) -> Option<String> {
+    let args: Value = p["arguments"].as_str().and_then(|a| serde_json::from_str(a).ok()).unwrap_or(Value::Null);
+    let join = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(" "));
+    args["cmd"].as_str().map(str::to_string).or_else(|| join(&args["command"])).or_else(|| join(&p["action"]["command"]))
 }
 
 /// Where a command's own description puts the work. Checked words first: "build and test" is a check.

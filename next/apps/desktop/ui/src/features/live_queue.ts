@@ -1,13 +1,12 @@
 /**
- * The card beside the owner's ring: one piece of business at a time, in value per minute
- * (live_cards.ts). One key answers it. Copied from `renderCard` in the concept page, line 1076,
- * and `.qcard` in its CSS, lines 48 to 74.
+ * The card docked at the bottom right of the map: one piece of business at a time, in value per
+ * minute (live_cards.ts). One key answers it. Copied from `renderCard` in the concept page, line
+ * 1076, and `.qcard` in its CSS, lines 48 to 74.
  */
 
 import { errorText } from "../errors";
 import { buildCards, KIND, managerBrief, order, scoreLine, type Act, type Card, type CardKind } from "./live_cards";
-import type { Layout } from "./live_layout";
-import { button, div, placeAt, span, withoutRoom } from "./live_text";
+import { button, div, span, withoutRoom } from "./live_text";
 import type { LiveCtx } from "./live_types";
 import "./live_queue.css";
 
@@ -250,15 +249,6 @@ export function mountQueue(ctx: LiveCtx, el: HTMLElement): Queue {
   }
 
   return { paint, onKey };
-}
-
-/** The count in the owner's ring, and "You" under it. Bevy draws the ring itself. */
-export function ringWords(ctx: LiveCtx, l: Layout): HTMLElement[] {
-  const n = div(`live-ring-count${ctx.s.cards.length ? "" : " is-empty"}`, String(ctx.s.cards.length));
-  placeAt(n, l.ring.x, l.ring.y);
-  const you = div("live-ring-you", "You");
-  placeAt(you, l.ring.x, l.ring.y + l.ring.r + 5);
-  return [n, you];
 }
 
 /** Up to four items, then "+N more". */

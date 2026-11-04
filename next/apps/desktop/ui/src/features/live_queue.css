@@ -1,10 +1,12 @@
-/* The card beside the ring. Copied from `.qcard` in the concept page CSS, lines 48 to 74. */
+/* The card docked at the bottom right of the map. Copied from `.qcard` in the concept page CSS,
+   lines 48 to 74. */
 
 .qcard {
   position: absolute;
-  left: 0;
-  top: 0;
+  right: 14px;
+  bottom: 14px;
   z-index: 2;
+  width: min(400px, calc(100% - 28px));
   padding: 14px 16px 12px;
   border: 1px solid var(--l-line-2);
   border-radius: 12px;
@@ -56,8 +58,4 @@
 .qlist li::before { content: ""; position: absolute; left: 2px; top: 0.55em; width: 5px; height: 5px; border-radius: 50%; background: var(--l-ink-3); }
 .qlist .more { color: var(--l-ink-3); }
 .qlist .more::before { display: none; }
-.live-ring-count, .live-ring-you { position: absolute; left: 0; top: 0; translate: -50% 0; pointer-events: none; text-align: center; }
-.live-ring-count { translate: -50% -50%; font: 700 24px/1 var(--l-display); color: var(--l-ink); }
-.live-ring-count.is-empty { color: var(--l-ink-3); }
-.live-ring-you { font: 500 10.5px/14px var(--l-sans); color: var(--l-ink-2); }
 .qcard button:focus-visible, .reply:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 2px; }

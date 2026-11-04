@@ -1,30 +1,37 @@
 /**
- * Live — what every agent, script and process on this Mac is doing, and the few things that
- * need the owner. The target look is the concept page at
- * next/apps/live/concept.html. Every "concept page" line number in Live's files points there.
+ * Live — a dark map of this Mac where every agent is a small electron that acts out what it is
+ * doing. The owner drags and zooms it like a game scene.
  *
- * One drawn building. Project rooms keep fixed places (live_layout.ts), each with four station
- * pads. This Mac is the base. The owner's ring sits under it with the card beside it. Bevy, built
- * to WebAssembly from apps/live, draws the boxes and the light from the scene in live_scene.ts.
- * Every word is HTML on top: live_rooms, live_queue, live_panel, live_mac and live_top.
+ * The map (live_world.ts): This Mac in the middle with its testlock bays, the GitHub tower above,
+ * the owner's desk below, the board left and the web gate right. Each busy project is a round
+ * district around them. Silent projects are not drawn.
  *
- * This file only mounts, polls, keeps the state and wires the parts together. Polled every 2 s
- * and the board every 60 s, only while the screen is open. Bevy sleeps while it is closed. If
- * Bevy cannot start, everything else still works and the stage says why.
+ * Each step an agent takes has a verb, and each verb has an animation script in the catalog
+ * (live_script.ts). A git push carries a crate up the tower. A search sweeps a radar. A verb
+ * with no script yet gets one written on its own (src-tauri/src/live/catalog.rs), and the owner
+ * deletes bad ones in the catalog view (live_catalog.ts).
+ *
+ * Bevy, built to WebAssembly from apps/live, draws every shape from the scene in live_scene.ts.
+ * Words are HTML on top: live_labels, live_queue (the card), live_panel and live_top.
+ *
+ * This file mounts, polls, keeps the state, moves the camera and starts scripts. Polled every
+ * 2 s and the board every 60 s, only while the screen is open. Bevy sleeps while it is closed.
+ * If Bevy cannot start, everything else still works and the stage says why.
  */
 
 import { errorText } from "../errors";
 import type { BoardFeed, BoardIssue } from "./live_cards";
-import { layout } from "./live_layout";
-import { paintMac } from "./live_mac";
+import { mountCatalog } from "./live_catalog";
+import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
 import { direct, type EmberEnd, type Seen } from "./live_playbook";
-import { mountQueue, readSeen, ringWords } from "./live_queue";
-import { paintRooms } from "./live_rooms";
+import { mountQueue, readSeen } from "./live_queue";
 import { scene } from "./live_scene";
-import { HARNESS } from "./live_text";
+import { PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
+import { ago, button, div, doing, HARNESS, OUTCOME_COLOUR, OUTCOME_WORD, span } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
-import type { BevyView, LiveAgent, LiveCtx, LiveEvents, LiveState, Selection, Station } from "./live_types";
+import type { BevyView, LiveAgent, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
+import { lay } from "./live_world";
 import "./live.css";
 
 export type { LiveAgent, LiveEmber, LiveEvents, LiveJob, LiveWorld } from "./live_types";
@@ -32,8 +39,12 @@ export type LiveHandle = { open(): void; clear(): void };
 
 const POLL_MS = 2000;
 const BOARD_MS = 60_000;
-/** A dot moves to a new station only after it held there this long, so it never jitters. */
-const STATION_HOLD_MS = 10_000;
+/** More scripts at once than this is noise. A step that finds no room just shows its words. */
+const MAX_SCRIPTS = 6;
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 1.8;
+/** Reports in the feed. */
+const FEED = 4;
 
 export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   root.innerHTML = `
@@ -41,18 +52,20 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     <div class="live-stage" data-stage>
       <canvas id="liveCanvas" class="live-canvas" tabindex="-1" aria-hidden="true"></canvas>
       <div class="live-labels" data-labels></div>
+      <div class="live-tools" data-tools></div>
+      <div class="live-feed" data-feed aria-label="What happened"></div>
       <div class="qcard" data-card aria-live="polite"></div>
       <div class="apanel" data-panel hidden></div>
-      <div class="peek" data-peek hidden></div>
+      <div class="live-catalog" data-catalog></div>
       <div class="live-toast" data-toast role="status" hidden></div>
       <p class="live-note" data-note hidden></p>
     </div>
-    <p class="live-hint">Click any dot, room or ember. Answer the card with Enter, 2 or 3. T talks about it. Space opens the room behind it. ↓ moves it to later. Esc closes a panel.</p>`;
+    <p class="live-hint">Drag to move, scroll to zoom, 0 shows everything. Click an agent to follow it. Enter, 2 or 3 answers the card. ↓ puts it off.</p>`;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const stage = q("[data-stage]");
-  const labels = q("[data-labels]");
   const cardEl = q("[data-card]");
-  const panelEl = q("[data-panel]");
+  const feedEl = q("[data-feed]");
+  const tools = q("[data-tools]");
   const note = q("[data-note]");
 
   const reducedQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -62,6 +75,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     boardNote: "",
     boardRead: false,
     layout: null,
+    slots: new Map(),
+    camera: { x: 0, y: 0, zoom: 0.6 },
+    cameraHeld: false,
+    walks: new Map(),
+    carries: new Map(),
+    bubbles: new Map(),
+    lights: new Map(),
     selection: null,
     hover: null,
     cards: [],
@@ -87,10 +107,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   let polling = false;
   let boardAt = 0;
   let open = false;
-  const stations = new Map<string, { shown: Station; pending: Station; since: number }>();
   const played = new Map<string, number>();
   let lastSeen: Seen | null = null;
   let knownEmbers: Set<string> | null = null;
+  /** The stop function of each running script, by agent. */
+  const running = new Map<string, () => void>();
+  /** The last step each agent acted out, as verb@time, so a step plays once. */
+  const acted = new Map<string, string>();
 
   // ---------------------------------------------------------------- facts
 
@@ -101,9 +124,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     return (s.board?.now ?? []).find((i) => i.holder && names.includes(i.holder.toLowerCase()));
   };
   const issueOf = (a: LiveAgent) => held(a) ?? (a.issue ? issues().find((i) => i.number === a.issue) : undefined);
-  /** A fleet worker runs in the company folder. Its issue's app is its real room. */
+  /** A fleet worker runs in the company folder. Its issue's app is its real district. */
   const roomOf = (a: LiveAgent): string => (a.room !== "elsewhere" && a.room !== "home" ? a.room : (issueOf(a)?.apps[0] ?? a.room));
   const roomMeta = (key: string) => s.world?.rooms.find((r) => r.key === key);
+
+  const toScreen = (p: Pt): Pt => ({ x: (p.x - s.camera.x) * s.camera.zoom + stage.clientWidth / 2, y: (p.y - s.camera.y) * s.camera.zoom + stage.clientHeight / 2 });
+  const toWorld = (p: Pt): Pt => ({ x: (p.x - stage.clientWidth / 2) / s.camera.zoom + s.camera.x, y: (p.y - stage.clientHeight / 2) / s.camera.zoom + s.camera.y });
 
   const ctx: LiveCtx = {
     s,
@@ -117,13 +143,18 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     nameOf: (a) => a.name ?? `${HARNESS[a.harness]} ${a.pid ?? a.session?.slice(0, 4) ?? ""}`.trim(),
     select,
     draw,
+    toScreen,
     paintQueue: () => queue.paint(),
     poll: () => void poll(),
     toast: (text, bad) => top.toast(text, bad),
   };
   const top = mountTop(ctx, root, q("[data-toast]"));
   const queue = mountQueue(ctx, cardEl);
-  const panel = mountPanel(ctx, panelEl, q("[data-peek]"));
+  const panelEl = q("[data-panel]");
+  const catalogEl = q("[data-catalog]");
+  const panel = mountPanel(ctx, panelEl);
+  const labels = mountLabels(ctx, q("[data-labels]"));
+  const catalog = mountCatalog(ctx, catalogEl, playOn);
 
   const say = (text: string) => {
     note.textContent = text;
@@ -177,30 +208,153 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paint();
   }
 
-  function station(a: LiveAgent, now: number): Station {
-    const want = a.now?.station ?? a.steps[0]?.station ?? "plan";
-    const st = stations.get(a.id);
-    if (!st) {
-      stations.set(a.id, { shown: want, pending: want, since: now });
-      return want;
+  // ---------------------------------------------------------------- scripts
+
+  const scriptFor = (verb: string): Script | undefined => s.world?.catalog?.find((x) => x.verb === verb && !x.pending);
+
+  const hand: Stagehand = {
+    where(id, place) {
+      const w = s.layout;
+      const spot = w?.dots.get(id);
+      if (!w || !spot) return [];
+      const self = s.walks.get(id) ?? spot;
+      const a = ctx.agentById(id);
+      const district = w.districts.find((d) => d.key === spot.room);
+      const mine = district?.tiles.filter((t) => t.agents.includes(id)) ?? [];
+      const L = w.landmarks;
+      switch (place) {
+        case "self":
+          return [self];
+        case "home":
+          return district ? [district] : [self];
+        case "file": {
+          const f = a?.now?.file;
+          const t = district?.tiles.find((x) => x.path === f) ?? mine[0];
+          return [t ?? self];
+        }
+        case "files":
+          return mine;
+        case "parent": {
+          const p = a?.parent ? w.dots.get(a.parent) : undefined;
+          return [p ? (s.walks.get(a!.parent!) ?? p) : self];
+        }
+        case "helpers": {
+          const kids = (s.world?.agents ?? []).filter((k) => k.parent === id).flatMap((k) => {
+            const d = w.dots.get(k.id);
+            return d && d.swarm >= 0 ? [s.walks.get(k.id) ?? d] : [];
+          });
+          if (kids.length) return kids;
+          // Helpers that are not on the map, or a swarm: points around the agent.
+          const n = Math.max(3, Math.min(8, (a?.helpers ?? 0) + spot.swarm));
+          return Array.from({ length: n }, (_, i) => ({ x: self.x + Math.cos((i / n) * Math.PI * 2) * 34, y: self.y + Math.sin((i / n) * Math.PI * 2) * 26 }));
+        }
+        case "hub":
+          return [w.hub];
+        case "bay": {
+          const i = s.world?.mac.bays.findIndex((b) => b.agent === id) ?? -1;
+          return [w.hub.bays[Math.max(0, i)]];
+        }
+        case "tower":
+        case "sky":
+        case "desk":
+        case "board":
+        case "web":
+          return [L[place]];
+        default:
+          return [];
+      }
+    },
+    fx(f) {
+      if (!s.reduced) s.pendingFx.push(f);
+    },
+    walk(id, to) {
+      if (to && !s.reduced) s.walks.set(id, to);
+      else s.walks.delete(id);
+    },
+    carry(id, color) {
+      if (color) s.carries.set(id, color);
+      else s.carries.delete(id);
+    },
+    say(id, text) {
+      if (text) s.bubbles.set(id, text);
+      else s.bubbles.delete(id);
+    },
+    light(id, at, color, ms) {
+      const w = s.layout;
+      const a = ctx.agentById(id);
+      const spot = w?.dots.get(id);
+      const district = w?.districts.find((d) => d.key === spot?.room);
+      const tiles = (district?.tiles ?? []).filter((t) => t.agents.includes(id));
+      const pick = at === "file" ? [tiles.find((t) => t.path === a?.now?.file) ?? tiles[0]].filter(Boolean) : tiles;
+      const until = Date.now() + ms;
+      for (const t of pick) s.lights.set(t.path, { color, until });
+    },
+    label(id) {
+      const a = ctx.agentById(id);
+      return a ? doing(a) : "";
+    },
+    flush: () => draw(),
+  };
+
+  function run(id: string, script: Script): void {
+    running.get(id)?.();
+    running.set(
+      id,
+      play(script, id, hand, () => running.delete(id)),
+    );
+  }
+
+  /** Each new step of a working agent plays its verb's script, or the plain one. */
+  function act(): void {
+    const w = s.world!;
+    for (const id of running.keys()) if (!w.agents.some((a) => a.id === id)) running.get(id)?.();
+    for (const id of acted.keys()) if (!w.agents.some((a) => a.id === id)) acted.delete(id);
+    for (const a of w.agents) {
+      const step = a.now ?? (a.state === "think" ? a.steps[0] : undefined);
+      if (!step || (a.state !== "work" && a.state !== "think")) continue;
+      const key = `${step.verb ?? ""}@${step.atMs}`;
+      if (acted.get(a.id) === key) continue;
+      if (running.has(a.id) || running.size >= MAX_SCRIPTS || (s.layout?.dots.get(a.id)?.swarm ?? -1) < 0) continue;
+      acted.set(a.id, key);
+      run(a.id, scriptFor(step.verb ?? "") ?? PLAIN);
     }
-    if (want === st.shown) st.pending = want;
-    else if (want !== st.pending) {
-      st.pending = want;
-      st.since = now;
-    } else if (now - st.since >= STATION_HOLD_MS) st.shown = want;
-    return st.shown;
+  }
+
+  /** The catalog's Play: on the open agent, or on the busiest one. */
+  function playOn(verb: string): boolean {
+    const x = scriptFor(verb);
+    const w = s.world;
+    if (!x || !w) return false;
+    const sel = s.selection?.kind === "agent" ? s.selection.id : null;
+    const a = (sel && w.agents.find((g) => g.id === sel)) || w.agents.find((g) => g.state === "work") || w.agents.find((g) => (s.layout?.dots.get(g.id)?.swarm ?? -1) >= 0);
+    if (!a) return false;
+    run(a.id, x);
+    return true;
   }
 
   // ---------------------------------------------------------------- paint
 
   function paint(): void {
     if (!s.world) return;
-    for (const id of stations.keys()) if (!s.world.agents.some((a) => a.id === id)) stations.delete(id);
     queue.paint();
     top.paint();
     draw();
+    act();
     panel.paint();
+    catalog.paint();
+    paintTools();
+    paintFeed();
+  }
+
+  function fit(): void {
+    const b = s.layout?.bounds;
+    const W = stage.clientWidth;
+    const H = stage.clientHeight;
+    if (!b || !W || !H) return;
+    // The docked card covers the lower right on a wide stage: keep the map clear of it.
+    const right = W > 900 ? 420 : 0;
+    const zoom = clamp(Math.min((W - right - 40) / (b.x1 - b.x0), (H - 40) / (b.y1 - b.y0)), ZOOM_MIN, 1);
+    s.camera = { x: (b.x0 + b.x1) / 2 + right / 2 / zoom, y: (b.y0 + b.y1) / 2, zoom };
   }
 
   function draw(): void {
@@ -208,16 +362,10 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const width = stage.clientWidth;
     if (!w || !width) return;
     const now = Date.now();
-    const l = layout({ width, world: w, cards: s.cards, roomOf, roomName: ctx.roomName, stationOf: (a) => station(a, now) });
-    s.layout = l;
-    cardEl.style.left = `${l.card.x}px`;
-    cardEl.style.top = `${l.card.y}px`;
-    cardEl.style.width = `${l.card.w}px`;
-    labels.replaceChildren(...paintRooms(ctx, l), ...paintMac(ctx, l, (pid, who) => void stopPid(pid, who)), ...ringWords(ctx, l));
-    panel.place();
-    // The card or an open panel may reach past the building: the stage grows to hold them.
-    const panelBottom = panelEl.hidden ? 0 : panelEl.offsetTop + panelEl.offsetHeight + 10;
-    stage.style.height = `${Math.ceil(Math.max(l.h, l.card.y + cardEl.offsetHeight + l.pad + 4, panelBottom))}px`;
+    s.layout = lay({ world: w, cards: s.cards, roomOf, roomName: ctx.roomName, slots: s.slots });
+    for (const [path, l] of s.lights) if (l.until < now) s.lights.delete(path);
+    if (!s.cameraHeld) fit();
+    labels.paint();
 
     const snapshot = snap();
     const endings: EmberEnd[] = knownEmbers ? w.embers.filter((e) => !knownEmbers!.has(e.id)).map((e) => ({ id: e.id, agentId: e.id.split("@")[0], outcome: e.outcome })) : [];
@@ -225,7 +373,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     s.pendingFx.push(...direct(lastSeen, snapshot, endings, played, now));
     lastSeen = snapshot;
     // Effects are for this moment only. Without a view they are dropped, not saved up.
-    if (view) view.set_scene(JSON.stringify(scene(ctx, s.pendingFlights, panel.tether())));
+    if (view) view.set_scene(JSON.stringify(scene(ctx, width, stage.clientHeight)));
     s.pendingFx = [];
     s.pendingFlights = [];
   }
@@ -235,44 +383,131 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const dots: Seen["dots"] = new Map();
     for (const a of s.world!.agents) {
       const d = l.dots.get(a.id);
-      if (d) dots.set(a.id, { x: d.x, y: d.y, r: d.r, steps: a.stepCount, station: a.now?.station ?? "", parent: a.parent, nowLabel: a.now?.label ?? null, files: a.files });
+      if (d) dots.set(a.id, { x: d.x, y: d.y, r: d.r, parent: a.parent, files: a.files });
     }
-    const rooms: Seen["rooms"] = new Map(l.rooms.map((r) => [r.key, { x: r.x, y: r.y, w: r.w, h: r.h }]));
+    const districts: Seen["districts"] = new Map(l.districts.map((d) => [d.key, { x: d.x, y: d.y, r: d.r }]));
     const closed: Seen["closed"] = new Map((s.board?.done ?? []).filter((i) => !i.dropped).map((i) => [i.number, i.apps[0] ?? "hq"]));
-    return { dots, embers: new Set(s.world!.embers.map((e) => e.id)), cards: new Map(s.cards.map((c) => [c.id, c.room])), rooms, closed };
+    return { dots, districts, closed };
   }
 
-  async function stopPid(pid: number, who: string): Promise<void> {
-    try {
-      await events.stop(pid);
-      top.toast(`Asked ${who} to stop.`);
-      void poll();
-    } catch (e) {
-      top.toast(`Could not stop ${who}: ${errorText(e, "refused")}`, true);
-    }
+  function paintTools(): void {
+    const n = catalog.count();
+    const writing = (s.world?.catalog ?? []).filter((x) => x.pending).length;
+    const toggle = () => {
+      catalog.toggle();
+      paintFeed();
+    };
+    tools.replaceChildren(button("live-tool", "Show all", () => refit()), button("live-tool", `Animations ${n}${writing ? ` · ${writing} writing` : ""}`, toggle));
+    (tools.firstElementChild as HTMLElement).hidden = !s.cameraHeld;
+  }
+
+  /** The last few agents that ended, newest first. Click one for its report. */
+  function paintFeed(): void {
+    const now = Date.now();
+    const list = [...(s.world?.embers ?? [])].sort((a, b) => b.endedMs - a.endedMs).slice(0, FEED);
+    // An open panel or catalog owns the right column.
+    feedEl.hidden = !list.length || !panelEl.hidden || !catalogEl.hidden;
+    feedEl.style.bottom = `${cardEl.offsetHeight + 24}px`;
+    feedEl.replaceChildren(
+      div("live-feed-head", "What happened"),
+      ...list.map((e) => {
+        const row = button("live-feed-row", "", () => select({ kind: "ember", id: e.id }));
+        const dot = document.createElement("i");
+        dot.style.setProperty("--c", OUTCOME_COLOUR[e.outcome]);
+        row.append(dot, span("live-feed-who", `${e.name ?? HARNESS[e.harness]} · ${OUTCOME_WORD[e.outcome].toLowerCase()}`), span("live-feed-what", e.result ?? e.task ?? e.roomName), span("live-feed-when", ago(e.endedMs, now)));
+        return row;
+      }),
+    );
   }
 
   function select(next: Selection): void {
     const same = next && s.selection && next.kind === s.selection.kind && next.id === s.selection.id;
     s.selection = same ? null : next;
-    panel.peek(null);
     panel.paint();
     draw();
+    paintFeed();
   }
 
-  // ---------------------------------------------------------------- pointer and keys
+  function refit(): void {
+    s.cameraHeld = false;
+    draw();
+    paintTools();
+  }
 
-  labels.addEventListener("pointerover", (e) => {
-    const id = (e.target as HTMLElement).closest<HTMLElement>(".live-hit")?.dataset.agent ?? null;
+  // ---------------------------------------------------------------- camera, pointer and keys
+
+  /** Moves the camera without a new scene, so a drag stays smooth. */
+  function moveCamera(): void {
+    view?.set_camera(s.camera.x, s.camera.y, s.camera.zoom);
+    labels.paint();
+    if (!s.cameraHeld) {
+      s.cameraHeld = true;
+      paintTools();
+    }
+  }
+
+  const OVER = ".qcard, .apanel, .live-catalog, .live-feed, .live-tools, button, input";
+  let drag: { x: number; y: number; moved: boolean; id: number } | null = null;
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest(OVER)) return;
+    drag = { x: e.clientX, y: e.clientY, moved: false, id: e.pointerId };
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    if (!drag.moved) root.classList.add("is-panning");
+    drag.moved = true;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    s.camera.x -= dx / s.camera.zoom;
+    s.camera.y -= dy / s.camera.zoom;
+    moveCamera();
+  });
+  const endDrag = (e: PointerEvent) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    // A click on empty map closes the open panel.
+    if (!drag.moved && s.selection) select(null);
+    drag = null;
+    root.classList.remove("is-panning");
+  };
+  stage.addEventListener("pointerup", endDrag);
+  stage.addEventListener("pointercancel", endDrag);
+  stage.addEventListener(
+    "wheel",
+    (e) => {
+      if ((e.target as HTMLElement).closest(".qcard, .apanel, .live-catalog, .live-feed")) return;
+      e.preventDefault();
+      const r = stage.getBoundingClientRect();
+      const at = { x: e.clientX - r.left, y: e.clientY - r.top };
+      const before = toWorld(at);
+      // A pinch on a trackpad comes as a wheel with ctrl held, and moves faster.
+      s.camera.zoom = clamp(s.camera.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), ZOOM_MIN, ZOOM_MAX);
+      s.camera.x = before.x - (at.x - stage.clientWidth / 2) / s.camera.zoom;
+      s.camera.y = before.y - (at.y - stage.clientHeight / 2) / s.camera.zoom;
+      root.classList.add("is-panning");
+      moveCamera();
+      window.clearTimeout(wheelEnd);
+      wheelEnd = window.setTimeout(() => root.classList.remove("is-panning"), 120);
+    },
+    { passive: false },
+  );
+  let wheelEnd = 0;
+  stage.addEventListener("dblclick", (e) => {
+    if (!(e.target as HTMLElement).closest(OVER)) refit();
+  });
+
+  stage.addEventListener("pointerover", (e) => {
+    const id = (e.target as HTMLElement).closest<HTMLElement>(".live-agent")?.dataset.agent ?? null;
     if (id === s.hover) return;
     s.hover = id;
-    panel.peek(id);
     draw();
   });
-  labels.addEventListener("pointerleave", () => {
+  stage.addEventListener("pointerleave", () => {
     if (!s.hover) return;
     s.hover = null;
-    panel.peek(null);
     draw();
   });
 
@@ -281,6 +516,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
     if (e.key === "Escape" && s.selection) select(null);
+    else if (e.key === "0") refit();
     else if (!queue.onKey(e)) return;
     e.preventDefault();
   }
@@ -301,8 +537,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       document.removeEventListener("keydown", onKey);
       if (timer !== null) window.clearInterval(timer);
       timer = null;
+      for (const stop of [...running.values()]) stop();
       // Bevy sleeps until the canvas reappears, so a closed Live costs no frames.
       view?.set_paused(true);
     },
   };
+}
+
+function clamp(v: number, a: number, b: number): number {
+  return Math.max(a, Math.min(b, v));
 }

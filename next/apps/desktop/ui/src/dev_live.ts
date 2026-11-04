@@ -1,26 +1,34 @@
 /**
  * Dev harness for the Live screen. NOT part of the app build — index.html never loads this.
  * It mounts the REAL module (mountLive) against fixture data that changes every few seconds, so
- * the stage, the queue and the playbook can be looked at without Tauri. ?real=1 reads
+ * the map, the scripts and the card can be looked at without Tauri. ?real=1 reads
  * live.real.json (a saved `live_world`) and board.real.json, which are never committed.
- * ?calm=1 shows an empty queue.
+ * ?calm=1 shows an empty queue. The catalog is the seed scripts, as on a first run.
+ *
+ * The fixture plays the three scenes the owner asked for: Hacivat ships Panel with a git push,
+ * Karagöz hunts a bug in Tavla, and Pişekar orchestrates helpers in Interbellum. Zenne's eight
+ * helpers in Pillow show a swarm.
  */
 import "./style.css";
 import { mountLive, type LiveAgent, type LiveEmber, type LiveJob, type LiveWorld } from "./features/live";
 import type { BoardFeed } from "./features/live_cards";
+import type { Script } from "./features/live_script";
+import seeds from "./features/live_seeds.json";
 
 const params = new URLSearchParams(location.search);
 const T = Date.now();
 const min = (m: number) => T - m * 60_000;
 const iso = (m: number) => new Date(min(m)).toISOString();
+const ROOT = "/Users/a/Desktop/projects/appgea-apps";
 
-const step = (m: number, label: string, station: "plan" | "build" | "check" | "ship", file?: string) => ({ atMs: min(m), label, station, file });
+type St = "plan" | "build" | "check" | "ship";
+const step = (m: number, label: string, station: St, verb: string, file?: string) => ({ atMs: min(m), label, station, verb, file });
 
 const agent = (a: Partial<LiveAgent> & Pick<LiveAgent, "id" | "name" | "harness" | "room" | "state">): LiveAgent => ({
   pid: Number(a.id.replace(/\D/g, "")) || null,
   headless: false,
   session: `sess-${a.id}`,
-  cwd: "/Users/a/Desktop/projects/appgea-apps",
+  cwd: ROOT,
   roomName: a.room,
   parent: null,
   via: "Terminal",
@@ -40,36 +48,78 @@ const agent = (a: Partial<LiveAgent> & Pick<LiveAgent, "id" | "name" | "harness"
   ...a,
 });
 
+/** What each working fixture agent does, in a loop: verb, words, file. */
+const PLAYS: Record<string, [string, string, string?][]> = {
+  "pid:106": [
+    ["edit", "Edited live_world.ts", `${ROOT}/panel/ui/src/features/live_world.ts`],
+    ["typecheck", "Typecheck the UI"],
+    ["build", "Build the Bevy wasm view"],
+    ["git.commit", "Commit the new Live map"],
+    ["git.push", "Push develop to GitHub"],
+    ["read", "Read live_scene.ts", `${ROOT}/panel/ui/src/features/live_scene.ts`],
+  ],
+  "pid:109": [
+    ["search", "Search for the dice roll seed"],
+    ["read", "Read dice.dart", `${ROOT}/tavla/lib/game/dice.dart`],
+    ["test", "Run the dice tests"],
+    ["edit", "Edited dice.dart", `${ROOT}/tavla/lib/game/dice.dart`],
+    ["test", "Run the dice tests again"],
+    ["git.push", "Push the dice fix"],
+  ],
+  "pid:101": [
+    ["spawn", "Start two helpers for the map colours"],
+    ["message", "Ask the helpers for their counts"],
+    ["think", "Weigh the land and sea numbers"],
+    ["board", "Claim #1163 on the board"],
+    ["message", "Send the new target to Terra"],
+  ],
+  "pid:102": [
+    ["search", "Search for map colour tokens"],
+    ["read", "Read map_style.css", `${ROOT}/interbellum/apps/web/src/map/map_style.css`],
+  ],
+  "pid:103": [
+    ["web", "Read the MapLibre docs on line dashes"],
+    ["edit", "Edited front_line.ts", `${ROOT}/interbellum/apps/web/src/map/front_line.ts`],
+    ["shot", "Shoot the map at two sizes"],
+  ],
+  "pid:110": [
+    ["search", "Search the sleep timer code"],
+    ["message", "Collect the helpers' findings"],
+    ["render", "Render the sleep timer clip"],
+  ],
+};
+
 const agents: LiveAgent[] = [
   agent({
-    id: "pid:101", name: "Pişekar", harness: "claude", room: "interbellum", state: "work", panel: "s1", helpers: 2,
-    task: "Codex map tickets", now: step(0.4, "Measure land and sea lightness in the Codex mock", "check"), stateMs: min(0.7),
-    steps: [step(0.4, "Measure land and sea lightness in the Codex mock", "check"), step(2, "Edited map_style.css", "build", "/Users/a/Desktop/projects/appgea-apps/interbellum/apps/web/src/map/map_style.css"), step(4, "Read the sun mesh setup and the ground grade", "plan"), step(9, "Post the 1162 remaining steps", "ship")],
-    files: ["/Users/a/Desktop/projects/appgea-apps/interbellum/apps/web/src/map/map_style.css", "/Users/a/Desktop/projects/appgea-apps/interbellum/docs/art-direction/README.md"],
+    id: "pid:101", name: "Pişekar", harness: "claude", room: "interbellum", state: "work", panel: "s1", helpers: 0,
+    task: "Codex map tickets", steps: [step(4, "Read the sun mesh setup", "plan", "read", `${ROOT}/interbellum/docs/art-direction/README.md`)],
+    files: [`${ROOT}/interbellum/apps/web/src/map/map_style.css`, `${ROOT}/interbellum/docs/art-direction/README.md`],
     lastText: "Land sits at 70% and sea at 28%. Both are too bright for the B target.",
   }),
-  agent({ id: "pid:102", name: "Haiku 9f", harness: "claude", room: "interbellum", state: "work", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, now: step(0.2, "Searched the code", "plan"), steps: [step(0.2, "Searched the code", "plan")], task: "Find every map colour token" }),
-  agent({ id: "pid:103", name: "Terra 2110", harness: "codex", room: "elsewhere", state: "work", headless: true, via: "fleet", model: "gpt-6.1-terra", issue: 1104, session: "01a1a7f3-2375-7d42-9d3c-c6010a502110", now: step(1, "Step 2 of 4. The drift is still present.", "build"), steps: [step(1, "Step 2 of 4. The drift is still present.", "build"), step(5, "Step 1 of 4. The board assigned #1104.", "plan")] }),
-  agent({ id: "pid:104", name: "Terra c17e", harness: "codex", room: "elsewhere", state: "think", headless: true, via: "fleet", model: "gpt-6.1-terra", issue: 1163, steps: [step(0.5, "The baseline measurements are land 70% and sea 28%.", "check")] }),
-  agent({ id: "pid:105", name: "Köroğlu", harness: "claude", room: "videokit", state: "turn", panel: "s2", stateMs: min(6), task: "Zaman makinesi sigara videosu", lastText: "The episode is rendered and passed the judge. It is ready to post today.", steps: [step(6, "Commit and push the due batch", "ship"), step(8, "Review the due batch", "check")] }),
-  agent({ id: "pid:106", name: "Hacivat", harness: "claude", room: "panel", state: "work", panel: "s3", task: "Panel app Live Observing screen", now: step(0.1, "Rebuild the Bevy wasm view in a test bay", "check"), steps: [step(0.1, "Rebuild the Bevy wasm view in a test bay", "check"), step(1, "Edited live.ts", "build")] }),
+  agent({ id: "pid:102", name: "Haiku 9f", harness: "claude", room: "interbellum", state: "work", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, task: "Find every map colour token" }),
+  agent({ id: "pid:111", name: "Haiku a3", harness: "claude", room: "interbellum", state: "think", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, task: "Measure the sea", steps: [step(0.3, "Measure the sea lightness", "check", "think")] }),
+  agent({ id: "pid:103", name: "Terra 2110", harness: "codex", room: "elsewhere", state: "work", headless: true, via: "fleet", model: "gpt-6.1-terra", issue: 1104, session: "01a1a7f3-2375-7d42-9d3c-c6010a502110" }),
+  agent({ id: "pid:105", name: "Köroğlu", harness: "claude", room: "videokit", state: "turn", panel: "s2", stateMs: min(6), task: "Zaman makinesi sigara videosu", lastText: "The episode is rendered and passed the judge. It is ready to post today.", steps: [step(6, "Commit and push the due batch", "ship", "git.push")] }),
+  agent({ id: "pid:106", name: "Hacivat", harness: "claude", room: "panel", state: "work", panel: "s3", task: "Panel Live map" }),
   agent({ id: "pid:107", name: "Mahmut Hoca", harness: "grok", room: "hq", state: "idle", model: null, via: "Grok Bot", startedMs: min(600) }),
-  agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the dice tests", "check"), steps: [step(41, "Run the dice tests", "check")], issue: 742 }),
+  agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the store build", "check", "build"), steps: [step(41, "Run the store build", "check", "build")], issue: 742 }),
+  agent({ id: "pid:109", name: "Karagöz", harness: "claude", room: "tavla", state: "work", panel: "s4", task: "Dice repeat the same roll after a restart" }),
+  agent({ id: "pid:110", name: "Zenne", harness: "claude", room: "pillow_app", state: "work", panel: "s5", helpers: 0, task: "Sleep timer forgets its value" }),
+  ...Array.from({ length: 8 }, (_, i) =>
+    agent({ id: `pid:12${i}`, name: `Haiku ${(i + 10).toString(16)}`, harness: "claude", room: "pillow_app", state: "work", headless: true, parent: "pid:110", model: "claude-haiku-4-5", via: null, now: step(0.1, "Search the timer code", "plan", "search") }),
+  ),
 ];
 
 const job = (j: Partial<LiveJob> & Pick<LiveJob, "id" | "label" | "kind" | "room">): LiveJob => ({ pid: Number(j.id.replace(/\D/g, "")), agent: null, startedMs: min(8), cpu: 2, procs: 3, bay: false, roomName: j.room, ...j });
 const jobs: LiveJob[] = [
   job({ id: "job:201", label: "vk make", kind: "job", room: "videokit", agent: "pid:105", cpu: 398, procs: 27, bay: true }),
-  job({ id: "job:202", label: "node shoot.mjs", kind: "job", room: "elsewhere", agent: "pid:103", bay: true, startedMs: min(3) }),
   job({ id: "job:203", label: "fleet", kind: "launcher", room: "hq", startedMs: min(21) }),
-  job({ id: "job:204", label: "bridge.py", kind: "service", room: "hq", startedMs: min(8000) }),
-  job({ id: "job:205", label: "slack-listen.py", kind: "service", room: "hq", startedMs: min(1700) }),
   job({ id: "job:206", label: "chrome-headless-shell", kind: "left", room: "videokit", startedMs: min(71), cpu: 0, procs: 16 }),
 ];
 
 const ember = (e: Partial<LiveEmber> & Pick<LiveEmber, "id" | "room">): LiveEmber => ({
   name: "Terra 0a51", harness: "codex", headless: true, roomName: e.room, model: "gpt-6.1-terra", session: null, cwd: "", task: null,
-  result: "Released #1162 with the unfinished HUD changes recorded.", outcome: "done", files: [], steps: [step(30, "Released #1162", "ship")], stepCount: 46,
+  result: "Released #1162 with the unfinished HUD changes recorded.", outcome: "done", files: [], steps: [step(30, "Released #1162", "ship", "release")], stepCount: 46,
   parentName: null, via: "fleet", startedMs: min(70), endedMs: min(25), ...e,
 });
 const embers: LiveEmber[] = [
@@ -77,7 +127,6 @@ const embers: LiveEmber[] = [
   ember({ id: "pid:91@1", room: "interbellum", name: "Terra 8840", endedMs: min(48), result: "Air borders now use the thin dashed stroke." }),
   ember({ id: "pid:92@1", room: "tavla", name: "Sol 31bc", outcome: "crashed", result: null, endedMs: min(90) }),
   ember({ id: "pid:93@1", room: "pillow_app", name: "Haiku 12", harness: "claude", model: "claude-haiku-4-5", endedMs: min(200), result: "Sleep timer survives a background kill." }),
-  ember({ id: "pid:94@1", room: "pillow_app", name: "Haiku 13", harness: "claude", model: "claude-haiku-4-5", endedMs: min(260) }),
 ];
 
 const rooms = [
@@ -91,12 +140,15 @@ const rooms = [
   { key: "elsewhere", name: "Elsewhere", order: 9001, weight: 1 },
 ];
 
+const catalog: Script[] = [...Object.entries(seeds as Record<string, Omit<Script, "verb">>).map(([verb, x]) => ({ verb, ...x, madeMs: min(30) })), { verb: "cmd.magick", pending: true }];
+
 let world: LiveWorld = {
   agents,
   jobs,
   embers,
   rooms,
-  mac: { load: 11.2, cores: 14, hot: false, bays: [{ agent: "pid:105", holder: "vk make" }, { agent: "pid:103", holder: "node shoot.mjs" }], quota: [{ harness: "Claude", used: 46 }] },
+  mac: { load: 11.2, cores: 14, hot: false, bays: [{ agent: "pid:105", holder: "vk make" }, { agent: null, holder: null }], quota: [{ harness: "Claude", used: 46 }] },
+  catalog,
   scannedMs: T,
 };
 
@@ -107,44 +159,40 @@ const fixtureBoard: BoardFeed = {
   ],
   now: [
     { number: 1104, title: "Interbellum: front line drift at zoom", url: "https://github.com/Appgea/ops/issues/1104", apps: ["interbellum"], holder: "codex-0a502110", decided: "The front follows the shared border path, because tile centres drift at low zoom", created_at: iso(300) },
-    { number: 742, title: "Pillow: sleep timer forgets its value", url: "https://github.com/Appgea/ops/issues/742", apps: ["tavla"] },
+    { number: 742, title: "Tavla: store build fails", url: "https://github.com/Appgea/ops/issues/742", apps: ["tavla"] },
   ],
   ready: [
     { number: 1160, title: "Speed: typecheck reruns the whole workspace on one-file edits", url: "https://github.com/Appgea/ops/issues/1160", apps: ["interbellum"], kinds: ["speed"], problem: "Each edit re-typechecks 40 packages, about 90 s.", direction: "Typecheck only the changed package and its dependants.", created_at: iso(180) },
   ],
   done: params.has("calm") ? [] : [
     { number: 1150, title: "Interbellum: darker overhead map, B target", url: "https://github.com/Appgea/ops/issues/1150", apps: ["interbellum"], closed_at: iso(30) },
-    { number: 1151, title: "Interbellum: HUD slides in at 100 ms", url: "https://github.com/Appgea/ops/issues/1151", apps: ["interbellum"], closed_at: iso(55) },
-    { number: 1140, title: "Tavla: dice sound clips on older iPhones", url: "https://github.com/Appgea/ops/issues/1140", apps: ["tavla"], closed_at: iso(80) },
   ],
   apps: { tavla: { name: "Tavla" }, interbellum: { name: "Interbellum" }, videokit: { name: "VideoKit" }, pillow_app: { name: "Pillow" } },
 };
 
-const labels = ["Edited map_style.css", "Run the map shots at two sizes", "Read the art direction", "Commit the darker map", "Measure land and sea lightness"];
 let tick = 0;
-/** Every few seconds the fixture world moves: steps advance, a worker ends, a new one starts. */
+/** Every poll some agents start their next step, so scripts keep playing. */
 function move(): void {
   tick++;
   const now = Date.now();
-  const next = world.agents.map((a) => {
-    if (a.state !== "work") return a;
-    const label = labels[(tick + a.stepCount) % labels.length];
-    const st = label.startsWith("Commit") ? "ship" : label.startsWith("Edited") ? "build" : label.startsWith("Run") || label.startsWith("Measure") ? "check" : "plan";
-    const s = { atMs: now, label, station: st as "plan" };
-    return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...a.steps].slice(0, 20) };
+  const list = world.agents.map((a, i) => {
+    const plays = PLAYS[a.id];
+    // A step lasts about three polls, staggered so the map never plays all at once.
+    if (!plays || a.state !== "work" || (tick + i) % 3 !== 0) return a;
+    const n = Math.floor((tick + i) / 3) % plays.length;
+    const [verb, label, file] = plays[n];
+    const s = { atMs: now, label, station: "build" as St, verb, file };
+    const files = file && !a.files.includes(file) ? [file, ...a.files] : a.files;
+    const helpers = a.id === "pid:101" ? 2 : a.helpers;
+    return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...a.steps].slice(0, 20), files, helpers };
   });
-  let endedEmbers = world.embers;
-  let list = next;
-  if (tick % 5 === 0) {
-    const gone = list.find((a) => a.id === "pid:102");
-    if (gone) {
-      list = list.filter((a) => a !== gone);
-      endedEmbers = [{ ...ember({ id: `${gone.id}@${now}`, room: "interbellum" }), name: gone.name, harness: "claude", model: gone.model, endedMs: now, result: "Found 14 colour tokens in three files." }, ...endedEmbers];
-    } else {
-      list = [...list, agent({ id: "pid:102", name: "Haiku 9f", harness: "claude", room: "interbellum", state: "work", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, startedMs: now, now: step(0, "Searched the code", "plan") })];
-    }
-  }
-  world = { ...world, agents: list, embers: endedEmbers, scannedMs: now };
+  const bayHolder = list.find((a) => a.now && (a.now.verb === "test" || a.now.verb === "build") && a.state === "work");
+  world = {
+    ...world,
+    agents: list,
+    mac: { ...world.mac, bays: [world.mac.bays[0], bayHolder ? { agent: bayHolder.id, holder: bayHolder.now!.verb === "test" ? "flutter test" : "build-live.mjs" } : { agent: null, holder: null }] },
+    scannedMs: now,
+  };
 }
 
 async function realWorld(): Promise<LiveWorld> {
@@ -172,9 +220,12 @@ const live = mountLive(document.getElementById("liveScreen")!, {
   openFile: (path) => console.log("[live harness] file", path),
   openHistory: (session) => console.log("[live harness] history", session),
   stop: async (pid) => console.log("[live harness] stop", pid),
+  deleteAnimation: async (verb) => {
+    world = { ...world, catalog: (world.catalog ?? []).filter((x) => x.verb !== verb) };
+  },
 });
 document.getElementById("liveScreen")!.hidden = false;
 live.open();
 if (params.has("select")) {
-  setTimeout(() => (document.querySelector<HTMLButtonElement>(".live-hit")?.click()), 600);
+  setTimeout(() => document.querySelector<HTMLButtonElement>(".live-agent")?.click(), 600);
 }

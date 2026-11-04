@@ -1,0 +1,253 @@
+{
+  "git.push": {
+    "title": "Push to GitHub",
+    "about": "The agent carries a crate of commits to the tower, and it launches up into GitHub.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "carry", "color": "done" },
+      { "do": "walk", "to": { "place": "tower", "dx": -34, "dy": 4 }, "ms": 1400 },
+      { "do": "carry" },
+      { "do": "orb", "from": { "place": "tower", "dy": -20 }, "to": "sky", "color": "done", "size": 7, "ms": 1000 },
+      { "do": "wait", "ms": 950 },
+      { "do": "ring", "at": "sky", "color": "done", "size": 80, "ms": 1300 },
+      { "do": "burst", "at": "sky", "color": "done", "count": 20, "size": 40 },
+      { "do": "pulse", "at": { "place": "tower", "dy": -124 }, "color": "work", "size": 46 },
+      { "do": "wait", "ms": 1100 }
+    ]
+  },
+  "release": {
+    "title": "Release to a store",
+    "about": "An amber crate goes up the tower and opens a wide ring in the sky.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "carry", "color": "turn" },
+      { "do": "walk", "to": { "place": "tower", "dx": 34, "dy": 4 }, "ms": 1400 },
+      { "do": "carry" },
+      { "do": "orb", "from": { "place": "tower", "dy": -20 }, "to": { "place": "sky", "dy": -40 }, "color": "turn", "size": 9, "ms": 1200 },
+      { "do": "wait", "ms": 1150 },
+      { "do": "ring", "at": { "place": "sky", "dy": -40 }, "color": "turn", "size": 130, "ms": 1600 },
+      { "do": "burst", "at": { "place": "sky", "dy": -40 }, "color": "turn", "count": 26, "size": 55 },
+      { "do": "wait", "ms": 1200 }
+    ]
+  },
+  "git.commit": {
+    "title": "Commit",
+    "about": "The agent packs its edited files into a green crate.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "light", "at": "files", "color": "done", "ms": 1200 },
+      { "do": "packets", "from": "files", "to": "self", "color": "done", "count": 3, "ms": 700 },
+      { "do": "wait", "ms": 900 },
+      { "do": "carry", "color": "done" },
+      { "do": "pulse", "at": "self", "color": "done", "size": 26 },
+      { "do": "wait", "ms": 1200 },
+      { "do": "carry" }
+    ]
+  },
+  "git.pull": {
+    "title": "Pull from GitHub",
+    "about": "A light comes down from the tower to the agent.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "orb", "from": { "place": "tower", "dy": -124 }, "to": "self", "color": "work", "size": 5, "ms": 1100 },
+      { "do": "wait", "ms": 1100 },
+      { "do": "pulse", "at": "self", "color": "work", "size": 24 }
+    ]
+  },
+  "search": {
+    "title": "Search the code",
+    "about": "A radar light turns around the agent while the project's files flicker.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "sweep", "at": "self", "color": "work", "size": 46, "ms": 2200 },
+      { "do": "light", "at": "files", "color": "work", "ms": 1800 },
+      { "do": "wait", "ms": 2200 }
+    ]
+  },
+  "read": {
+    "title": "Read a file",
+    "about": "The agent visits a file and a soft light passes over it.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "file", "dy": -14 }, "ms": 900 },
+      { "do": "pulse", "at": "file", "color": "think", "size": 22, "ms": 1100 },
+      { "do": "light", "at": "file", "color": "think", "ms": 1400 },
+      { "do": "wait", "ms": 1300 }
+    ]
+  },
+  "edit": {
+    "title": "Edit a file",
+    "about": "The agent goes to a file and sparks fly as it writes.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "file", "dy": -14 }, "ms": 900 },
+      { "do": "burst", "at": "file", "color": "done", "count": 9, "size": 14 },
+      { "do": "light", "at": "file", "color": "done", "ms": 2000 },
+      { "do": "wait", "ms": 500 },
+      { "do": "burst", "at": "file", "color": "done", "count": 6, "size": 10 },
+      { "do": "wait", "ms": 1100 }
+    ]
+  },
+  "test": {
+    "title": "Run tests",
+    "about": "The agent takes a testlock bay on This Mac and electrons spin in it while the tests run.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "bay", "dy": -28 }, "ms": 1300 },
+      { "do": "orbit", "at": "bay", "color": "work", "count": 4, "size": 30, "ms": 2600 },
+      { "do": "wait", "ms": 2600 },
+      { "do": "pulse", "at": "bay", "color": "done", "size": 40 },
+      { "do": "wait", "ms": 600 }
+    ]
+  },
+  "build": {
+    "title": "Build",
+    "about": "In a bay on This Mac, rings of heat rise while the build runs.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "bay", "dy": -28 }, "ms": 1300 },
+      { "do": "ring", "at": "bay", "color": "work", "size": 46, "ms": 1000 },
+      { "do": "wait", "ms": 700 },
+      { "do": "ring", "at": "bay", "color": "work", "size": 46, "ms": 1000 },
+      { "do": "orbit", "at": "bay", "color": "work", "count": 6, "size": 22, "ms": 1800 },
+      { "do": "wait", "ms": 1900 }
+    ]
+  },
+  "typecheck": {
+    "title": "Typecheck",
+    "about": "A fast blue sweep over the agent's own files.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "sweep", "at": "self", "color": "think", "size": 30, "ms": 1400 },
+      { "do": "light", "at": "files", "color": "think", "ms": 1200 },
+      { "do": "wait", "ms": 1400 }
+    ]
+  },
+  "spawn": {
+    "title": "Start helpers",
+    "about": "Beams shoot from the agent to each helper it started.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "pulse", "at": "self", "color": "ink", "size": 30 },
+      { "do": "beam", "from": "self", "to": "helpers", "color": "ink", "ms": 1400 },
+      { "do": "wait", "ms": 600 },
+      { "do": "burst", "at": "helpers", "color": "work", "count": 8, "size": 14 },
+      { "do": "wait", "ms": 1200 }
+    ]
+  },
+  "message": {
+    "title": "Talk to other agents",
+    "about": "Packets of light go out to the helpers and answers come back, like an orchestra.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "packets", "from": "self", "to": "helpers", "color": "think", "count": 3, "ms": 800 },
+      { "do": "wait", "ms": 1300 },
+      { "do": "packets", "from": "helpers", "to": "self", "color": "work", "count": 2, "ms": 800 },
+      { "do": "wait", "ms": 1100 },
+      { "do": "pulse", "at": "self", "color": "think", "size": 26 }
+    ]
+  },
+  "ask": {
+    "title": "Ask the owner",
+    "about": "The agent walks to the owner's desk and waits there.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "desk", "dy": -52 }, "ms": 1500 },
+      { "do": "pulse", "at": "desk", "color": "turn", "size": 70, "ms": 1200 },
+      { "do": "wait", "ms": 1600 }
+    ]
+  },
+  "web": {
+    "title": "Read the web",
+    "about": "The agent goes to the web gate and a light comes back through it.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "web", "dx": -56 }, "ms": 1400 },
+      { "do": "ring", "at": "web", "color": "think", "size": 60, "ms": 1000 },
+      { "do": "orb", "from": "web", "to": "self", "color": "think", "size": 5, "ms": 700 },
+      { "do": "wait", "ms": 1200 }
+    ]
+  },
+  "board": {
+    "title": "Work the board",
+    "about": "The agent visits the board and takes a card from it.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "walk", "to": { "place": "board", "dx": 80 }, "ms": 1400 },
+      { "do": "packets", "from": "board", "to": "self", "color": "ink", "count": 2, "ms": 600 },
+      { "do": "wait", "ms": 1000 }
+    ]
+  },
+  "review": {
+    "title": "Review",
+    "about": "Rings of judgement close in around the agent.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "ring", "at": "self", "color": "think", "size": 50, "ms": 1100 },
+      { "do": "wait", "ms": 500 },
+      { "do": "ring", "at": "self", "color": "think", "size": 36, "ms": 1100 },
+      { "do": "light", "at": "files", "color": "think", "ms": 1500 },
+      { "do": "wait", "ms": 1500 }
+    ]
+  },
+  "render": {
+    "title": "Render media",
+    "about": "Amber electrons spin fast around the agent while frames are made.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "orbit", "at": "self", "color": "turn", "count": 5, "size": 20, "ms": 2600 },
+      { "do": "pulse", "at": "self", "color": "turn", "size": 34, "ms": 1300 },
+      { "do": "wait", "ms": 2600 }
+    ]
+  },
+  "shot": {
+    "title": "Take a screenshot",
+    "about": "Two quick white flashes, like a camera.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "pulse", "at": "self", "color": "ink", "size": 54, "ms": 350 },
+      { "do": "wait", "ms": 500 },
+      { "do": "pulse", "at": "self", "color": "ink", "size": 54, "ms": 350 },
+      { "do": "wait", "ms": 700 }
+    ]
+  },
+  "think": {
+    "title": "Think",
+    "about": "Two slow blue electrons circle the agent.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "orbit", "at": "self", "color": "think", "count": 2, "size": 16, "ms": 2400 },
+      { "do": "wait", "ms": 2400 }
+    ]
+  },
+  "skill": {
+    "title": "Load a skill",
+    "about": "A blue light flies from the board's shelf of know-how to the agent.",
+    "by": "opus",
+    "steps": [
+      { "do": "say", "text": "{label}" },
+      { "do": "orb", "from": "board", "to": "self", "color": "think", "size": 4, "ms": 1100 },
+      { "do": "wait", "ms": 1100 },
+      { "do": "pulse", "at": "self", "color": "think", "size": 22 }
+    ]
+  }
+}

@@ -1,25 +1,32 @@
-//! The playbook's one-shot effects and the flights along card threads. Copied from the concept
-//! page: `burst` line 695, flights and rings lines 983 to 999, the step pulse line 1018.
-//! Each effect owns its colour so it can fade alone, and despawns with it when it ends.
-//! With reduced motion no effect plays.
+//! Effects: the moves animation scripts and the playbook are made of. Each `Fx` in a scene
+//! starts after its `delay`, plays for its `ms`, and despawns. Each effect owns its colour so it
+//! can fade alone. With reduced motion no effect plays.
+//!
+//! - `orb`: a glowing ball from x, y to x2, y2, easing in and out, shedding a trail.
+//! - `beam`: a line of light from x, y to x2, y2 with a head that runs along it, then fades.
+//! - `pulse`: a soft glow that swells to `size` and fades.
+//! - `ring`: a thin ring that grows to `size` and fades.
+//! - `burst`: `count` sparks fly out and slow down.
+//! - `sweep`: a radar arm of length `size` turning around the point, two turns a second.
+//! - `orbit`: `count` electrons circling the point at radius `size`.
 
-use crate::draw::{bezier, ease, line, rounded_edge, srgba, Dice, Frame, Kit, Pace, Shape, DONE, FAIL, INK, MOVING, WAIT, WORK};
-use crate::{Current, Dir, FxKind, Step};
+use crate::draw::{ease, line, srgba, Dice, Frame, Kit, Pace, Shape, MOVING};
+use crate::{Current, FxKind, Step};
 use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 
 #[derive(Clone, Copy)]
 enum Kind {
-    /// A light along a card's thread: in to the ring, or out to the room.
-    Flight { p: [Vec2; 4], out: bool },
-    /// A ring of light opening around a room box.
-    Shipped { x: f32, y: f32, w: f32, h: f32 },
-    Spark { pos: Vec2, vel: Vec2 },
-    Flicker { at: Vec2, r: f32 },
+    Orb { a: Vec2, b: Vec2, size: f32 },
+    Trail { at: Vec2, size: f32 },
     BeamLine { a: Vec2, b: Vec2 },
     BeamHead { a: Vec2, b: Vec2 },
-    Pulse { at: Vec2, r: f32 },
-    Clash { a: Vec2, b: Vec2 },
+    Pulse { at: Vec2, size: f32 },
+    Ring { at: Vec2, size: f32 },
+    Spark { pos: Vec2, vel: Vec2 },
+    SweepArm { at: Vec2, size: f32 },
+    SweepTip { at: Vec2, size: f32 },
+    Electron { at: Vec2, size: f32, i: u32, n: u32 },
 }
 
 #[derive(Component)]
@@ -28,75 +35,83 @@ struct Effect {
     began: f32,
     /// Seconds it lasts.
     len: f32,
+    hex: u32,
     paint: Handle<ColorMaterial>,
-    /// A mesh this effect reshapes as it plays.
-    own_mesh: Option<Handle<Mesh>>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_systems(Update, (start.run_if(resource_changed::<Current>), play).chain().in_set(Step::Draw));
 }
 
-#[allow(clippy::too_many_arguments)]
-fn start(
-    mut commands: Commands,
-    mut kit: ResMut<Kit>,
-    mut dice: ResMut<Dice>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut mats: ResMut<Assets<ColorMaterial>>,
-    time: Res<Time>,
-    current: Res<Current>,
-) {
+/// What to spawn: a kind, its length, colour, mesh and start time.
+struct New {
+    kind: Kind,
+    len: f32,
+    hex: u32,
+    mesh: Handle<Mesh>,
+    began: f32,
+}
+
+fn spawn(commands: &mut Commands, mats: &mut Assets<ColorMaterial>, n: New) {
+    let paint = mats.add(ColorMaterial { color: srgba(n.hex, 0.0), alpha_mode: AlphaMode2d::Blend, ..default() });
+    commands.spawn((Mesh2d(n.mesh), MeshMaterial2d(paint.clone()), Transform::from_scale(Vec3::ZERO), Effect { kind: n.kind, began: n.began, len: n.len, hex: n.hex, paint }));
+}
+
+fn start(mut commands: Commands, mut kit: ResMut<Kit>, mut dice: ResMut<Dice>, mut meshes: ResMut<Assets<Mesh>>, mut mats: ResMut<Assets<ColorMaterial>>, time: Res<Time>, current: Res<Current>) {
     if current.0.reduced {
         return;
     }
     let now = time.elapsed_secs();
     let glow = kit.shape(&mut meshes, Shape::Glow);
     let square = kit.shape(&mut meshes, Shape::Square);
-    let mut spawn = |mats: &mut Assets<ColorMaterial>, kind: Kind, len: f32, hex: u32, mesh: Handle<Mesh>, own_mesh: Option<Handle<Mesh>>| {
-        let paint = mats.add(ColorMaterial { color: srgba(hex, 0.0), alpha_mode: AlphaMode2d::Blend, ..default() });
-        commands.spawn((Mesh2d(mesh), MeshMaterial2d(paint.clone()), Transform::from_scale(Vec3::ZERO), Effect { kind, began: now, len, paint, own_mesh }));
-    };
-    for f in &current.0.flights {
-        let p = f.p.map(|q| Vec2::new(q[0], q[1]));
-        let out = f.dir == Dir::Out;
-        spawn(&mut mats, Kind::Flight { p, out }, 1.1, if out { INK } else { WAIT }, glow.clone(), None);
-    }
-    for fx in current.0.fx.iter().copied() {
+    let ring = kit.shape(&mut meshes, Shape::Ring(30));
+    for fx in &current.0.fx {
         let at = Vec2::new(fx.x, fx.y);
-        let to = Vec2::new(fx.x2, fx.y2);
+        let to = Vec2::new(fx.x2.unwrap_or(fx.x), fx.y2.unwrap_or(fx.y));
+        let hex = crate::hex(fx.color.as_deref());
+        let began = now + fx.delay.unwrap_or(0.0).max(0.0) / 1000.0;
+        let len = |default_ms: f32| (fx.ms.unwrap_or(default_ms).clamp(100.0, 8000.0)) / 1000.0;
+        let mut add = |kind: Kind, len: f32, mesh: &Handle<Mesh>| spawn(&mut commands, &mut mats, New { kind, len, hex, mesh: mesh.clone(), began });
         match fx.kind {
-            FxKind::Pulse => spawn(&mut mats, Kind::Pulse { at, r: fx.r }, 0.9, WORK, glow.clone(), None),
-            FxKind::Ship => spawn(&mut mats, Kind::Pulse { at, r: fx.r }, 0.9, DONE, glow.clone(), None),
+            FxKind::Orb => add(Kind::Orb { a: at, b: to, size: fx.size.unwrap_or(6.0) }, len(900.0), &glow),
             FxKind::Beam => {
-                spawn(&mut mats, Kind::BeamLine { a: at, b: to }, 2.4, INK, square.clone(), None);
-                spawn(&mut mats, Kind::BeamHead { a: at, b: to }, 2.4, INK, glow.clone(), None);
+                add(Kind::BeamLine { a: at, b: to }, len(1200.0), &square);
+                add(Kind::BeamHead { a: at, b: to }, len(1200.0), &glow);
             }
-            FxKind::Done | FxKind::Cut => {
-                let hex = if fx.kind == FxKind::Done { DONE } else { FAIL };
-                for _ in 0..14 {
+            FxKind::Pulse => add(Kind::Pulse { at, size: fx.size.unwrap_or(30.0) }, len(900.0), &glow),
+            FxKind::Ring => add(Kind::Ring { at, size: fx.size.unwrap_or(60.0) }, len(1200.0), &ring),
+            FxKind::Burst => {
+                for _ in 0..fx.count.unwrap_or(14).min(40) {
                     let an = dice.range(0.0, std::f32::consts::TAU);
-                    let sp = dice.range(30.0, 90.0);
-                    let life = dice.range(0.6, 1.1);
-                    spawn(&mut mats, Kind::Spark { pos: at, vel: Vec2::new(an.cos(), an.sin()) * sp }, life, hex, glow.clone(), None);
-                }
-                if fx.kind == FxKind::Cut {
-                    spawn(&mut mats, Kind::Flicker { at, r: fx.r }, 1.0, FAIL, glow.clone(), None);
+                    let sp = dice.range(30.0, 90.0) * fx.size.unwrap_or(30.0) / 30.0;
+                    add(Kind::Spark { pos: at, vel: Vec2::new(an.cos(), an.sin()) * sp }, dice.range(0.6, 1.1), &glow);
                 }
             }
-            FxKind::Shipped => {
-                let mesh = meshes.add(rounded_edge(1.0, 1.0, 0.0, 1.0));
-                spawn(&mut mats, Kind::Shipped { x: fx.x, y: fx.y, w: fx.x2 - fx.x, h: fx.y2 - fx.y }, 1.6, DONE, mesh.clone(), Some(mesh));
+            FxKind::Sweep => {
+                let size = fx.size.unwrap_or(70.0);
+                add(Kind::SweepArm { at, size }, len(2000.0), &square);
+                add(Kind::SweepTip { at, size }, len(2000.0), &glow);
             }
-            FxKind::Clash => spawn(&mut mats, Kind::Clash { a: at, b: to }, 1.5, FAIL, square.clone(), None),
-            // A new card already flies along its thread: the flight is its effect.
-            FxKind::Card | FxKind::Unknown => {}
+            FxKind::Orbit => {
+                let n = fx.count.unwrap_or(3).clamp(1, 12);
+                for i in 0..n {
+                    add(Kind::Electron { at, size: fx.size.unwrap_or(18.0), i, n }, len(2000.0), &glow);
+                }
+            }
+            FxKind::Unknown => {}
         }
     }
 }
 
+/// Fades in over the first tenth and out over the last third.
+fn envelope(u: f32) -> f32 {
+    (u / 0.1).min(1.0) * ((1.0 - u) / 0.33).min(1.0)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn play(
     mut commands: Commands,
+    mut kit: ResMut<Kit>,
     time: Res<Time>,
     frame: Res<Frame>,
     mut pace: ResMut<Pace>,
@@ -107,49 +122,59 @@ fn play(
     let frame = *frame;
     let now = time.elapsed_secs();
     let dt = time.delta_secs();
+    let glow = kit.shape(&mut meshes, Shape::Glow);
+    let mut trails: Vec<New> = Vec::new();
     for (e, mut fx, mut tf) in &mut effects {
         pace.ask(MOVING);
         let age = now - fx.began;
+        if age < 0.0 {
+            continue;
+        }
         let u = (age / fx.len).clamp(0.0, 1.0);
         if u >= 1.0 {
             commands.entity(e).despawn();
             mats.remove(&fx.paint);
-            if let Some(m) = &fx.own_mesh {
-                meshes.remove(m);
-            }
             continue;
         }
         let glow_at = |p: Vec2, r: f32, z: f32| Transform::from_translation(frame.at(p.x, p.y, z)).with_scale(Vec3::splat(r));
         let (alpha, t) = match fx.kind {
-            Kind::Flight { p, out } => {
-                let k = ease(u);
-                (0.95 * (1.0 - u * 0.4), glow_at(bezier(p, if out { 1.0 - k } else { k }), 14.0, 0.7))
+            Kind::Orb { a, b, size } => {
+                let p = a.lerp(b, ease(u));
+                trails.push(New { kind: Kind::Trail { at: p, size: size * 2.6 }, len: 0.5, hex: fx.hex, mesh: glow.clone(), began: now });
+                (0.95 * (u / 0.08).min(1.0), glow_at(p, size * 3.2, 0.72))
             }
-            Kind::Shipped { x, y, w, h } => {
-                let s = 4.0 + u * 16.0;
-                if let Some(mut m) = fx.own_mesh.as_ref().and_then(|m| meshes.get_mut(m)) {
-                    *m = rounded_edge(w + s * 2.0 + 2.0, h + s * 2.0 + 2.0, 10.0 + s, 2.0);
-                }
-                (0.7 * (1.0 - u), Transform::from_translation(frame.at(x + w / 2.0, y + h / 2.0, 0.7)))
-            }
+            Kind::Trail { at, size } => (0.45 * (1.0 - u), glow_at(at, size * (1.0 - u), 0.71)),
+            Kind::BeamLine { a, b } => (0.6 * envelope(u), line(frame, a, b, 0.68, 1.6)),
+            Kind::BeamHead { a, b } => (envelope(u), glow_at(a.lerp(b, ease((u / 0.45).min(1.0))), 18.0, 0.69)),
+            Kind::Pulse { at, size } => (0.6 * (1.0 - u), glow_at(at, size * (0.5 + u), 0.7)),
+            Kind::Ring { at, size } => (0.8 * (1.0 - u), glow_at(at, size * (0.15 + 0.85 * ease(u)), 0.7)),
             Kind::Spark { pos, vel } => {
-                // The concept damps by 0.94 a frame at 60 frames a second.
+                // Damped by 0.94 a frame at 60 frames a second.
                 let next = pos + vel * dt;
                 fx.kind = Kind::Spark { pos: next, vel: vel * 0.94f32.powf(dt * 60.0) };
                 (1.0 - u, glow_at(next, 7.0, 0.7))
             }
-            Kind::Flicker { at, r } => {
-                let on = if (u * 9.0) as u32 % 2 == 0 { 1.0 } else { 0.25 };
-                (0.9 * (1.0 - u) * on, glow_at(at, r * 4.0, 0.7))
+            Kind::SweepArm { at, size } => {
+                let an = age * std::f32::consts::TAU * 2.0;
+                let tip = at + Vec2::new(an.cos(), an.sin()) * size;
+                (0.55 * envelope(u), line(frame, at, tip, 0.69, 1.4))
             }
-            Kind::BeamLine { a, b } => (0.55 * (1.0 - u), line(frame, a, b, 0.68, 1.6)),
-            Kind::BeamHead { a, b } => (1.0 - u, glow_at(a.lerp(b, (age / 0.8).min(1.0)), 18.0, 0.69)),
-            Kind::Pulse { at, r } => (0.55 * (1.0 - u), glow_at(at, r * (3.0 + 5.0 * u), 0.7)),
-            Kind::Clash { a, b } => (0.8 * (1.0 - u), line(frame, a, b, 0.68, 1.6)),
+            Kind::SweepTip { at, size } => {
+                let an = age * std::f32::consts::TAU * 2.0;
+                (0.9 * envelope(u), glow_at(at + Vec2::new(an.cos(), an.sin()) * size, 14.0, 0.7))
+            }
+            Kind::Electron { at, size, i, n } => {
+                let an = age * 3.2 + i as f32 * std::f32::consts::TAU / n as f32;
+                let p = at + Vec2::new(an.cos() * size, an.sin() * size * 0.42);
+                (envelope(u), glow_at(p, 8.0, 0.72))
+            }
         };
         *tf = t;
         if let Some(mut m) = mats.get_mut(&fx.paint) {
             m.color = crate::draw::fade(m.color, alpha);
         }
+    }
+    for n in trails {
+        spawn(&mut commands, &mut mats, n);
     }
 }
