@@ -10,9 +10,10 @@ import type { LiveCtx } from "./live_types";
 import type { Script } from "./live_script";
 import "./live_catalog.css";
 
-export type Catalog = { paint(): void; toggle(): void; count(): number };
+export type Catalog = { paint(): void; toggle(): void; count(): number; isOpen(): boolean };
 
-export function mountCatalog(ctx: LiveCtx, el: HTMLElement, playOn: (verb: string) => boolean): Catalog {
+/** `changed` runs after it opens or closes, so the column beside the map can show the right part. */
+export function mountCatalog(ctx: LiveCtx, el: HTMLElement, playOn: (verb: string) => boolean, changed: () => void): Catalog {
   el.hidden = true;
 
   function scripts(): Script[] {
@@ -61,7 +62,8 @@ export function mountCatalog(ctx: LiveCtx, el: HTMLElement, playOn: (verb: strin
   function toggle(): void {
     el.hidden = !el.hidden;
     paint();
+    changed();
   }
 
-  return { paint, toggle, count: () => scripts().filter((x) => !x.pending).length };
+  return { paint, toggle, count: () => scripts().filter((x) => !x.pending).length, isOpen: () => !el.hidden };
 }

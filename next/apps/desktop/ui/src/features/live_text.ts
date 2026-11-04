@@ -18,6 +18,61 @@ export function short(model: string | null): string {
 export const OUTCOME_WORD: Record<EmberOutcome, string> = { done: "Done", failed: "Failed", stopped: "Stopped", crashed: "Crashed", stuck: "Stuck" };
 export const OUTCOME_COLOUR: Record<EmberOutcome, string> = { done: "var(--l-done)", failed: "var(--l-stuck)", crashed: "var(--l-stuck)", stopped: "var(--l-idle)", stuck: "var(--l-turn)" };
 
+/**
+ * Claude's own session names, like `cardly-e7` or `cmd-style-drift-80`: a slug and a short hex
+ * tail. They say nothing about the agent, so Live never shows them.
+ */
+const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{2,4}$/;
+
+/**
+ * What kind of agent a headless run is, read from its first prompt. First match wins, and `$1`
+ * is the first group. Add a line when a new kind of background run shows up as "Background run".
+ */
+const PROMPT_ROLES: [RegExp, string][] = [
+  [/^You review a diff before it is pushed/i, "Pre-push reviewer"],
+  [/^You write one animation script/i, "Animation writer"],
+  [/^You are Terra worker (\S+)/i, "Builder · $1"],
+];
+
+/** What `who` reads. Agents and embers both have these. */
+export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null };
+
+/**
+ * Who an agent is, for a person who did not start it. `title` is the name to show: the folk name
+ * of a session someone types into (the name on its terminal tab), else its role. `sub` says the
+ * rest: the role or the folk name, and the model. `parent` is the name of the agent that started it.
+ */
+export function who(a: WhoInput, parent: string | null = null): { title: string; sub: string; role: string } {
+  const task = (a.task ?? "").trim();
+  let role = "";
+  for (const [re, r] of PROMPT_ROLES) {
+    const m = task.match(re);
+    if (m) {
+      role = r.replace("$1", m[1] ?? "").trim();
+      break;
+    }
+  }
+  if (!role) {
+    if (a.name === "Mahmut Hoca") role = "Board chief";
+    else if (/board\.py review/.test(a.via ?? "")) role = "Board reviewer";
+    else if (/board\.py|launch\.py|fleet/.test(a.via ?? "")) role = "Board worker";
+    else if (parent) role = `Helper of ${parent}`;
+    else if (a.via === "Codex app") role = "Codex app";
+    else role = a.headless ? "Background run" : "Terminal session";
+  }
+  const folk = a.name && !SLUG.test(a.name) ? a.name : null;
+  const model = [HARNESS[a.harness], short(a.model)].filter(Boolean).join(" ");
+  if (folk && !a.headless) return { title: folk, sub: `${role} · ${model}`, role };
+  return { title: role, sub: [folk, model].filter(Boolean).join(" · "), role };
+}
+
+/** A first prompt that only names the agent's kind is no news once `who` has said the kind. */
+export function taskLine(task: string | null): string | null {
+  const t = task?.trim();
+  if (!t || PROMPT_ROLES.some(([re]) => re.test(t))) return null;
+  return t;
+}
+
 /** Board titles start with their app, "Tavla: …". The row already names the room. */
 export function withoutRoom(title: string, room: string): string {
   return title.toLowerCase().startsWith(`${room.toLowerCase()}: `) ? title.slice(room.length + 2) : title;

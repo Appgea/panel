@@ -51,6 +51,7 @@ import type { NotebookHandle } from "./features/notebook";
 import type { SupportHandle } from "./features/support";
 import { mountReview } from "./features/review";
 import { mountLive, type LiveHandle, type LiveWorld } from "./features/live";
+import { mountForYou, type ForYouHandle } from "./features/foryou";
 import type { BoardFeed } from "./features/live_cards";
 import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import { moduleGet, modulePost } from "./features/modules";
@@ -356,6 +357,9 @@ let review: ReturnType<typeof mountReview>;
 /** Every agent on this Mac, drawn by Bevy. Mounted at boot, polled only while open. */
 let live: LiveHandle;
 let liveActive = false;
+/** The calls that wait for the owner. Mounted at boot, polled only while open. */
+let forYou: ForYouHandle;
+let forYouActive = false;
 /** Every agent session, reported or not, read from each agent's own store. */
 let history: HistoryHandle;
 let historyActive = false;
@@ -735,6 +739,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   exitTerminals();
   // Whatever took the glass has handed it back — the project chrome is the screen again. Said
   // here once rather than in each drop*(), which do not know what replaces them.
@@ -1201,6 +1206,7 @@ function showSettings(): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   settingsActive = true;
   mainZone().hidden = true;
   el("settingsScreen").hidden = false;
@@ -1250,6 +1256,7 @@ function showTerminals(at?: number): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   if (terminalsActive) {
     if (at !== undefined) terminals.select(at);
     return;
@@ -1278,6 +1285,7 @@ function showHome(): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   // The workspace comes down properly — the deck takes its panes back before Home takes the glass.
   if (terminalsActive) exitTerminals();
   if (homeActive) return;
@@ -1314,6 +1322,7 @@ function showNotebook(): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   if (notebookActive) return;
   notebookActive = true;
   mainZone().hidden = true;
@@ -1351,6 +1360,7 @@ function showSprint(): void {
   dropSupport();
   dropReview();
   dropLive();
+  dropForYou();
   dropHistory();
   dropSettings();
   dropChat();
@@ -1402,6 +1412,7 @@ function showOpsMap(): void {
   dropSupport();
   dropReview();
   dropLive();
+  dropForYou();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (opsMapActive) return;
@@ -1452,6 +1463,7 @@ function showBoard(): void {
   dropSupport();
   dropReview();
   dropLive();
+  dropForYou();
   dropOpsMap();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1579,6 +1591,7 @@ function showSupport(): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1624,6 +1637,7 @@ function dropSupport(): void {
 function showReview(projectId?: string): void {
   if (projectId && review.openProject(projectId)) return;
   dropLive();
+  dropForYou();
   dropSupport();
   dropHistory();
   dropSettings();
@@ -1661,6 +1675,7 @@ function showLive(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropForYou();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (liveActive) return;
@@ -1679,12 +1694,43 @@ function dropLive(): void {
   el("liveScreen").hidden = true;
 }
 
+/** For you: the calls that wait for the owner, one card at a time. Live shows what runs. */
+function showForYou(): void {
+  dropSupport();
+  dropReview();
+  dropHistory();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  dropOpsMap();
+  dropBoard();
+  dropLive();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  if (forYouActive) return;
+  forYouActive = true;
+  mainZone().hidden = true;
+  el("forYouScreen").hidden = false;
+  forYou.open();
+  paintNav();
+  paintProjects();
+}
+
+function dropForYou(): void {
+  if (!forYouActive) return;
+  forYou.clear();
+  forYouActive = false;
+  el("forYouScreen").hidden = true;
+}
+
 /** History: every agent session across the portfolio, reported or not. A screen like Support —
  *  one list for one person — opened from its row, from Home, or from an appgeapanel:// link. */
 function showHistory(focus?: { query?: string; session?: string }): void {
   dropSupport();
   dropReview();
   dropLive();
+  dropForYou();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1846,6 +1892,7 @@ function showChat(): void {
   dropHistory();
   dropReview();
   dropLive();
+  dropForYou();
   chatActive = true;
   mainZone().hidden = true;
   paintNav();
@@ -1916,6 +1963,7 @@ const offProject = (): boolean =>
   supportActive ||
   reviewActive ||
   liveActive ||
+  forYouActive ||
   historyActive;
 
 /** Navigation and run actions share the project selected on the visible surface. */
@@ -2200,7 +2248,8 @@ function paintNav(): void {
   el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
   // and only the row you are actually on carries the accent.
-  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || liveActive || historyActive);
+  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || liveActive || forYouActive || historyActive);
+  el("forYouButton").classList.toggle("is-on", forYouActive);
   el("historyButton").classList.toggle("is-on", historyActive);
   el("reviewButton").classList.toggle("is-on", reviewActive);
   el("liveButton").classList.toggle("is-on", liveActive);
@@ -4247,25 +4296,37 @@ async function boot(): Promise<void> {
     },
   });
 
+  // Live and For you read the same world and the same board, each only while it is open.
+  const liveWorld = () => invoke<LiveWorld>("live_world");
+  // The board lives in the scout module. Without it Live still runs, and For you has session cards only.
+  const liveBoard = (fresh: boolean) => moduleGet<BoardFeed>(`/m/scout/board${fresh ? "?fresh=1" : ""}`).catch(() => null);
+  const openLink = (url: string) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] live", error));
+  const openTerminal = (panel: string) => {
+    const session = sessionById(panel);
+    if (!session) return false;
+    jumpToSession(session.project, session.id);
+    return true;
+  };
   live = mountLive(el("liveScreen"), {
-    world: () => invoke<LiveWorld>("live_world"),
-    // The board lives in the scout module. Without it Live still runs, with no board cards.
-    board: (fresh) => moduleGet<BoardFeed>(`/m/scout/board${fresh ? "?fresh=1" : ""}`).catch(() => null),
-    answer: (body) => modulePost<{ ok: boolean; said?: string }>("/m/scout/live/answer", body),
-    picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
-    openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] live", error)),
-    openTerminal: (panel) => {
-      const session = sessionById(panel);
-      if (!session) return false;
-      jumpToSession(session.project, session.id);
-      return true;
-    },
+    world: liveWorld,
+    board: liveBoard,
+    openUrl: openLink,
+    openTerminal,
     sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
-    seedManager: (text) => chat.seedCpo(text),
     openFile: (path) => void openFullPath({ path }, false, null).catch((error: unknown) => console.warn("[panel] live", error)),
     openHistory: (session) => showHistory({ session }),
     stop: (pid) => invoke("live_stop", { pid }),
     deleteAnimation: (verb) => invoke("live_catalog_delete", { verb }),
+  });
+  forYou = mountForYou(el("forYouScreen"), {
+    world: liveWorld,
+    board: liveBoard,
+    answer: (body) => modulePost<{ ok: boolean; said?: string }>("/m/scout/live/answer", body),
+    picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
+    openUrl: openLink,
+    openTerminal,
+    sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
+    seedManager: (text) => chat.seedCpo(text),
   });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
@@ -4530,6 +4591,7 @@ async function boot(): Promise<void> {
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
   el("liveButton").addEventListener("click", () => showLive());
+  el("forYouButton").addEventListener("click", () => showForYou());
   el("historyButton").addEventListener("click", () => showHistory());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.

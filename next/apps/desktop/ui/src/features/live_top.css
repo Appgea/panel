@@ -4,7 +4,11 @@
 .live-onair { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--l-ink); box-shadow: 0 0 10px var(--l-ink); animation: live-onair 1.6s ease-in-out infinite; }
 .live.is-reduced .live-onair { animation: none; }
 @keyframes live-onair { 50% { opacity: 0.3; } }
-.live-narr { min-width: 0; font: 500 13px/1.4 var(--l-mono); color: var(--l-ink); overflow-wrap: anywhere; }
+.live-narr { flex: 1; min-width: 0; font: 500 13px/1.4 var(--l-mono); color: var(--l-ink); overflow-wrap: anywhere; }
+.live-left { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 50%; }
+.live-left[hidden] { display: none; }
+.live-left-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px/1.3 var(--l-mono); color: var(--l-turn); }
+.live-left .opt { flex: none; padding: 4px 9px; font-size: 12px; }
 
 .live-toast {
   position: absolute;

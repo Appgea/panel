@@ -5,7 +5,7 @@
 //! call, so it is ready at once and costs nothing. Reports stay 12 hours and survive a restart in
 //! `~/.appgeapanel/state/panel-live-embers.json`.
 
-use super::track::Step;
+use super::track::{Step, Track};
 use super::{Agent, Harness, State};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -97,9 +97,24 @@ fn file() -> PathBuf {
     crate::paths::user_root().join("state").join("panel-live-embers.json")
 }
 
-/// Compare this scan with the last one. Every agent that is gone becomes an ember. Returns the
-/// shelf, newest first.
-pub fn update(agents: &[Agent], now: u64) -> Vec<Ember> {
+/// The agent as its transcript ended, when that was read after the last scan saw it. The scan
+/// before an exit misses the final answer and still shows the last step open.
+fn at_end(last: &Agent, ended: &HashMap<String, Track>) -> Agent {
+    let mut a = last.clone();
+    let Some(t) = a.session.as_ref().and_then(|s| ended.get(s)) else { return a };
+    if t.last_text.is_some() {
+        a.last_text = t.last_text.clone();
+    }
+    a.now = t.now();
+    a.steps = t.recent(30);
+    a.step_count = a.step_count.max(t.steps);
+    a.files = t.files.iter().rev().take(40).cloned().collect();
+    a
+}
+
+/// Compare this scan with the last one. Every agent that is gone becomes an ember, judged on its
+/// transcript's last read in `ended` where there is one. Returns the shelf, newest first.
+pub fn update(agents: &[Agent], ended: &HashMap<String, Track>, now: u64) -> Vec<Ember> {
     let mut s = shelf().lock().unwrap_or_else(|p| p.into_inner());
     if !s.loaded {
         s.loaded = true;
@@ -115,6 +130,7 @@ pub fn update(agents: &[Agent], now: u64) -> Vec<Ember> {
         if last.step_count == 0 && now.saturating_sub(*first_seen) < BLIP_MS {
             continue;
         }
+        let last = &at_end(last, ended);
         let parent_name = last.parent.as_ref().and_then(|p| s.seen.get(p)).map(|(p, _)| p.name.clone().unwrap_or_else(|| p.harness_name().into()));
         gone.push(Ember {
             id: format!("{id}@{now}"),
@@ -197,6 +213,18 @@ mod tests {
         // A shelf saved before the five outcomes still reads.
         assert_eq!(serde_json::from_str::<Outcome>("\"finished\"").unwrap(), Outcome::Done);
         assert_eq!(serde_json::from_str::<Outcome>("\"cut\"").unwrap(), Outcome::Crashed);
+    }
+
+    #[test]
+    fn a_run_that_answered_after_the_last_scan_is_done() {
+        // The last scan saw it mid-step with nothing said. Its transcript ends with an answer.
+        let mut last = agent(State::Work, None, true);
+        last.session = Some("s1".into());
+        let mut t = Track::default();
+        t.last_text = Some("Wrote the script.".into());
+        let ended = HashMap::from([("s1".to_string(), t)]);
+        assert_eq!(outcome(&last, false), Outcome::Crashed);
+        assert_eq!(outcome(&at_end(&last, &ended), false), Outcome::Done);
     }
 }
 

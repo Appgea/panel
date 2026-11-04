@@ -3,50 +3,61 @@
  * name tag and speech bubble. Bevy draws every shape. Words sit in stage pixels over the world
  * point they belong to, so they stay sharp at any zoom.
  *
- * An agent's tag and bubble are kept per agent and slide with a CSS transition that matches
- * Bevy's glide. While the owner drags, `.is-panning` turns the transition off so the words stay
- * glued to the map.
+ * Words keep their size while the map zooms, so zooming out packs them together. Two rules keep
+ * them apart. Small words go first as the map shrinks (the zoom levels below). Then every word
+ * that is left gets a priority, and one that would touch a more important word hides until there
+ * is room. Owner, 2026-11-05: "Zooming out and in, things look weird. Sometimes text overlap."
+ *
+ * Every element is kept by key and only its text changes, so its size is measured once per text,
+ * not on every frame of a drag. An agent's tag and bubble slide with a CSS transition that
+ * matches Bevy's glide. While the owner drags, `.is-panning` turns the transition off.
  */
 
-import { errorText } from "../errors";
-import { button, div, holdButton, plural, span, STATE_WORD } from "./live_text";
+import { button, div, span, STATE_WORD } from "./live_text";
 import type { LiveAgent, LiveCtx } from "./live_types";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
 
-/** Below this zoom only agents that need the owner keep their name tags. */
+/** Below this zoom only agents that need the owner, or the one in focus, keep their name tags. */
 const TAG_ZOOM = 0.7;
 /** Below these zooms This Mac shows only its name, then no bay words. */
 const HUB_LINE_ZOOM = 0.6;
 const BAY_ZOOM = 0.75;
+/** Below this zoom signs and landmarks show their name without the second line. */
+const META_ZOOM = 0.55;
+/** Clear space kept around every word, in CSS pixels. */
+const GAP = 3;
+
+/**
+ * Which word wins a spot, lowest first. What an agent says is the point of Live, so its bubble
+ * beats a district's sign. The words that are always the same lose first.
+ */
+const RANK = { focusBubble: 0, urgentTag: 1, bubble: 2, sign: 3, hub: 4, tag: 5, mark: 6, bay: 7 } as const;
+
+/** Where a word's box sits against its point. */
+type Anchor = "above" | "below" | "corner";
+type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dy: number };
 
 export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   const fixed = div("live-fixed");
   const agents = div("live-agents");
-  // Processes no agent owns any more, under This Mac. Kept, not rebuilt, so a hold on Stop
-  // survives the repaints a running script makes.
-  const left = div("live-left");
-  const leftText = span("live-left-text");
-  left.append(
-    leftText,
-    holdButton("Hold to Stop", () => {
-      for (const j of (ctx.s.world?.jobs ?? []).filter((x) => x.kind === "left")) void stop(j.pid, j.label);
-    }),
-  );
-  agents.append(left);
   layer.append(fixed, agents);
 
-  async function stop(pid: number, who: string): Promise<void> {
-    try {
-      await ctx.events.stop(pid);
-      ctx.toast(`Asked ${who} to stop.`);
-      ctx.poll();
-    } catch (e) {
-      ctx.toast(`Could not stop ${who}: ${errorText(e, "refused")}`, true);
-    }
-  }
+  const pool = new Map<string, HTMLElement>();
   const nodes = new Map<string, { el: HTMLElement; tag: HTMLElement; bubble: HTMLElement }>();
+  const sizes = new WeakMap<HTMLElement, { sig: string; w: number; h: number }>();
+
+  function keep(key: string, used: Set<string>, make: () => HTMLElement): HTMLElement {
+    let el = pool.get(key);
+    if (!el) {
+      el = make();
+      pool.set(key, el);
+      fixed.append(el);
+    }
+    used.add(key);
+    return el;
+  }
 
   function agentNode(a: LiveAgent) {
     let n = nodes.get(a.id);
@@ -69,60 +80,80 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     const world = s.world;
     if (!w || !world) return;
     const z = s.camera.zoom;
-    const out: HTMLElement[] = [];
-    const at = (el: HTMLElement, x: number, y: number) => {
+    const words: Word[] = [];
+    const used = new Set<string>();
+    const place = (el: HTMLElement, x: number, y: number) => {
       const p = ctx.toScreen({ x, y });
       el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
-      out.push(el);
-      return el;
+      return p;
     };
 
     for (const d of w.districts) {
+      const sign = keep(`sign:${d.key}`, used, () => {
+        const b = button("live-sign", "", () => ctx.select({ kind: "room", id: d.key }));
+        b.append(span("live-sign-name"), span("live-sign-meta"));
+        return b;
+      });
       const working = d.agents.filter((id) => ctx.agentById(id)?.state !== "idle").length;
-      const meta = [working ? `${working} working` : `${d.agents.length} idle`, d.cards ? `${d.cards} for you` : "", d.stuck ? "stuck" : ""].filter(Boolean);
-      const sign = button("live-sign", "", () => ctx.select({ kind: "room", id: d.key }));
-      sign.append(span("live-sign-name", d.name), span(`live-sign-meta${d.stuck ? " is-stuck" : d.cards ? " is-card" : ""}`, meta.join(" · ")));
-      at(sign, d.x, d.y - d.r);
+      const meta = [working ? `${working} working` : `${d.agents.length} idle`, d.waiting ? `${d.waiting} ${d.waiting === 1 ? "waits" : "wait"} for you` : "", d.stuck ? "stuck" : ""].filter(Boolean).join(" · ");
+      text(sign.children[0] as HTMLElement, d.name);
+      const line = sign.children[1] as HTMLElement;
+      text(line, meta);
+      line.className = `live-sign-meta${d.stuck ? " is-stuck" : d.waiting ? " is-card" : ""}`;
+      sign.classList.toggle("is-small", z < META_ZOOM);
+      const p = place(sign, d.x, d.y - d.r);
+      words.push({ el: sign, rank: RANK.sign, x: p.x, y: p.y, anchor: "above", dy: 8 });
     }
 
     const m = world.mac;
     const cpu = m.cores ? Math.round(Math.min(1, m.load / m.cores) * 100) : 0;
-    const hub = div("live-hub");
-    hub.append(span("live-hub-name", "This Mac"), span(`live-hub-line${m.hot ? " is-hot" : ""}`, `CPU ${cpu}% · ${m.hot ? "hot" : "cool"}${(m.quota ?? []).map((q) => ` · ${q.harness} week ${Math.round(q.used)}%`).join("")}`));
-    at(hub, w.hub.x - w.hub.w / 2 + 14, w.hub.y - w.hub.h / 2 + 10);
+    const hub = keep("hub", used, () => {
+      const h = div("live-hub");
+      h.append(span("live-hub-name", "This Mac"), span("live-hub-line"));
+      return h;
+    });
+    const hubLine = hub.children[1] as HTMLElement;
+    text(hubLine, `CPU ${cpu}% · ${m.hot ? "hot" : "cool"}${(m.quota ?? []).map((q) => ` · ${q.harness} week ${Math.round(q.used)}%`).join("")}`);
+    hubLine.classList.toggle("is-hot", m.hot);
     // Words never spill out of This Mac: they get its width, and the small ones go when it shrinks.
     hub.style.width = `${Math.max(60, w.hub.w * z - 28)}px`;
     hub.classList.toggle("is-small", z < HUB_LINE_ZOOM);
-    if (z >= BAY_ZOOM) w.hub.bays.forEach((b, i) => {
-      const hold = m.bays[i];
-      const owner = ctx.agentById(hold?.agent ?? null);
-      const bay = div(`live-bay${hold?.holder ? " is-held" : ""}`);
-      bay.style.width = `${Math.max(40, b.w * z - 16)}px`;
-      bay.append(span("live-bay-name", `bay ${i + 1}`), span("live-bay-who", hold?.holder ? [owner ? ctx.nameOf(owner) : "", hold.holder].filter(Boolean).join(" · ") : "Free"));
-      at(bay, b.x - b.w / 2 + 8, b.y - b.h / 2 + 5);
-    });
-
-    const leftJobs = world.jobs.filter((j) => j.kind === "left");
-    left.hidden = !leftJobs.length;
-    if (leftJobs.length) {
-      const procs = leftJobs.reduce((n, j) => n + j.procs, 0);
-      leftText.textContent = `Left behind: ${leftJobs.map((j) => j.label).join(", ")} · ${procs} ${plural(procs, "process", "processes")}`;
-      const p = ctx.toScreen({ x: w.hub.x, y: w.hub.y + w.hub.h / 2 + 10 });
-      left.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
-    }
+    const hp = place(hub, w.hub.x - w.hub.w / 2 + 14, w.hub.y - w.hub.h / 2 + 10);
+    words.push({ el: hub, rank: RANK.hub, x: hp.x, y: hp.y, anchor: "corner", dy: 0 });
+    if (z >= BAY_ZOOM)
+      w.hub.bays.forEach((b, i) => {
+        const hold = m.bays[i];
+        const owner = ctx.agentById(hold?.agent ?? null);
+        const bay = keep(`bay:${i}`, used, () => {
+          const el = div("live-bay");
+          el.append(span("live-bay-name", `bay ${i + 1}`), span("live-bay-who"));
+          return el;
+        });
+        bay.classList.toggle("is-held", !!hold?.holder);
+        bay.style.width = `${Math.max(40, b.w * z - 16)}px`;
+        text(bay.children[1] as HTMLElement, hold?.holder ? [owner ? ctx.nameOf(owner) : "", hold.holder].filter(Boolean).join(" · ") : "Free");
+        const p = place(bay, b.x - b.w / 2 + 8, b.y - b.h / 2 + 5);
+        words.push({ el: bay, rank: RANK.bay, x: p.x, y: p.y, anchor: "corner", dy: 0 });
+      });
 
     const L = w.landmarks;
-    const mins = s.cards.reduce((n, c) => n + (c.minutes ?? 1), 0);
-    const mark = (cls: string, name: string, line: string, x: number, y: number) => {
-      const el = div(`live-mark ${cls}`);
-      el.append(span("live-mark-name", name), span("live-mark-line", line));
-      at(el, x, y);
+    const mark = (key: string, name: string, line: string, x: number, y: number) => {
+      const el = keep(`mark:${key}`, used, () => {
+        const e = div(`live-mark is-${key}`);
+        e.append(span("live-mark-name", name), span("live-mark-line", line));
+        return e;
+      });
+      el.classList.toggle("is-small", z < META_ZOOM);
+      const p = place(el, x, y);
+      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "below", dy: 0 });
     };
-    mark("is-tower", "GitHub", "pushes and releases", L.tower.x, L.tower.y + 14);
-    mark("is-desk", "Inbox", s.cards.length ? `${s.cards.length} ${plural(s.cards.length, "card")}, about ${Math.max(1, Math.round(mins))} min` : "Nothing waits", L.desk.x, L.desk.y + 40);
-    mark("is-board", "Board", `${(s.board?.ready ?? []).length} ready · ${(s.board?.now ?? []).length} in work`, L.board.x, L.board.y + 50);
-    mark("is-web", "Web", "searches and pages", L.web.x, L.web.y + 50);
-    fixed.replaceChildren(...out);
+    mark("tower", "GitHub", "pushes and releases", L.tower.x, L.tower.y + 14);
+    mark("web", "Web", "searches and pages", L.web.x, L.web.y + 50);
+    for (const [key, el] of pool)
+      if (!used.has(key)) {
+        el.remove();
+        pool.delete(key);
+      }
 
     // Agents: kept, so their move animates.
     const seen = new Set<string>();
@@ -131,24 +162,61 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       if (!spot || spot.swarm < 0) continue;
       seen.add(a.id);
       const n = agentNode(a);
-      const p = ctx.toScreen(s.walks.get(a.id) ?? spot);
-      n.el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px)`;
+      const p = place(n.el, ...xy(s.walks.get(a.id) ?? spot));
       n.el.className = `live-agent is-${a.state}`;
-      n.el.setAttribute("aria-label", `${ctx.nameOf(a)}, ${STATE_WORD[a.state]}${a.now ? `: ${a.now.label}` : ""}`);
+      const name = ctx.nameOf(a);
+      n.el.setAttribute("aria-label", `${name}, ${STATE_WORD[a.state]}${a.now ? `: ${a.now.label}` : ""}`);
       const focus = s.hover === a.id || (s.selection?.kind === "agent" && s.selection.id === a.id);
       const urgent = a.state === "turn" || a.state === "stuck";
-      n.tag.textContent = spot.swarm > 0 ? `${ctx.nameOf(a)} ×${spot.swarm + a.helpers}` : ctx.nameOf(a);
+      n.el.classList.toggle("is-focus", focus);
+      text(n.tag, spot.swarm > 0 ? `${name} ×${spot.swarm + a.helpers}` : name);
       n.tag.hidden = !(focus || urgent || z >= TAG_ZOOM);
+      if (!n.tag.hidden) words.push({ el: n.tag, rank: focus || urgent ? RANK.urgentTag : RANK.tag, x: p.x, y: p.y, anchor: "below", dy: 9 });
       const said = s.bubbles.get(a.id) ?? (focus ? (a.now?.label ?? a.lastText ?? STATE_WORD[a.state]) : null);
-      n.bubble.textContent = said ?? "";
+      text(n.bubble, said ?? "");
       n.bubble.hidden = !said;
+      if (said) words.push({ el: n.bubble, rank: focus ? RANK.focusBubble : RANK.bubble, x: p.x, y: p.y, anchor: "above", dy: 9 });
     }
     for (const [id, n] of nodes)
       if (!seen.has(id)) {
         n.el.remove();
         nodes.delete(id);
       }
+
+    cull(words);
+  }
+
+  /** Measures what changed, then hides each word that would touch one placed before it. */
+  function cull(words: Word[]): void {
+    const boxes = words.map((wd) => {
+      const sig = `${wd.el.className}|${wd.el.style.width}|${wd.el.textContent}`;
+      let size = sizes.get(wd.el);
+      if (!size || size.sig !== sig) {
+        size = { sig, w: wd.el.offsetWidth, h: wd.el.offsetHeight };
+        sizes.set(wd.el, size);
+      }
+      const { w, h } = size;
+      const x0 = wd.anchor === "corner" ? wd.x : wd.x - w / 2;
+      const y0 = wd.anchor === "above" ? wd.y - wd.dy - h : wd.y + wd.dy;
+      return { wd, x0: x0 - GAP, y0: y0 - GAP, x1: x0 + w + GAP, y1: y0 + h + GAP };
+    });
+    boxes.sort((a, b) => a.wd.rank - b.wd.rank);
+    const placed: typeof boxes = [];
+    for (const b of boxes) {
+      const hit = placed.some((p) => b.x0 < p.x1 && b.x1 > p.x0 && b.y0 < p.y1 && b.y1 > p.y0);
+      b.wd.el.classList.toggle("is-culled", hit);
+      if (!hit) placed.push(b);
+    }
   }
 
   return { paint };
+}
+
+function xy(p: { x: number; y: number }): [number, number] {
+  return [p.x, p.y];
+}
+
+/** Writes text only when it changed, so a repaint never costs a layout for the same words. */
+function text(el: HTMLElement, t: string): void {
+  if (el.textContent !== t) el.textContent = t;
 }

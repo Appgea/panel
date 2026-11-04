@@ -12,13 +12,14 @@
 //!   Nothing blinks or glides then, and no effect plays.
 //! - `camera`: the world point at the stage's centre and the `zoom`, 1 for one world pixel per
 //!   CSS pixel. The owner drags and zooms it.
-//! - `districts`: one circle per project with something going on, with its `edge` (`quiet`,
-//!   `card`, `stuck`) and `selected`. Silent projects are not on the map.
+//! - `districts`: one circle per project with a running agent, with its `edge` (`quiet`, `card`
+//!   when an agent there waits for the owner, `stuck`) and `selected`. Other projects are not on
+//!   the map.
 //! - `tiles`: the files agents touched, as small squares in their district. `lit` from 0 to 1
 //!   is how recently, `edited` when an agent wrote it.
 //! - `hub`: This Mac's box, `hot` when macOS slowed the CPU, and its testlock `bays`.
-//! - `landmarks`: the GitHub `tower`, the owner's `desk` (`waiting` while a card waits), the
-//!   `board` and the `web` gate.
+//! - `landmarks`: the GitHub `tower` and the `web` gate. A kind this build does not know draws
+//!   nothing.
 //! - `links`: lines from the hovered or selected dot to its parent and children.
 //! - `dots`: the agents. Each keeps its id across scenes and glides to its new `x`, `y`. `r`
 //!   is its core size, `state` its colour and blink, `helpers` the electrons circling it,
@@ -220,16 +221,12 @@ pub(crate) struct Landmark {
     pub kind: LandmarkKind,
     pub x: f32,
     pub y: f32,
-    #[serde(default)]
-    pub waiting: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum LandmarkKind {
     Tower,
-    Desk,
-    Board,
     Web,
     #[serde(other)]
     Unknown,

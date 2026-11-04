@@ -312,6 +312,12 @@
              Workspace: the work area is what you reach for first. -->
         <nav id="chatNav" class="side-nav chat-nav" aria-label="Inbox">
           <span class="side-label side-nav-label"><span>Inbox</span></span>
+          <!-- The calls that wait for you: your board agenda, sessions that wait, what got done.
+               One card at a time. They sat on the Live map until 2026-11-05. -->
+          <button id="forYouButton" class="nav-row" type="button" title="For you: the calls that wait for you">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 21V4h12l-2 4 2 4H5"/></svg></span>
+            For you
+          </button>
           <button id="chatButton" class="nav-row" type="button" title="Agent reports · ⌘⇧C" aria-pressed="false">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3z"/></svg></span>
             Reports <span id="chatBadge" class="nav-badge" hidden>0</span>
@@ -450,6 +456,7 @@
       <section id="supportScreen" class="support" hidden></section>
       <section id="reviewScreen" class="review" hidden></section>
       <section id="liveScreen" class="live" hidden></section>
+      <section id="forYouScreen" class="foryou" hidden></section>
       <!-- HISTORY: every agent session across the portfolio, from each agent's own store. -->
       <section id="historyScreen" class="history" hidden></section>
 

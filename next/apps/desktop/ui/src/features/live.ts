@@ -1,10 +1,14 @@
 /**
  * Live — a dark map of this Mac where every agent is a small electron that acts out what it is
- * doing. The owner drags and zooms it like a game scene.
+ * doing, and a column beside it that says who each agent is. The owner drags and zooms the map
+ * like a game scene.
  *
- * The map (live_world.ts): This Mac in the middle with its testlock bays, the GitHub tower above,
- * the owner's desk below, the board left and the web gate right. Each busy project is a round
- * district around them. Silent projects are not drawn.
+ * Live shows activity and nothing else. The decisions that wait for the owner are in For you
+ * (foryou.ts), the issues on the Board, what agents made in Review. Owner, 2026-11-05: "no
+ * review, no boards, tasks. They must be a separate section."
+ *
+ * The map (live_world.ts): This Mac in the middle with its testlock bays, the GitHub tower above
+ * and the web gate right. Each project with a running agent is a round district around them.
  *
  * Each step an agent takes has a verb, and each verb has an animation script in the catalog
  * (live_script.ts). A git push carries a crate up the tower. A search sweeps a radar. A verb
@@ -12,7 +16,8 @@
  * deletes bad ones in the catalog view (live_catalog.ts).
  *
  * Bevy, built to WebAssembly from apps/live, draws every shape from the scene in live_scene.ts.
- * Words are HTML on top: live_labels, live_queue (the card), live_panel and live_top.
+ * Words are HTML on top: live_labels on the map, live_side, live_panel and live_catalog in the
+ * column, and live_top over both.
  *
  * This file mounts, polls, keeps the state, moves the camera and starts scripts. Polled every
  * 2 s and the board every 60 s, only while the screen is open. Bevy sleeps while it is closed.
@@ -20,17 +25,18 @@
  */
 
 import { errorText } from "../errors";
-import type { BoardFeed, BoardIssue } from "./live_cards";
+import type { BoardFeed } from "./live_cards";
 import { mountCatalog } from "./live_catalog";
+import { facts } from "./live_facts";
 import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
 import { direct, type EmberEnd, type Seen } from "./live_playbook";
-import { mountQueue, readSeen } from "./live_queue";
 import { scene } from "./live_scene";
 import { PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
-import { ago, button, div, doing, HARNESS, OUTCOME_COLOUR, OUTCOME_WORD, span } from "./live_text";
+import { mountSide } from "./live_side";
+import { button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
-import type { BevyView, LiveAgent, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
+import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
 import { lay } from "./live_world";
 import "./live.css";
 
@@ -41,39 +47,45 @@ const POLL_MS = 2000;
 const BOARD_MS = 60_000;
 /** More scripts at once than this is noise. A step that finds no room just shows its words. */
 const MAX_SCRIPTS = 6;
-const ZOOM_MIN = 0.2;
-const ZOOM_MAX = 1.8;
-/** Reports in the feed. */
-const FEED = 4;
+/**
+ * Below 0.3 a district is a speck and every word is hidden to keep the rest apart. Above 1.6 the
+ * map's lines turn thick and soft.
+ */
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 1.6;
+/** One press of + or −. */
+const ZOOM_STEP = 1.25;
 
 export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   root.innerHTML = `
     ${TOP_HTML}
-    <div class="live-stage" data-stage>
-      <canvas id="liveCanvas" class="live-canvas" tabindex="-1" aria-hidden="true"></canvas>
-      <div class="live-labels" data-labels></div>
-      <div class="live-tools" data-tools></div>
-      <div class="live-feed" data-feed aria-label="What happened"></div>
-      <div class="qcard" data-card aria-live="polite"></div>
-      <div class="apanel" data-panel hidden></div>
-      <div class="live-catalog" data-catalog></div>
-      <div class="live-toast" data-toast role="status" hidden></div>
-      <p class="live-note" data-note hidden></p>
+    <div class="live-body">
+      <div class="live-stage" data-stage>
+        <canvas id="liveCanvas" class="live-canvas" tabindex="-1" aria-hidden="true"></canvas>
+        <div class="live-labels" data-labels></div>
+        <div class="live-tools" data-tools></div>
+        <div class="live-toast" data-toast role="status" hidden></div>
+        <p class="live-note" data-note hidden></p>
+      </div>
+      <aside class="live-side" aria-label="Agents on this Mac">
+        <div class="live-list" data-list></div>
+        <div class="apanel" data-panel hidden></div>
+        <div class="live-catalog" data-catalog></div>
+      </aside>
     </div>
-    <p class="live-hint">Drag to move, scroll to zoom, 0 shows everything. Click an agent to follow it. Enter, 2 or 3 answers the card. ↓ puts it off.</p>`;
+    <p class="live-hint">Drag to move. Scroll or pinch to zoom, 0 fits the map. Click an agent or its row to follow it.</p>`;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const stage = q("[data-stage]");
-  const cardEl = q("[data-card]");
-  const feedEl = q("[data-feed]");
   const tools = q("[data-tools]");
   const note = q("[data-note]");
+  const listEl = q("[data-list]");
+  const panelEl = q("[data-panel]");
+  const catalogEl = q("[data-catalog]");
 
   const reducedQuery = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   const s: LiveState = {
     world: null,
     board: null,
-    boardNote: "",
-    boardRead: false,
     layout: null,
     slots: new Map(),
     camera: { x: 0, y: 0, zoom: 0.6 },
@@ -84,14 +96,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     lights: new Map(),
     selection: null,
     hover: null,
-    cards: [],
-    front: null,
-    later: {},
-    answered: new Set(),
-    seen: readSeen(),
-    talkCard: null,
     pendingFx: [],
-    pendingFlights: [],
     reduced: !!reducedQuery?.matches,
   };
   root.classList.toggle("is-reduced", s.reduced);
@@ -115,46 +120,29 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   /** The last step each agent acted out, as verb@time, so a step plays once. */
   const acted = new Map<string, string>();
 
-  // ---------------------------------------------------------------- facts
-
-  const issues = (): BoardIssue[] => [...(s.board?.now ?? []), ...(s.board?.you ?? []), ...(s.board?.ready ?? []), ...(s.board?.waiting ?? []), ...(s.board?.done ?? [])];
-  /** The board names a claim by session: `codex-0a513057` for Codex, the folk name for others. */
-  const held = (a: LiveAgent): BoardIssue | undefined => {
-    const names = [a.session ? `codex-${a.session.slice(-8)}` : "", (a.name ?? "").toLowerCase()].filter(Boolean);
-    return (s.board?.now ?? []).find((i) => i.holder && names.includes(i.holder.toLowerCase()));
-  };
-  const issueOf = (a: LiveAgent) => held(a) ?? (a.issue ? issues().find((i) => i.number === a.issue) : undefined);
-  /** A fleet worker runs in the company folder. Its issue's app is its real district. */
-  const roomOf = (a: LiveAgent): string => (a.room !== "elsewhere" && a.room !== "home" ? a.room : (issueOf(a)?.apps[0] ?? a.room));
-  const roomMeta = (key: string) => s.world?.rooms.find((r) => r.key === key);
-
   const toScreen = (p: Pt): Pt => ({ x: (p.x - s.camera.x) * s.camera.zoom + stage.clientWidth / 2, y: (p.y - s.camera.y) * s.camera.zoom + stage.clientHeight / 2 });
   const toWorld = (p: Pt): Pt => ({ x: (p.x - stage.clientWidth / 2) / s.camera.zoom + s.camera.x, y: (p.y - stage.clientHeight / 2) / s.camera.zoom + s.camera.y });
 
   const ctx: LiveCtx = {
+    ...facts(() => s),
     s,
     events,
     stage,
-    issueOf,
-    roomOf,
-    roomName: (key) => roomMeta(key)?.name ?? s.board?.apps?.[key]?.name ?? key,
-    weight: (key) => roomMeta(key)?.weight ?? 1,
-    agentById: (id) => (id ? s.world?.agents.find((a) => a.id === id) : undefined),
-    nameOf: (a) => a.name ?? `${HARNESS[a.harness]} ${a.pid ?? a.session?.slice(0, 4) ?? ""}`.trim(),
     select,
+    hover,
     draw,
     toScreen,
-    paintQueue: () => queue.paint(),
     poll: () => void poll(),
     toast: (text, bad) => top.toast(text, bad),
   };
   const top = mountTop(ctx, root, q("[data-toast]"));
-  const queue = mountQueue(ctx, cardEl);
-  const panelEl = q("[data-panel]");
-  const catalogEl = q("[data-catalog]");
   const panel = mountPanel(ctx, panelEl);
   const labels = mountLabels(ctx, q("[data-labels]"));
-  const catalog = mountCatalog(ctx, catalogEl, playOn);
+  const side = mountSide(ctx, listEl);
+  const catalog = mountCatalog(ctx, catalogEl, playOn, () => {
+    paintTools();
+    paintColumn();
+  });
 
   const say = (text: string) => {
     note.textContent = text;
@@ -186,7 +174,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     polling = true;
     try {
       s.world = await events.world();
-      if (Date.now() - boardAt > BOARD_MS) void readBoard(false);
+      if (Date.now() - boardAt > BOARD_MS) void readBoard();
       paint();
     } catch (e) {
       top.say(`Could not read the agents: ${errorText(e, "the scan failed")}`);
@@ -195,16 +183,15 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
-  async function readBoard(fresh: boolean): Promise<void> {
+  /** The board names each worker's issue and project, and its closes ring their district. */
+  async function readBoard(): Promise<void> {
     boardAt = Date.now();
     try {
-      const b = (await events.board(fresh)) as (BoardFeed & { error?: string }) | null;
-      s.board = b && !b.error ? b : s.board;
-      s.boardNote = !b ? "No board module: cards come from your sessions only." : b.error ? `The board did not answer: ${b.error}` : "";
-    } catch (e) {
-      s.boardNote = `The board did not answer: ${errorText(e, "unknown error")}`;
+      const b = (await events.board(false)) as (BoardFeed & { error?: string }) | null;
+      if (b && !b.error) s.board = b;
+    } catch {
+      // Without the board an agent shows its own task instead of its issue.
     }
-    s.boardRead = true;
     paint();
   }
 
@@ -249,15 +236,18 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
           return Array.from({ length: n }, (_, i) => ({ x: self.x + Math.cos((i / n) * Math.PI * 2) * 34, y: self.y + Math.sin((i / n) * Math.PI * 2) * 26 }));
         }
         case "hub":
+        // The desk and the board left the map. Scripts written before still name them: the
+        // owner sits at This Mac, and the board is GitHub's.
+        case "desk":
           return [w.hub];
         case "bay": {
           const i = s.world?.mac.bays.findIndex((b) => b.agent === id) ?? -1;
           return [w.hub.bays[Math.max(0, i)]];
         }
+        case "board":
+          return [L.tower];
         case "tower":
         case "sky":
-        case "desk":
-        case "board":
         case "web":
           return [L[place]];
         default:
@@ -336,14 +326,19 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   function paint(): void {
     if (!s.world) return;
-    queue.paint();
     top.paint();
     draw();
     act();
     panel.paint();
     catalog.paint();
+    side.paint();
     paintTools();
-    paintFeed();
+    paintColumn();
+  }
+
+  /** The column shows one thing: the catalog, else the open panel, else the list of agents. */
+  function paintColumn(): void {
+    listEl.hidden = catalog.isOpen() || !panelEl.hidden;
   }
 
   function fit(): void {
@@ -351,10 +346,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const W = stage.clientWidth;
     const H = stage.clientHeight;
     if (!b || !W || !H) return;
-    // The docked card covers the lower right on a wide stage: keep the map clear of it.
-    const right = W > 900 ? 420 : 0;
-    const zoom = clamp(Math.min((W - right - 40) / (b.x1 - b.x0), (H - 40) / (b.y1 - b.y0)), ZOOM_MIN, 1);
-    s.camera = { x: (b.x0 + b.x1) / 2 + right / 2 / zoom, y: (b.y0 + b.y1) / 2, zoom };
+    const zoom = clamp(Math.min((W - 40) / (b.x1 - b.x0), (H - 40) / (b.y1 - b.y0)), ZOOM_MIN, 1);
+    s.camera = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, zoom };
   }
 
   function draw(): void {
@@ -362,7 +355,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const width = stage.clientWidth;
     if (!w || !width) return;
     const now = Date.now();
-    s.layout = lay({ world: w, cards: s.cards, roomOf, roomName: ctx.roomName, slots: s.slots });
+    s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots });
     for (const [path, l] of s.lights) if (l.until < now) s.lights.delete(path);
     if (!s.cameraHeld) fit();
     labels.paint();
@@ -375,7 +368,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     // Effects are for this moment only. Without a view they are dropped, not saved up.
     if (view) view.set_scene(JSON.stringify(scene(ctx, width, stage.clientHeight)));
     s.pendingFx = [];
-    s.pendingFlights = [];
   }
 
   function snap(): Seen {
@@ -390,42 +382,47 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     return { dots, districts, closed };
   }
 
+  // The tools are made once. A drag repaints them on every move, so a repaint only sets states.
+  const zoomOut = button("live-tool is-icon", "−", () => zoomBy(1 / ZOOM_STEP));
+  zoomOut.setAttribute("aria-label", "Zoom out");
+  zoomOut.title = "Zoom out (−)";
+  const zoomIn = button("live-tool is-icon", "+", () => zoomBy(ZOOM_STEP));
+  zoomIn.setAttribute("aria-label", "Zoom in");
+  zoomIn.title = "Zoom in (+)";
+  const fitBtn = button("live-tool", "Fit", () => refit());
+  fitBtn.title = "Fit the map (0)";
+  const anim = button("live-tool", "Animations", () => {
+    if (!catalog.isOpen() && s.selection) select(null);
+    catalog.toggle();
+  });
+  tools.append(zoomOut, zoomIn, fitBtn, anim);
+
   function paintTools(): void {
     const n = catalog.count();
     const writing = (s.world?.catalog ?? []).filter((x) => x.pending).length;
-    const toggle = () => {
-      catalog.toggle();
-      paintFeed();
-    };
-    tools.replaceChildren(button("live-tool", "Show all", () => refit()), button("live-tool", `Animations ${n}${writing ? ` · ${writing} writing` : ""}`, toggle));
-    (tools.firstElementChild as HTMLElement).hidden = !s.cameraHeld;
-  }
-
-  /** The last few agents that ended, newest first. Click one for its report. */
-  function paintFeed(): void {
-    const now = Date.now();
-    const list = [...(s.world?.embers ?? [])].sort((a, b) => b.endedMs - a.endedMs).slice(0, FEED);
-    // An open panel or catalog owns the right column.
-    feedEl.hidden = !list.length || !panelEl.hidden || !catalogEl.hidden;
-    feedEl.style.bottom = `${cardEl.offsetHeight + 24}px`;
-    feedEl.replaceChildren(
-      div("live-feed-head", "What happened"),
-      ...list.map((e) => {
-        const row = button("live-feed-row", "", () => select({ kind: "ember", id: e.id }));
-        const dot = document.createElement("i");
-        dot.style.setProperty("--c", OUTCOME_COLOUR[e.outcome]);
-        row.append(dot, span("live-feed-who", `${e.name ?? HARNESS[e.harness]} · ${OUTCOME_WORD[e.outcome].toLowerCase()}`), span("live-feed-what", e.result ?? e.task ?? e.roomName), span("live-feed-when", ago(e.endedMs, now)));
-        return row;
-      }),
-    );
+    zoomOut.disabled = s.camera.zoom <= ZOOM_MIN + 0.001;
+    zoomIn.disabled = s.camera.zoom >= ZOOM_MAX - 0.001;
+    fitBtn.disabled = !s.cameraHeld;
+    const label = `Animations ${n}${writing ? ` · ${writing} writing` : ""}`;
+    if (anim.textContent !== label) anim.textContent = label;
+    anim.classList.toggle("is-on", catalog.isOpen());
   }
 
   function select(next: Selection): void {
     const same = next && s.selection && next.kind === s.selection.kind && next.id === s.selection.id;
     s.selection = same ? null : next;
+    if (s.selection && catalog.isOpen()) catalog.toggle();
     panel.paint();
     draw();
-    paintFeed();
+    side.paint();
+    paintColumn();
+  }
+
+  function hover(id: string | null): void {
+    if (id === s.hover) return;
+    s.hover = id;
+    draw();
+    side.paint();
   }
 
   function refit(): void {
@@ -434,19 +431,23 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintTools();
   }
 
+  /** Zooms around the stage's centre, for the buttons and keys. */
+  function zoomBy(f: number): void {
+    s.camera.zoom = clamp(s.camera.zoom * f, ZOOM_MIN, ZOOM_MAX);
+    moveCamera();
+  }
+
   // ---------------------------------------------------------------- camera, pointer and keys
 
   /** Moves the camera without a new scene, so a drag stays smooth. */
   function moveCamera(): void {
     view?.set_camera(s.camera.x, s.camera.y, s.camera.zoom);
     labels.paint();
-    if (!s.cameraHeld) {
-      s.cameraHeld = true;
-      paintTools();
-    }
+    s.cameraHeld = true;
+    paintTools();
   }
 
-  const OVER = ".qcard, .apanel, .live-catalog, .live-feed, .live-tools, button, input";
+  const OVER = ".live-tools, button, input";
   let drag: { x: number; y: number; moved: boolean; id: number } | null = null;
   stage.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest(OVER)) return;
@@ -478,7 +479,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   stage.addEventListener(
     "wheel",
     (e) => {
-      if ((e.target as HTMLElement).closest(".qcard, .apanel, .live-catalog, .live-feed")) return;
       e.preventDefault();
       const r = stage.getBoundingClientRect();
       const at = { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -500,16 +500,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   });
 
   stage.addEventListener("pointerover", (e) => {
-    const id = (e.target as HTMLElement).closest<HTMLElement>(".live-agent")?.dataset.agent ?? null;
-    if (id === s.hover) return;
-    s.hover = id;
-    draw();
+    hover((e.target as HTMLElement).closest<HTMLElement>(".live-agent")?.dataset.agent ?? null);
   });
-  stage.addEventListener("pointerleave", () => {
-    if (!s.hover) return;
-    s.hover = null;
-    draw();
-  });
+  stage.addEventListener("pointerleave", () => hover(null));
 
   function onKey(e: KeyboardEvent): void {
     if (!open || e.metaKey || e.ctrlKey || e.altKey) return;
@@ -517,7 +510,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
     if (e.key === "Escape" && s.selection) select(null);
     else if (e.key === "0") refit();
-    else if (!queue.onKey(e)) return;
+    else if (e.key === "+" || e.key === "=") zoomBy(ZOOM_STEP);
+    else if (e.key === "-") zoomBy(1 / ZOOM_STEP);
+    else return;
     e.preventDefault();
   }
 

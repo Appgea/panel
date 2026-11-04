@@ -9,9 +9,9 @@
  * the catalog view, and the next sighting writes a new one.
  *
  * THE MAP. A dark field. This Mac, the hub, sits in the middle with two testlock bays. The
- * GitHub tower stands above it, the owner's desk below it, the board to its left and the web
- * gate to its right. Each project with work going on is a round district around the hub, with
- * the files agents touched as small tiles on its rim. Agents are small glowing electrons.
+ * GitHub tower stands above it and the web gate to its right. Each project with a running agent
+ * is a round district around the hub, with the files agents touched as small tiles on its rim.
+ * Agents are small glowing electrons.
  *
  * A SCRIPT is a JSON object:
  *   {
@@ -32,9 +32,8 @@
  *   "bay"      the agent's testlock bay, or the first one
  *   "tower"    the foot of the GitHub tower
  *   "sky"      high above the tower
- *   "desk"     the owner's desk, where cards wait
- *   "board"    the board
  *   "web"      the web gate
+ * Older scripts name "desk" and "board": they play at "hub" and "tower". Never write them.
  * or an object with an offset in pixels, y growing down: {"place": "tower", "dx": 0, "dy": -40}
  *
  * COLOURS: "work" cyan, "think" blue, "turn" amber, "stuck" red, "done" green, "idle" grey,

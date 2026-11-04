@@ -1,11 +1,12 @@
 /**
- * The panel for a dot, an ember or a district, docked at the top right of the map. Copied from
- * the concept page: `agentHTML` line 1153, `reportHTML` line 1162, `roomHTML` line 1172, and
- * `.apanel` in its CSS.
+ * The panel for a dot, an ember or a district. It takes the column beside the map while it is
+ * open, so it never covers the map. Copied from the concept page: `agentHTML` line 1153,
+ * `reportHTML` line 1162, `roomHTML` line 1172, and `.apanel` in its CSS. A district's panel
+ * lists agents only: the board's issues are on the Board.
  */
 
 import { errorText } from "../errors";
-import { ago, button, clock, div, doing, HARNESS, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, short, since, span, STATE_RANK, STATE_WORD } from "./live_text";
+import { ago, button, clock, div, doing, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, STATE_WORD, taskLine, who } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber, Step } from "./live_types";
 import "./live_panel.css";
 
@@ -123,10 +124,11 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
   function agentPanel(a: LiveAgent): HTMLElement[] {
     const now = Date.now();
     const room = ctx.roomName(ctx.roomOf(a));
-    const out: HTMLElement[] = [head(ctx.nameOf(a), [HARNESS[a.harness], short(a.model), room].filter(Boolean).join(" · "), `var(--l-${a.state})`)];
+    const me = ctx.whoOf(a);
+    const out: HTMLElement[] = [head(me.title, `${me.sub} · ${room}`, `var(--l-${a.state})`)];
     out.push(chipRow(STATE_WORD[a.state], `var(--l-${a.state})`, a.startedMs ? `running ${since(a.startedMs, now)}` : ""));
     const iss = ctx.issueOf(a);
-    const task: string | HTMLElement = iss ? link(`#${iss.number} ${iss.title}`, () => ctx.events.openUrl(iss.url)) : (a.task ?? "Not known");
+    const task: string | HTMLElement = iss ? link(`#${iss.number} ${iss.title}`, () => ctx.events.openUrl(iss.url)) : (taskLine(a.task) ?? (a.task ? me.role : "Not known"));
     const timer = a.stateMs && now - a.stateMs > 20_000 && (a.state === "work" || a.state === "stuck") ? ` · ${clock(now - a.stateMs)}` : "";
     const parent = ctx.agentById(a.parent);
     const by: string | HTMLElement = parent ? link(ctx.nameOf(parent), () => ctx.select({ kind: "agent", id: parent.id })) : a.via ? (a.via === "Terminal" ? "You, in Terminal" : a.via) : "Not known";
@@ -179,12 +181,14 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
   function reportPanel(e: LiveEmber): HTMLElement[] {
     const now = Date.now();
     const o = e.outcome;
-    const out: HTMLElement[] = [head(e.name ?? HARNESS[e.harness], [HARNESS[e.harness], short(e.model), ctx.roomName(e.room)].filter(Boolean).join(" · "), OUTCOME_COLOUR[o])];
+    const me = who(e, e.parentName);
+    const out: HTMLElement[] = [head(me.title, `${me.sub} · ${ctx.roomName(e.room)}`, OUTCOME_COLOUR[o])];
     out.push(chipRow(OUTCOME_WORD[o], OUTCOME_COLOUR[o], `ended ${ago(e.endedMs, now)}`));
     if (e.result) out.push(div("presult", e.result));
     out.push(...doneList(`What it did · ${e.stepCount} ${plural(e.stepCount, "step")}`, e.steps));
     const list: [string, string | HTMLElement][] = [];
-    if (e.task) list.push(["Task", e.task]);
+    const task = taskLine(e.task);
+    if (task) list.push(["Task", task]);
     if (e.startedMs) list.push(["Ran", since(e.startedMs, e.endedMs)]);
     list.push(["Started by", e.parentName ?? (e.via === "Terminal" ? "You, in Terminal" : (e.via ?? "Not known"))]);
     if (e.files.length) {
@@ -205,9 +209,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     const w = s.world!;
     const here = w.agents.filter((a) => ctx.roomOf(a) === key).sort((a, b) => STATE_RANK[a.state] - STATE_RANK[b.state] || a.id.localeCompare(b.id));
     const embers = w.embers.filter((e) => e.room === key).sort((a, b) => b.endedMs - a.endedMs);
-    const b = s.board;
-    const open = [...(b?.you ?? []), ...(b?.now ?? []), ...(b?.ready ?? []), ...(b?.waiting ?? [])].filter((i) => i.apps.includes(key));
-    const out: HTMLElement[] = [head(ctx.roomName(key), `${here.length} ${plural(here.length, "agent")} · ${open.length} open ${plural(open.length, "issue")}`, null)];
+    const out: HTMLElement[] = [head(ctx.roomName(key), `${here.length} ${plural(here.length, "agent")} running`, null)];
     const list = (items: HTMLElement[], empty: string) => {
       const ul = document.createElement("ul");
       ul.className = "rlist";
@@ -229,8 +231,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       return r;
     };
     out.push(div("psec", "Now"), list(here.map((a) => rowBtn(`var(--l-${a.state})`, ctx.nameOf(a), doing(a), () => ctx.select({ kind: "agent", id: a.id }))), "Nobody here now"));
-    out.push(div("psec", "Recently"), list(embers.slice(0, 5).map((e) => rowBtn(OUTCOME_COLOUR[e.outcome], e.name ?? HARNESS[e.harness], e.result ?? OUTCOME_WORD[e.outcome], () => ctx.select({ kind: "ember", id: e.id }))), "Nothing yet today"));
-    out.push(div("psec", "Open issues"), list(open.slice(0, 6).map((i) => rowBtn("var(--l-ink-3)", `#${i.number}`, i.title, () => ctx.events.openUrl(i.url))), "No open issues"));
+    out.push(div("psec", "Recently"), list(embers.slice(0, 5).map((e) => rowBtn(OUTCOME_COLOUR[e.outcome], who(e, e.parentName).title, e.result ?? OUTCOME_WORD[e.outcome], () => ctx.select({ kind: "ember", id: e.id }))), "Nothing yet today"));
     return out;
   }
 

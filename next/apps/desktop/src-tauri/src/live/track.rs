@@ -373,11 +373,20 @@ fn tracks() -> &'static Mutex<Tracks> {
     TRACKS.get_or_init(Default::default)
 }
 
-/// The folded transcript of each running session, brought up to date. Sessions no longer in
-/// `sessions` fall out, so the cache holds only what runs now.
-pub fn read(home: &Path, sessions: &[(String, Kind)]) -> HashMap<String, Track> {
+/// The folded transcript of each running session, brought up to date, and of each session that
+/// just left `sessions`, read to its end one last time. Those fall out, so the cache holds only
+/// what runs now. The last read matters: a `claude -p` run writes its answer and exits inside
+/// one poll, and judged on the poll before, every such run looked crashed.
+pub fn read(home: &Path, sessions: &[(String, Kind)]) -> (HashMap<String, Track>, HashMap<String, Track>) {
     let mut all = tracks().lock().unwrap_or_else(|p| p.into_inner());
-    all.retain(|s, _| sessions.iter().any(|(id, _)| id == s));
+    let gone: Vec<String> = all.keys().filter(|s| !sessions.iter().any(|(id, _)| id == *s)).cloned().collect();
+    let mut ended = HashMap::new();
+    for session in gone {
+        if let Some((path, kind, mut track)) = all.remove(&session) {
+            refresh(&mut track, &path, kind);
+            ended.insert(session, track);
+        }
+    }
     let mut out = HashMap::new();
     for (session, kind) in sessions {
         if !all.contains_key(session) {
@@ -392,7 +401,7 @@ pub fn read(home: &Path, sessions: &[(String, Kind)]) -> HashMap<String, Track> 
         refresh(track, path, *kind);
         out.insert(session.clone(), track.clone());
     }
-    out
+    (out, ended)
 }
 
 fn find_claude(home: &Path, session: &str) -> Option<PathBuf> {

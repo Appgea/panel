@@ -5,11 +5,12 @@
     <title>Panel — Live harness</title>
     <style>
       html, body { margin: 0; height: 100%; }
-      #liveScreen { position: fixed; inset: 0; }
+      #liveScreen, #forYouScreen { position: fixed; inset: 0; }
     </style>
   </head>
   <body>
-    <section id="liveScreen" class="live"></section>
+    <section id="liveScreen" class="live" hidden></section>
+    <section id="forYouScreen" class="foryou" hidden></section>
     <script type="module" src="/src/dev_live.ts"></script>
   </body>
 </html>

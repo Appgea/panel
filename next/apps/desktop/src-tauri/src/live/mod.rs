@@ -226,7 +226,7 @@ pub fn scan() -> World {
             Some((a.session.clone()?, kind))
         })
         .collect();
-    let tracks = track::read(&home, &sessions);
+    let (tracks, ended) = track::read(&home, &sessions);
     let now = now_ms();
     for a in &mut agents {
         if let Some(pid) = a.pid {
@@ -259,7 +259,7 @@ pub fn scan() -> World {
         (a.state, a.state_ms) = state_of(a, t, s, now);
     }
     agents.sort_by(|a, b| a.room.cmp(&b.room).then(a.started_ms.cmp(&b.started_ms)).then(a.id.cmp(&b.id)));
-    let embers = embers::update(&agents, now);
+    let embers = embers::update(&agents, &ended, now);
     let pids: HashMap<u32, String> = agents.iter().filter_map(|a| Some((a.pid?, a.id.clone()))).collect();
     let mac = mac::read(&procs, &pids);
     let in_project = |p: &Path| crate::pulse::owning_app(p, &rooms.root, &rooms.apps).is_some();

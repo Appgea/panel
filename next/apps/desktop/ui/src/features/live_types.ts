@@ -1,6 +1,7 @@
 /** The shapes Live passes between its files. The backend's types first, then the screen's state. */
 
-import type { BoardFeed, BoardIssue, Card } from "./live_cards";
+import type { BoardFeed } from "./live_cards";
+import type { Facts } from "./live_facts";
 import type { FxOut, Pt, Script } from "./live_script";
 import type { World } from "./live_world";
 
@@ -99,15 +100,12 @@ export type LiveWorld = {
 /** What main.ts lends Live. Every one of them already exists elsewhere in Panel. */
 export type LiveEvents = {
   world(): Promise<LiveWorld>;
-  /** Null when the board module is not installed: Live then shows no cards, and says so. */
+  /** Null when the board module is not installed. Live reads it only to name an agent's issue and its project. */
   board(fresh: boolean): Promise<BoardFeed | null>;
-  answer(body: { number: number; pick?: number; say?: string }): Promise<{ ok: boolean; said?: string }>;
-  picture(path: string): Promise<string>;
   openUrl(url: string): void;
   /** Jump to the Panel terminal hosting an agent. False when that terminal is gone. */
   openTerminal(panel: string): boolean;
   sendToAgent(panel: string, text: string): Promise<boolean>;
-  seedManager(text: string): Promise<void>;
   openFile(path: string): void;
   openHistory(session: string): void;
   stop(pid: number): Promise<void>;
@@ -126,9 +124,6 @@ export type BevyView = {
 
 export type Selection = { kind: "agent" | "ember" | "room"; id: string } | null;
 
-/** A light between a district and the desk: a new card flies in, an answer flies out. */
-export type Flight = { dir: "in" | "out"; room: string; agent: string | null };
-
 /** The world point at the stage's centre, and world pixels to CSS pixels. */
 export type Camera = { x: number; y: number; zoom: number };
 
@@ -136,8 +131,6 @@ export type Camera = { x: number; y: number; zoom: number };
 export type LiveState = {
   world: LiveWorld | null;
   board: BoardFeed | null;
-  boardNote: string;
-  boardRead: boolean;
   layout: World | null;
   /** District slots by key, kept across polls so a district never jumps. */
   slots: Map<string, number>;
@@ -151,38 +144,25 @@ export type LiveState = {
   /** File tiles a script lit, by path, until a time. */
   lights: Map<string, { color: string; until: number }>;
   selection: Selection;
-  /** The dot under the pointer, by agent id. */
+  /** The dot under the pointer, or the agent row under it in the side list, by agent id. */
   hover: string | null;
-  cards: Card[];
-  /** The card in front, kept in front until it is answered or put off. */
-  front: string | null;
-  later: Record<string, number>;
-  answered: Set<string>;
-  seen: Record<string, number>;
-  talkCard: string | null;
   pendingFx: FxOut[];
-  pendingFlights: Flight[];
   reduced: boolean;
 };
 
 /** What every Live file gets: the state, the events, the facts and the few calls that repaint. */
-export type LiveCtx = {
+export type LiveCtx = Facts & {
   s: LiveState;
   events: LiveEvents;
   stage: HTMLElement;
-  issueOf(a: LiveAgent): BoardIssue | undefined;
-  roomOf(a: LiveAgent): string;
-  roomName(key: string): string;
-  weight(key: string): number;
-  agentById(id: string | null): LiveAgent | undefined;
-  nameOf(a: LiveAgent): string;
   /** Opens a panel, or closes it when `next` is what is already open. */
   select(next: Selection): void;
+  /** Marks the agent under the pointer, on the map or in the side list. */
+  hover(id: string | null): void;
   /** Lays out and sends a new scene to Bevy. */
   draw(): void;
   /** A world point on the stage, in CSS pixels. */
   toScreen(p: Pt): Pt;
-  paintQueue(): void;
   poll(): void;
   /** A short line for the owner, gone after a few seconds. */
   toast(text: string, bad?: boolean): void;

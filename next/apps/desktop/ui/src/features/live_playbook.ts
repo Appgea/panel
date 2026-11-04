@@ -7,8 +7,7 @@
  * director compares two scans and plays the entries whose triggers fired.
  *
  * Blinks, glow, glides and the Hot Mac wash are states, not one-shot effects: Bevy draws them
- * from each scene. A card arriving flies from its district to the desk, and an answer flies
- * back (live_queue.ts makes those flights).
+ * from each scene. Cards for the owner are not on the map: they live in For you.
  */
 
 import { COLOR, type FxOut } from "./live_script";
@@ -19,12 +18,10 @@ export type Entry = { id: string; trigger: string; moves: string; tells: string;
 export const PLAYBOOK: Entry[] = [
   { id: "arrive", trigger: "a new agent appears with a parent", moves: "a beam from the parent to the new dot", tells: "who started whom", everyMs: 0 },
   { id: "appear", trigger: "a new agent appears on its own", moves: "a ring opens around the new dot", tells: "someone started an agent here", everyMs: 0 },
-  { id: "done", trigger: "an agent ends done", moves: "green sparks and a green ring where it stood", tells: "it finished; its report is in the feed", everyMs: 0 },
+  { id: "done", trigger: "an agent ends done", moves: "green sparks and a green ring where it stood", tells: "it finished; its report is under Ended", everyMs: 0 },
   { id: "failed", trigger: "an agent ends failed, crashed or stuck", moves: "red sparks where it stood", tells: "it did not finish; read its report", everyMs: 0 },
   { id: "shipped", trigger: "an issue of this district closes on the board", moves: "a wide green ring opens around the district", tells: "work for this project went out", everyMs: 60_000 },
   { id: "clash", trigger: "two running agents have written the same file", moves: "a red beam between their dots", tells: "they may overwrite each other's work", everyMs: 60_000 },
-  { id: "card", trigger: "a new card for you comes from a district", moves: "an amber light flies to your desk", tells: "something new waits for you", everyMs: 0 },
-  { id: "answer", trigger: "you answer a card or talk about it", moves: "a white light flies from your desk to the district", tells: "your answer reached them", everyMs: 0 },
   { id: "hot", trigger: "macOS slows the CPU for heat", moves: "This Mac warms to amber until it cools", tells: "the Mac is too busy; fewer builds at once", everyMs: 0 },
 ];
 

@@ -10,6 +10,7 @@
  * helpers in Pillow show a swarm.
  */
 import "./style.css";
+import { mountForYou } from "./features/foryou";
 import { mountLive, type LiveAgent, type LiveEmber, type LiveJob, type LiveWorld } from "./features/live";
 import type { BoardFeed } from "./features/live_cards";
 import type { Script } from "./features/live_script";
@@ -105,6 +106,9 @@ const agents: LiveAgent[] = [
   agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the store build", "check", "build"), steps: [step(41, "Run the store build", "check", "build")], issue: 742 }),
   agent({ id: "pid:109", name: "Karagöz", harness: "claude", room: "tavla", state: "work", panel: "s4", task: "Dice repeat the same roll after a restart" }),
   agent({ id: "pid:110", name: "Zenne", harness: "claude", room: "pillow_app", state: "work", panel: "s5", helpers: 0, task: "Sleep timer forgets its value" }),
+  // Background runs named the way Claude names them, which say nothing: Live must say what they are.
+  agent({ id: "pid:131", name: "cardly-e7", harness: "claude", room: "panel", state: "work", headless: true, via: null, model: "claude-sonnet-5-5", task: "You review a diff before it is pushed. Report only. You never edit, commit or push.", now: step(0.2, "Read live_world.ts", "check", "read", `${ROOT}/panel/ui/src/features/live_world.ts`) }),
+  agent({ id: "pid:132", name: "Tuzsuz Deli Bekir", harness: "claude", room: "panel", state: "work", headless: true, via: "Appgea Panel", model: "claude-sonnet-5-5", task: "You write one animation script for Panel Live, a dark map where coding agents are small glowing electrons." }),
   ...Array.from({ length: 8 }, (_, i) =>
     agent({ id: `pid:12${i}`, name: `Haiku ${(i + 10).toString(16)}`, harness: "claude", room: "pillow_app", state: "work", headless: true, parent: "pid:110", model: "claude-haiku-4-5", via: null, now: step(0.1, "Search the timer code", "plan", "search") }),
   ),
@@ -127,6 +131,8 @@ const embers: LiveEmber[] = [
   ember({ id: "pid:91@1", room: "interbellum", name: "Terra 8840", endedMs: min(48), result: "Air borders now use the thin dashed stroke." }),
   ember({ id: "pid:92@1", room: "tavla", name: "Sol 31bc", outcome: "crashed", result: null, endedMs: min(90) }),
   ember({ id: "pid:93@1", room: "pillow_app", name: "Haiku 12", harness: "claude", model: "claude-haiku-4-5", endedMs: min(200), result: "Sleep timer survives a background kill." }),
+  ember({ id: "pid:94@1", room: "panel", name: "cmd-style-drift-80", harness: "claude", model: "claude-sonnet-5-5", via: "Appgea Panel", task: "You write one animation script for Panel Live, a dark map where coding agents are small glowing electrons.", endedMs: min(3), result: "Wrote the cmd.magick script." }),
+  ember({ id: "pid:95@1", room: "interbellum", name: "interbellum-43", harness: "claude", model: "claude-sonnet-5-5", via: null, task: "You review a diff before it is pushed. Report only. You never edit, commit or push.", endedMs: min(8), result: "No findings. The batch is clean." }),
 ];
 
 const rooms = [
@@ -200,32 +206,51 @@ async function realWorld(): Promise<LiveWorld> {
   return (await r.json()) as LiveWorld;
 }
 
-const live = mountLive(document.getElementById("liveScreen")!, {
-  world: async () => {
-    if (params.has("real")) return realWorld();
-    move();
-    return world;
-  },
-  board: async () => (params.has("real") ? ((await (await fetch("/board.real.json")).json()) as BoardFeed) : fixtureBoard),
-  answer: async (body) => {
-    console.log("[live harness] answer", body);
-    fixtureBoard.you = (fixtureBoard.you ?? []).filter((i) => i.number !== body.number);
-    return { ok: true, said: `#${body.number}: recorded` };
-  },
-  picture: async () => "",
-  openUrl: (url) => console.log("[live harness] open", url),
-  openTerminal: (panel) => (console.log("[live harness] terminal", panel), true),
-  sendToAgent: async (panel, text) => (console.log("[live harness] send", panel, text), true),
-  seedManager: async (text) => console.log("[live harness] manager", text),
-  openFile: (path) => console.log("[live harness] file", path),
-  openHistory: (session) => console.log("[live harness] history", session),
-  stop: async (pid) => console.log("[live harness] stop", pid),
-  deleteAnimation: async (verb) => {
-    world = { ...world, catalog: (world.catalog ?? []).filter((x) => x.verb !== verb) };
-  },
-});
-document.getElementById("liveScreen")!.hidden = false;
-live.open();
-if (params.has("select")) {
-  setTimeout(() => document.querySelector<HTMLButtonElement>(".live-agent")?.click(), 600);
+const readWorld = async () => {
+  if (params.has("real")) return realWorld();
+  move();
+  return world;
+};
+const readBoard = async () => (params.has("real") ? ((await (await fetch("/board.real.json")).json()) as BoardFeed) : fixtureBoard);
+const openUrl = (url: string) => console.log("[live harness] open", url);
+const openTerminal = (panel: string) => (console.log("[live harness] terminal", panel), true);
+const sendToAgent = async (panel: string, text: string) => (console.log("[live harness] send", panel, text), true);
+
+// ?foryou=1 shows the For you section instead of the map.
+if (params.has("foryou")) {
+  const fy = mountForYou(document.getElementById("forYouScreen")!, {
+    world: readWorld,
+    board: readBoard,
+    answer: async (body) => {
+      console.log("[live harness] answer", body);
+      fixtureBoard.you = (fixtureBoard.you ?? []).filter((i) => i.number !== body.number);
+      return { ok: true, said: `#${body.number}: recorded` };
+    },
+    picture: async () => "",
+    openUrl,
+    openTerminal,
+    sendToAgent,
+    seedManager: async (text) => console.log("[live harness] manager", text),
+  });
+  document.getElementById("forYouScreen")!.hidden = false;
+  fy.open();
+} else {
+  const live = mountLive(document.getElementById("liveScreen")!, {
+    world: readWorld,
+    board: readBoard,
+    openUrl,
+    openTerminal,
+    sendToAgent,
+    openFile: (path) => console.log("[live harness] file", path),
+    openHistory: (session) => console.log("[live harness] history", session),
+    stop: async (pid) => console.log("[live harness] stop", pid),
+    deleteAnimation: async (verb) => {
+      world = { ...world, catalog: (world.catalog ?? []).filter((x) => x.verb !== verb) };
+    },
+  });
+  document.getElementById("liveScreen")!.hidden = false;
+  live.open();
+  if (params.has("select")) {
+    setTimeout(() => document.querySelector<HTMLButtonElement>(".live-agent")?.click(), 600);
+  }
 }

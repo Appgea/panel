@@ -4,7 +4,6 @@
  * Change both together.
  */
 
-import { COLOR, type FxOut } from "./live_script";
 import type { LiveCtx } from "./live_types";
 
 /** A file tile glows for this long after an agent last touched it. */
@@ -54,32 +53,21 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     return [{ id: a.id, x: p.x, y: p.y, r: spot.r, state: a.state, helpers: a.helpers + spot.swarm, selected: sel?.kind === "agent" && sel.id === a.id, hovered: s.hover === a.id, carry: s.carries.get(a.id) ?? null }];
   });
 
-  const desk = w.landmarks.desk;
-  const flights: FxOut[] = s.pendingFlights.flatMap((fl) => {
-    const d = w.districts.find((x) => x.key === fl.room);
-    const from = (fl.agent && at(fl.agent)) || d;
-    if (!from) return [];
-    const toDesk = fl.dir === "in";
-    const [a, b] = toDesk ? [from, { x: desk.x, y: desk.y - 20 }] : [{ x: desk.x, y: desk.y - 20 }, from];
-    return [{ kind: "orb", x: a.x, y: a.y, x2: b.x, y2: b.y, color: toDesk ? COLOR.turn : COLOR.ink, size: 6, ms: 1300 }];
-  });
-
   return {
     w: width,
     h: height,
     reduced: s.reduced,
     camera: s.camera,
-    districts: w.districts.map((d) => ({ x: d.x, y: d.y, r: d.r, edge: d.stuck ? "stuck" : d.cards ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
+    // The amber `card` edge: an agent in this district waits for the owner.
+    districts: w.districts.map((d) => ({ x: d.x, y: d.y, r: d.r, edge: d.stuck ? "stuck" : d.waiting ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
     tiles,
     hub: { ...w.hub, hot: world.mac.hot, bays: w.hub.bays.map((b, i) => ({ ...b, held: !!world.mac.bays[i]?.holder })) },
     landmarks: [
       { kind: "tower", ...w.landmarks.tower },
-      { kind: "desk", ...desk, waiting: s.cards.length > 0 },
-      { kind: "board", ...w.landmarks.board },
       { kind: "web", ...w.landmarks.web },
     ],
     links,
     dots,
-    fx: [...s.pendingFx, ...flights],
+    fx: s.pendingFx,
   };
 }
