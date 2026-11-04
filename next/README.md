@@ -109,6 +109,12 @@ The right-hand panel that used to sit beside these is gone. Asks float in the as
   output and caches are skipped. Files one project makes within a few minutes form one batch. Flip
   through a batch and send your verdict to that project's agent, or mark it done.
 - **Terminal** is the agent. A real PTY. No tmux, no ttyd, no iframe. One per project, all alive.
+- **Live** is a dark map of this Mac you drag and zoom. Agents are small electrons that act out
+  each step from a catalog of animation scripts, one per verb (`ui/src/features/live_script.ts`).
+  A verb with no script gets one written by a headless model, untested. The owner deletes bad
+  ones in the catalog view and the next sighting writes a new one. Silent projects are not drawn.
+  Why: owner, 2026-11-04, "Untested is fine, current models don't need testing on everything.
+  And if it is bad, I will delete ofc. So we will need a catalog of animations."
 
 ## Reuse, not rewrite
 
