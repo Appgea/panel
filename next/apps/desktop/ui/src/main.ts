@@ -50,7 +50,8 @@ import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
 import type { SupportHandle } from "./features/support";
 import { mountReview } from "./features/review";
-import { mountLive, type LiveHandle } from "./features/live";
+import { mountLive, type LiveHandle, type LiveWorld } from "./features/live";
+import type { BoardFeed } from "./features/live_cards";
 import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import { moduleGet, modulePost } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
@@ -4246,7 +4247,25 @@ async function boot(): Promise<void> {
     },
   });
 
-  live = mountLive(el("liveScreen"));
+  live = mountLive(el("liveScreen"), {
+    world: () => invoke<LiveWorld>("live_world"),
+    // The board lives in the scout module. Without it Live still runs, with no board cards.
+    board: (fresh) => moduleGet<BoardFeed>(`/m/scout/board${fresh ? "?fresh=1" : ""}`).catch(() => null),
+    answer: (body) => modulePost<{ ok: boolean; said?: string }>("/m/scout/live/answer", body),
+    picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
+    openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] live", error)),
+    openTerminal: (panel) => {
+      const session = sessionById(panel);
+      if (!session) return false;
+      jumpToSession(session.project, session.id);
+      return true;
+    },
+    sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
+    seedManager: (text) => chat.seedCpo(text),
+    openFile: (path) => void openFullPath({ path }, false, null).catch((error: unknown) => console.warn("[panel] live", error)),
+    openHistory: (session) => showHistory({ session }),
+    stop: (pid) => invoke("live_stop", { pid }),
+  });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
     projectPath: (id) => state(id)?.project.path ?? null,

@@ -3,17 +3,25 @@
 //! Read fresh on each call from what the agents already leave behind. Claude writes
 //! `~/.claude/sessions/<pid>.json`. The process table gives parents and the other harnesses.
 //! Codex rollouts cover sessions that live inside the Codex app server, which have no process of
-//! their own. Nothing is stored, so a stale answer never outlives one poll.
+//! their own. Claude transcripts say what each agent does (track.rs). Only the reports of
+//! stopped agents are stored (embers.rs). The rest is read fresh, so it never outlives a poll.
 
-use serde::Serialize;
+mod embers;
+mod jobs;
+mod mac;
+mod track;
+
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub use track::Step;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Harness {
     Claude,
@@ -22,6 +30,35 @@ pub enum Harness {
     Opencode,
     Gemini,
     Kimi,
+}
+
+/// What a dot's colour says. One state per agent, decided in [`state_of`].
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum State {
+    /// A step is running.
+    Work,
+    /// Busy between steps: the model is thinking or writing.
+    Think,
+    /// A person sits at it and it waits for that person: its turn ended, or it asked a question.
+    Turn,
+    /// Nobody waits on it and it does nothing.
+    Idle,
+    /// One step has run far longer than any step should, with the process quiet.
+    Stuck,
+}
+
+impl Agent {
+    fn harness_name(&self) -> &'static str {
+        match self.harness {
+            Harness::Claude => "Claude",
+            Harness::Codex => "Codex",
+            Harness::Grok => "Grok",
+            Harness::Opencode => "OpenCode",
+            Harness::Gemini => "Gemini",
+            Harness::Kimi => "Kimi",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -46,14 +83,56 @@ pub struct Agent {
     pub via: Option<String>,
     pub started_ms: Option<u64>,
     pub busy: bool,
+    pub state: State,
+    /// Since when it has been in `state`, as far as the logs say.
+    pub state_ms: Option<u64>,
+    pub model: Option<String>,
+    /// The session title, or the first line of the first prompt.
+    pub task: Option<String>,
+    /// The step running now.
+    pub now: Option<Step>,
+    /// Newest first, the running step on top.
+    pub steps: Vec<Step>,
+    /// Every step it started, so the view pulses once per new one.
+    pub step_count: u32,
+    pub last_text: Option<String>,
+    /// Helpers it runs now, drawn as small dots circling it.
+    pub helpers: u32,
+    /// Files it wrote, full paths.
+    pub files: Vec<String>,
+    /// The Panel terminal that hosts it. Filled by the command in main.rs, which holds the hooks.
+    pub panel: Option<String>,
+    /// The board issue it last named.
+    pub issue: Option<u32>,
+}
+
+/// A room is a project, or HQ, the home folder or Elsewhere.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Room {
+    pub key: String,
+    pub name: String,
+    /// The portfolio's order, so rooms keep their places and never reshuffle.
+    pub order: u32,
+    /// 3 for an app that earns, 2 for a store app, 1 for the rest. A card's stake starts here.
+    pub weight: u8,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct World {
     pub agents: Vec<Agent>,
+    /// Scripts, builds, tests and renders, each with the agent that started it.
+    pub jobs: Vec<jobs::Job>,
+    pub embers: Vec<embers::Ember>,
+    pub rooms: Vec<Room>,
+    pub mac: mac::Mac,
     pub scanned_ms: u64,
 }
+
+/// A step running this long, with the process quiet, is stuck. testlock queues and long builds
+/// stay under it.
+const STUCK_MS: u64 = 30 * 60 * 1000;
 
 /// A Codex session counts as running while its rollout was written this recently.
 const CODEX_FRESH: Duration = Duration::from_secs(120);
@@ -65,6 +144,8 @@ const GROK_BOT: &str = "Grok Bot.app/Contents/MacOS/";
 struct Proc {
     ppid: u32,
     cpu: f32,
+    /// Seconds since it started, from `ps` etime.
+    age_s: Option<u64>,
     args: String,
 }
 
@@ -74,13 +155,18 @@ pub fn scan() -> World {
     let people = session_people(&home);
     let rooms = Rooms::load(&home);
     let mut agents: Vec<Agent> = Vec::new();
+    let mut status: HashMap<String, ClaudeSession> = HashMap::new();
 
-    for (pid, session, cwd, started) in claude_sessions(&home) {
-        let Some(p) = procs.get(&pid) else { continue };
+    for c in claude_sessions(&home) {
+        let Some(p) = procs.get(&c.pid) else { continue };
         if !p.args.contains("claude") {
             continue; // the pid was reused after that session ended
         }
-        agents.push(agent(pid, p, Harness::Claude, headless_args(&p.args), Some(session), cwd, started));
+        let headless = headless_args(&p.args) || c.kind.as_deref().is_some_and(|k| k != "interactive");
+        let mut a = agent(c.pid, p, Harness::Claude, headless, Some(c.session.clone()), c.cwd.clone(), c.started);
+        a.name = c.name.clone();
+        agents.push(a);
+        status.insert(c.session.clone(), c);
     }
     let others: Vec<(u32, Harness, bool)> = procs
         .iter()
@@ -99,54 +185,203 @@ pub fn scan() -> World {
         agents.push(a);
     }
     fold_wrappers(&mut agents, &procs);
+    let fleet = fleet_workers(&home);
+    let mut producers: HashMap<String, u32> = HashMap::new();
+    for a in &mut agents {
+        let Some(w) = a.pid.and_then(|p| fleet.get(&p)) else { continue };
+        if a.session.is_none() {
+            a.session = w.session.clone();
+        }
+        if a.name.is_none() {
+            let tail: String = w.session.as_deref().unwrap_or_default().chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
+            a.name = Some(format!("{} {tail}", title_case(&w.kind)).trim().to_string());
+        }
+        if let Some(p) = w.producer {
+            producers.insert(a.id.clone(), p);
+        }
+    }
     for (session, cwd, started, headless, busy) in codex_rollouts(&home) {
-        if agents.iter().any(|a| a.harness == Harness::Codex && a.cwd == cwd) {
+        if agents.iter().any(|a| a.harness == Harness::Codex && (a.cwd == cwd || a.session.as_deref() == Some(session.as_str()))) {
             continue;
         }
-        agents.push(Agent {
-            id: format!("codex:{session}"),
-            pid: None,
-            harness: Harness::Codex,
-            headless,
-            name: None,
-            session: Some(session),
-            cwd,
-            room: String::new(),
-            room_name: String::new(),
-            parent: None,
-            via: Some("Codex app".into()),
-            started_ms: started,
-            busy,
-        });
+        let mut a = blank(format!("codex:{session}"), None, Harness::Codex, headless, Some(session), cwd, started, busy);
+        a.via = Some("Codex app".into());
+        agents.push(a);
     }
 
     let by_pid: HashMap<u32, String> = agents.iter().filter_map(|a| Some((a.pid?, a.id.clone()))).collect();
+    let sessions: Vec<(String, track::Kind)> = agents
+        .iter()
+        .filter_map(|a| {
+            let kind = match a.harness {
+                Harness::Claude => track::Kind::Claude,
+                Harness::Codex => track::Kind::Codex,
+                _ => return None,
+            };
+            Some((a.session.clone()?, kind))
+        })
+        .collect();
+    let tracks = track::read(&home, &sessions);
+    let now = now_ms();
     for a in &mut agents {
         if let Some(pid) = a.pid {
             let (parent, via) = lineage(pid, &procs, &by_pid);
-            a.parent = parent;
+            // A fleet runs under launchd. Its state file names the process that started it.
+            a.parent = parent.or_else(|| producers.get(&a.id).and_then(|p| ancestor_agent(*p, &procs, &by_pid)));
             a.via = via;
         }
-        if a.name.is_none() {
-            a.name = a
-                .session
-                .as_ref()
-                .and_then(|s| people.by_session.get(s))
-                .or_else(|| a.pid.and_then(|p| people.by_pid.get(&p)))
-                .cloned();
+        // The board's folk name wins over Claude's derived one, like `appgea-54`.
+        let folk = a.session.as_ref().and_then(|s| people.by_session.get(s)).or_else(|| a.pid.and_then(|p| people.by_pid.get(&p))).cloned();
+        if folk.is_some() {
+            a.name = folk;
         }
         if a.room.is_empty() {
             (a.room, a.room_name) = rooms.room_for(Path::new(&a.cwd));
         }
+        let t = a.session.as_ref().and_then(|s| tracks.get(s));
+        let s = a.session.as_ref().and_then(|s| status.get(s));
+        if let Some(t) = t {
+            a.model = t.model.clone();
+            a.task = t.task();
+            a.now = t.now();
+            a.steps = t.recent(30);
+            a.step_count = t.steps;
+            a.last_text = t.last_text.clone();
+            a.helpers = t.helpers();
+            a.files = t.files.iter().rev().take(40).cloned().collect();
+            a.issue = t.issue;
+        }
+        (a.state, a.state_ms) = state_of(a, t, s, now);
     }
     agents.sort_by(|a, b| a.room.cmp(&b.room).then(a.started_ms.cmp(&b.started_ms)).then(a.id.cmp(&b.id)));
-    World { agents, scanned_ms: now_ms() }
+    let embers = embers::update(&agents, now);
+    let pids: HashMap<u32, String> = agents.iter().filter_map(|a| Some((a.pid?, a.id.clone()))).collect();
+    let mac = mac::read(&procs, &pids);
+    let in_project = |p: &Path| crate::pulse::owning_app(p, &rooms.root, &rooms.apps).is_some();
+    let mut jobs = jobs::read(&procs, &pids, &in_project, now);
+    let room_of: HashMap<&str, (&str, &str)> = agents.iter().map(|a| (a.id.as_str(), (a.room.as_str(), a.room_name.as_str()))).collect();
+    for j in &mut jobs {
+        let owned = j.agent.as_deref().and_then(|a| room_of.get(a));
+        (j.room, j.room_name) = match (owned, &j.path_hint) {
+            (Some((k, n)), _) => (k.to_string(), n.to_string()),
+            (None, Some(path)) => rooms.room_for(Path::new(path)),
+            (None, None) => ("elsewhere".into(), "Elsewhere".into()),
+        };
+    }
+    let rooms = rooms.rooms();
+    World { agents, jobs, embers, rooms, mac, scanned_ms: now }
+}
+
+/// One worker a `board work --fleet` run started, from its `board-work-fleet-<pid>.json`.
+struct FleetWorker {
+    /// The model kind, like `terra` or `sol`.
+    kind: String,
+    /// Read from the worker's own log, where Codex prints `session id: …`.
+    session: Option<String>,
+    /// The process that started the fleet, when it says.
+    producer: Option<u32>,
+}
+
+/// Running fleet workers by pid. Board writes these files. Without them, workers still show,
+/// only nameless and without their parent.
+fn fleet_workers(home: &Path) -> HashMap<u32, FleetWorker> {
+    let mut out = HashMap::new();
+    let Ok(dir) = fs::read_dir(home.join(".appgeapanel/state")) else { return out };
+    for e in dir.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("board-work-fleet-") && name.ends_with(".json")) {
+            continue;
+        }
+        let Some(v) = fs::read(e.path()).ok().and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok()) else { continue };
+        if !v["ended"].is_null() && v["ended"] != false {
+            continue;
+        }
+        let producer = v["producer_pid"].as_u64().and_then(|p| u32::try_from(p).ok());
+        for w in v["workers"].as_array().into_iter().flatten().filter(|w| w["active"] == true) {
+            let Some(pid) = w["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else { continue };
+            let session = w["log"].as_str().and_then(|log| codex_session_in_log(Path::new(log))).or_else(|| w["session"].as_str().map(str::to_string));
+            out.insert(pid, FleetWorker { kind: w["kind"].as_str().unwrap_or_default().to_string(), session, producer });
+        }
+    }
+    out
+}
+
+/// Codex prints `session id: <uuid>` in the header of every `codex exec` run.
+fn codex_session_in_log(log: &Path) -> Option<String> {
+    let mut head = String::new();
+    BufReader::new(fs::File::open(log).ok()?).take(4096).read_to_string(&mut head).ok()?;
+    head.lines().find_map(|l| l.trim().strip_prefix("session id:")).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+/// The agent at `pid` or nearest above it.
+fn ancestor_agent(pid: u32, procs: &HashMap<u32, Proc>, agents: &HashMap<u32, String>) -> Option<String> {
+    let mut cur = pid;
+    for _ in 0..64 {
+        if let Some(id) = agents.get(&cur) {
+            return Some(id.clone());
+        }
+        cur = procs.get(&cur).map(|p| p.ppid).filter(|&p| p > 1)?;
+    }
+    None
+}
+
+fn title_case(word: &str) -> String {
+    let mut c = word.chars();
+    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
+/// Whether hold-to-stop may signal `pid`: an agent or a job in a fresh scan, never a service,
+/// and never Panel itself.
+pub fn stoppable(pid: u32) -> bool {
+    if pid == std::process::id() || pid <= 1 {
+        return false;
+    }
+    let w = scan();
+    w.agents.iter().any(|a| a.pid == Some(pid)) || w.jobs.iter().any(|j| j.pid == pid && j.kind != jobs::JobKind::Service)
+}
+
+/// One state per agent. Claude says busy or idle itself in its session file. A person's session
+/// that is idle waits for that person. The rest comes from the transcript and the CPU.
+fn state_of(a: &Agent, t: Option<&track::Track>, s: Option<&ClaudeSession>, now: u64) -> (State, Option<u64>) {
+    let open_since = a.now.as_ref().map(|n| n.at_ms);
+    if t.is_some_and(|t| t.asks()) {
+        return (State::Turn, open_since);
+    }
+    if t.is_none() && s.is_none() {
+        // Harnesses Live cannot read yet: only the CPU speaks.
+        return (if a.busy { State::Work } else { State::Idle }, None);
+    }
+    let said = s.and_then(|s| s.status.as_deref());
+    let since = s.and_then(|s| s.status_ms);
+    match said {
+        Some("idle") if !a.headless => (State::Turn, since),
+        Some("idle") => (State::Idle, since),
+        Some("busy") | None => {
+            if let Some(at) = open_since {
+                if now.saturating_sub(at) > STUCK_MS && !a.busy {
+                    return (State::Stuck, Some(at));
+                }
+                return (State::Work, Some(at));
+            }
+            if said.is_none() && !a.busy {
+                return (State::Idle, None);
+            }
+            (State::Think, t.map(|t| t.last_ms).filter(|&m| m > 0).or(since))
+        }
+        // Anything else Claude may report, like a prompt for a permission, waits on a person.
+        Some(_) => (State::Turn, since),
+    }
 }
 
 fn agent(pid: u32, p: &Proc, harness: Harness, headless: bool, session: Option<String>, cwd: String, started: Option<u64>) -> Agent {
+    blank(format!("pid:{pid}"), Some(pid), harness, headless, session, cwd, started, p.cpu >= BUSY_CPU)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn blank(id: String, pid: Option<u32>, harness: Harness, headless: bool, session: Option<String>, cwd: String, started: Option<u64>, busy: bool) -> Agent {
     Agent {
-        id: format!("pid:{pid}"),
-        pid: Some(pid),
+        id,
+        pid,
         harness,
         headless,
         name: None,
@@ -157,7 +392,19 @@ fn agent(pid: u32, p: &Proc, harness: Harness, headless: bool, session: Option<S
         parent: None,
         via: None,
         started_ms: started,
-        busy: p.cpu >= BUSY_CPU,
+        busy,
+        state: if busy { State::Work } else { State::Idle },
+        state_ms: None,
+        model: None,
+        task: None,
+        now: None,
+        steps: Vec::new(),
+        step_count: 0,
+        last_text: None,
+        helpers: 0,
+        files: Vec::new(),
+        panel: None,
+        issue: None,
     }
 }
 
@@ -259,6 +506,18 @@ fn is_plumbing(args: &str) -> bool {
 fn launcher_label(args: &str) -> String {
     let words: Vec<&str> = args.split_whitespace().collect();
     let first = base(words.first().copied().unwrap_or(""));
+    if first.to_ascii_lowercase().starts_with("python") && words.contains(&"-c") {
+        // Inline code: name it by the first module it imports past the standard ones, like `fleet`.
+        // `ps` prints a newline inside an argument as the four characters `\012`.
+        let code = args.replace("\\012", "\n");
+        let module = code
+            .split(|c: char| c.is_whitespace() || c == ';' || c == ',')
+            .collect::<Vec<_>>()
+            .windows(2)
+            .find(|w| w[0].ends_with("import") && !matches!(w[1], "sys" | "os" | "json" | "time" | "re" | "subprocess" | ""))
+            .map(|w| w[1].to_string());
+        return module.unwrap_or_else(|| "a Python script".into());
+    }
     if first.to_ascii_lowercase().starts_with("python") || matches!(first, "node" | "bun" | "deno") {
         let mut rest = words.iter().skip(1).filter(|w| !w.starts_with('-'));
         if let Some(script) = rest.next() {
@@ -277,7 +536,7 @@ fn launcher_label(args: &str) -> String {
 }
 
 fn processes() -> HashMap<u32, Proc> {
-    let Ok(out) = Command::new("ps").args(["-ax", "-o", "pid=,ppid=,pcpu=,args="]).output() else {
+    let Ok(out) = Command::new("ps").args(["-ax", "-o", "pid=,ppid=,pcpu=,etime=,args="]).output() else {
         return HashMap::new();
     };
     String::from_utf8_lossy(&out.stdout).lines().filter_map(parse_ps_line).collect()
@@ -287,7 +546,22 @@ fn parse_ps_line(line: &str) -> Option<(u32, Proc)> {
     let (pid, rest) = field(line)?;
     let (ppid, rest) = field(rest)?;
     let (cpu, rest) = field(rest)?;
-    Some((pid.parse().ok()?, Proc { ppid: ppid.parse().ok()?, cpu: cpu.parse().unwrap_or(0.0), args: rest.trim().to_string() }))
+    let (etime, rest) = field(rest)?;
+    Some((
+        pid.parse().ok()?,
+        Proc { ppid: ppid.parse().ok()?, cpu: cpu.parse().unwrap_or(0.0), age_s: elapsed(etime), args: rest.trim().to_string() },
+    ))
+}
+
+/// `ps` etime, `[[dd-]hh:]mm:ss`, in seconds.
+fn elapsed(etime: &str) -> Option<u64> {
+    let (days, clock) = match etime.split_once('-') {
+        Some((d, c)) => (d.parse::<u64>().ok()?, c),
+        None => (0, etime),
+    };
+    let parts: Vec<u64> = clock.split(':').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+    let s = parts.iter().fold(0, |acc, p| acc * 60 + p);
+    Some(days * 86_400 + s)
 }
 
 fn field(s: &str) -> Option<(&str, &str)> {
@@ -318,19 +592,37 @@ fn process_cwds(pids: impl Iterator<Item = u32>) -> HashMap<u32, String> {
     cwds
 }
 
-/// `(pid, session, cwd, startedAt)` from each `~/.claude/sessions/<pid>.json`.
-fn claude_sessions(home: &Path) -> Vec<(u32, String, String, Option<u64>)> {
+/// One `~/.claude/sessions/<pid>.json`. Claude keeps `status` (busy or idle) current itself.
+struct ClaudeSession {
+    pid: u32,
+    session: String,
+    cwd: String,
+    started: Option<u64>,
+    /// `interactive` when a person runs it in a terminal.
+    kind: Option<String>,
+    /// Claude's own name for it, like `appgea-54`.
+    name: Option<String>,
+    status: Option<String>,
+    status_ms: Option<u64>,
+}
+
+fn claude_sessions(home: &Path) -> Vec<ClaudeSession> {
     let Ok(dir) = fs::read_dir(home.join(".claude/sessions")) else { return Vec::new() };
     dir.flatten()
         .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
         .filter_map(|e| {
             let v: serde_json::Value = serde_json::from_str(&fs::read_to_string(e.path()).ok()?).ok()?;
-            Some((
-                u32::try_from(v.get("pid")?.as_u64()?).ok()?,
-                v.get("sessionId")?.as_str()?.to_string(),
-                v.get("cwd").and_then(|c| c.as_str()).unwrap_or("").to_string(),
-                v.get("startedAt").and_then(|s| s.as_u64()),
-            ))
+            let text = |k: &str| v.get(k).and_then(|c| c.as_str()).filter(|s| !s.is_empty()).map(str::to_string);
+            Some(ClaudeSession {
+                pid: u32::try_from(v.get("pid")?.as_u64()?).ok()?,
+                session: v.get("sessionId")?.as_str()?.to_string(),
+                cwd: text("cwd").unwrap_or_default(),
+                started: v.get("startedAt").and_then(|s| s.as_u64()),
+                kind: text("kind"),
+                name: text("name"),
+                status: text("status"),
+                status_ms: v.get("statusUpdatedAt").and_then(|s| s.as_u64()),
+            })
         })
         .collect()
 }
@@ -470,6 +762,23 @@ impl Rooms {
         ("elsewhere".into(), "Elsewhere".into())
     }
 
+    /// Every room an agent can stand in, in portfolio order: HQ first, the apps as
+    /// `portfolio.yaml` lists them, then the home folder and Elsewhere. The view shows the ones
+    /// with someone in them. A fleet worker in the company folder moves to its issue's app there.
+    fn rooms(&self) -> Vec<Room> {
+        let fixed = |key: &str, name: &str, order| Room { key: key.into(), name: name.into(), order, weight: 1 };
+        let mut out = vec![fixed("hq", "HQ", 0)];
+        out.extend(self.apps.iter().enumerate().map(|(i, a)| Room {
+            key: a.key.clone(),
+            name: a.name.clone(),
+            order: i as u32 + 1,
+            weight: if a.earns { 3 } else if a.in_store { 2 } else { 1 },
+        }));
+        out.push(fixed("home", "Home folder", 9000));
+        out.push(fixed("elsewhere", "Elsewhere", 9001));
+        out
+    }
+
     fn scratch_owner(&self, cwd: &Path) -> Option<&crate::sprints::PortfolioApp> {
         let encoded = cwd.components().find_map(|c| {
             let s = c.as_os_str().to_str()?;
@@ -504,8 +813,8 @@ mod tests {
     #[test]
     fn a_launchd_fleet_names_its_launcher() {
         let mut procs = HashMap::new();
-        procs.insert(54744, Proc { ppid: 1, cpu: 0.0, args: "/x/Python.app/Contents/MacOS/Python /Users/a/ops/runbooks/board.py work --n 3".into() });
-        procs.insert(6526, Proc { ppid: 54744, cpu: 0.6, args: "/Users/a/.local/bin/claude -p".into() });
+        procs.insert(54744, Proc { ppid: 1, cpu: 0.0, age_s: None, args: "/x/Python.app/Contents/MacOS/Python /Users/a/ops/runbooks/board.py work --n 3".into() });
+        procs.insert(6526, Proc { ppid: 54744, cpu: 0.6, age_s: None, args: "/Users/a/.local/bin/claude -p".into() });
         let (parent, via) = lineage(6526, &procs, &HashMap::new());
         assert_eq!(parent, None);
         assert_eq!(via.as_deref(), Some("board.py work"));

@@ -9,3 +9,5 @@ apps/desktop/ui/public/live/
 # A saved `board json` (?real=1) and review deck (?swipe=1&real=1) for the board harness. Real issue text, never committed.
 apps/desktop/ui/board.real.json
 apps/desktop/ui/deck.real.json
+# A saved `live_world` for the Live harness (dev_live.html?real=1). Real session text, never committed.
+apps/desktop/ui/live.real.json

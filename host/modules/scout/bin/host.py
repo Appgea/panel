@@ -306,6 +306,32 @@ def board(fresh):
         return {"error": str(error)}
 
 
+def live_answer(d):
+    """`board answer N K --via live`, or `--say WORDS`. The board cache is dropped, so Live's next
+    read no longer shows the answered card."""
+    number, pick, words = d.get("number"), d.get("pick"), (d.get("say") or "").strip()
+    if not isinstance(number, int) or number <= 0:
+        raise ValueError("number is required")
+    if pick is not None and (not isinstance(pick, int) or pick < 0):
+        raise ValueError("pick is an option number")
+    if pick is None and not words:
+        raise ValueError("give an option or words")
+    args = board_command() + ["answer", str(number)]
+    if pick is not None:
+        args.append(str(pick))
+    if words:
+        args += ["--say", words]
+    args += ["--via", "Panel Live"]
+    code, stdout, stderr, expired = command(args, 60)
+    if code or expired:
+        raise ValueError(last_line(stderr) or last_line(stdout) or ("board timed out" if expired else "board exited %d" % code))
+    try:
+        (state_path() / "board.json").unlink()
+    except OSError:
+        pass
+    return {"ok": True, "said": last_line(stdout)}
+
+
 PICTURE_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp"}
 PICTURE_LIMIT = 3 * 1024 * 1024
 
@@ -437,6 +463,13 @@ def main():
         except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as error:
             return _respond(400, {"error": str(error)})
         return _respond(404, {"error": "no route"})
+    if method == "POST" and path == "/live/answer":
+        # Live's Decide card: the owner's tap or words, recorded the way a Slack tap is.
+        try:
+            d = json.loads(sys.stdin.buffer.read() or b"{}")
+            return _respond(200, live_answer(d if isinstance(d, dict) else {}))
+        except ValueError as error:
+            return _respond(400, {"error": str(error)})
     if method == "POST" and path in ("/run", "/start", "/record"):
         try:
             d = json.loads(sys.stdin.buffer.read() or b"{}")

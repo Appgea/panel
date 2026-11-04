@@ -1039,8 +1039,36 @@ async fn ops_map() -> Result<ops_map::OpsMap, String> {
 
 /// Every agent running on this Mac, for the Live section. Polled only while Live is open.
 #[tauri::command]
-async fn live_world() -> Result<live::World, String> {
-    off_main(|| Ok(live::scan())).await
+async fn live_world(state: State<'_, DesktopState>) -> Result<live::World, String> {
+    // Claude conversation id -> the Panel terminal holding it, so Live can talk to it and open it.
+    let mut hosted: HashMap<String, String> = state
+        .ingress
+        .conversations()
+        .into_iter()
+        .map(|(instance, conversation)| (conversation, instance))
+        .collect();
+    for (id, sleeper) in state.sleeping.lock().unwrap().iter() {
+        hosted.insert(sleeper.conversation.clone(), id.clone());
+    }
+    let mut world = off_main(|| Ok(live::scan())).await?;
+    for a in &mut world.agents {
+        a.panel = a.session.as_ref().and_then(|s| hosted.get(s)).cloned();
+    }
+    Ok(world)
+}
+
+/// Live's hold-to-stop. Only a process the scan lists right now as an agent or a job, never a
+/// service, so a stale or forged pid cannot reach anything else. SIGTERM lets it clean up.
+#[tauri::command]
+async fn live_stop(pid: u32) -> Result<(), String> {
+    off_main(move || {
+        if !live::stoppable(pid) {
+            return Err(format!("{pid} is not an agent or a job Live shows"));
+        }
+        let status = std::process::Command::new("kill").args(["-TERM", &pid.to_string()]).status().map_err(|e| e.to_string())?;
+        if status.success() { Ok(()) } else { Err(format!("kill exited {status}")) }
+    })
+    .await
 }
 
 /// Each project's row in its company's `portfolio.yaml`, for the sidebar's lanes.
@@ -4381,6 +4409,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             live_world,
+            live_stop,
             launch_context,
             manager_project,
             main_folder_project,

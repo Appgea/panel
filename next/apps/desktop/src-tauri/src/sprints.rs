@@ -141,10 +141,15 @@ pub(crate) struct PortfolioApp {
     /// Keys of the shared services this app needs, and of the apps a service backs.
     pub depends_on: Vec<String>,
     pub serves: Vec<String>,
+    /// Listed in a store. Live weighs a card from a store app above one from a tool.
+    pub in_store: bool,
+    /// Sells something: in-app purchases, a subscription or a RevenueCat project.
+    pub earns: bool,
 }
 
 impl PortfolioApp {
     fn set(&mut self, field: &str, value: String) {
+        let given = !value.is_empty() && value != "null" && value != "[]";
         match field {
             "name" => self.name = value,
             "dir" => self.dir = value,
@@ -153,6 +158,9 @@ impl PortfolioApp {
             "kind" => self.kind = value,
             "depends_on" => self.depends_on = list_field(&value),
             "serves" => self.serves = list_field(&value),
+            "stores" | "bundle_id" => self.in_store |= given,
+            "revenuecat" => self.earns |= given,
+            "monetization" => self.earns |= value.contains("iap") || value.contains("subscription"),
             _ => {}
         }
     }
