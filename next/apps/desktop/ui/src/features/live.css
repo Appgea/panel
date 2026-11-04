@@ -4,7 +4,7 @@
  * the stage.
  *
  * Live is always dark: glow needs a dark room. Its tokens do not flip with the light theme.
- * They copy the concept page (~/.appgeapanel/state/panel-live/concept.html). No text glows.
+ * They copy the concept page (next/apps/live/concept.html). No text glows.
  * Glow is only for dots, beams and threads, and Bevy draws all of it.
  */
 

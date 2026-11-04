@@ -1,7 +1,7 @@
 /**
  * Live — what every agent, script and process on this Mac is doing, and the few things that
  * need the owner. The target look is the concept page at
- * ~/.appgeapanel/state/panel-live/concept.html.
+ * next/apps/live/concept.html. Every "concept page" line number in Live's files points there.
  *
  * One drawn building. Project rooms keep fixed places (live_layout.ts), each with four station
  * pads. This Mac is the base. The owner's ring sits under it with the card beside it. Bevy, built

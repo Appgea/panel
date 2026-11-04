@@ -1,6 +1,6 @@
 //! Panel Live's view. Panel's TypeScript lays the building out in CSS pixels and hands it over
 //! with `set_scene`. Bevy only draws it. Every word is HTML on top, so nothing here draws text.
-//! The target look is the concept page, ~/.appgeapanel/state/panel-live/concept.html.
+//! The target look is the concept page, next/apps/live/concept.html.
 //!
 //! # The scene contract
 //!

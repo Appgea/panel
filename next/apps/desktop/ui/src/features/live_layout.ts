@@ -1,6 +1,6 @@
 /**
  * Live's building, in stage CSS pixels. Copied from `layout()` in the concept page
- * (~/.appgeapanel/state/panel-live/concept.html, line 799).
+ * (next/apps/live/concept.html, line 799).
  *
  * Eight rooms in portfolio order, four to a row on a wide stage. Below them the Quiet row, then
  * This Mac as the base with its two test bays, then the owner's ring with the card beside it.

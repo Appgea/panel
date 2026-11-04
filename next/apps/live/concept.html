@@ -1,0 +1,1327 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Panel Live</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+:root{
+  /* Layout: the hero is a night cutaway of one building, project rooms on fixed floors and your ring below.
+     The spec under it reads like a drawing set: a narrow label column, a wide detail column.
+     One dark look by choice: glow needs a dark room. */
+  --night:#0A0D13; --deck:#0E121A; --wall:#11161F; --raise:#171D29;
+  --line:#232B3A; --line-2:#333D50;
+  --ink:#E6EAF1; --ink-2:#9AA4B6; --ink-3:#717C90;
+  --work:#6FE7FF; --think:#93B4FF; --wait:#FFB23F; --idle:#6B7689; --fail:#FF5A6A; --done:#4BE38F;
+  --f-display:"Bricolage Grotesque","IBM Plex Sans",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{background:var(--night)}
+body{background:var(--night);color:var(--ink);font:400 15px/1.6 var(--f-body);padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 56px;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1240px;margin-inline:auto}
+.top{display:grid;gap:12px;padding-block:44px 22px}
+.eyebrow{font:500 12px/1.4 var(--f-mono);color:var(--ink-3)}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(44px,7vw,76px);line-height:.95;letter-spacing:-.025em;margin:0;text-wrap:balance}
+.lede{font-size:clamp(16px,1.6vw,19px);line-height:1.5;color:var(--ink-2);max-width:60ch;margin:0}
+.goal{font:400 13px/1.5 var(--f-mono);color:var(--ink-3);max-width:80ch;margin:0}
+.goal b{color:var(--ink-2);font-weight:500}
+
+.bar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding-block:6px 10px}
+.bar-l{display:flex;align-items:center;gap:10px;min-width:0;flex:1 1 320px}
+.onair{width:8px;height:8px;border-radius:50%;background:var(--ink);box-shadow:0 0 10px var(--ink);flex:none;animation:onair 1.6s ease-in-out infinite}
+@keyframes onair{50%{opacity:.3}}
+.narr{font:500 13px/1.4 var(--f-mono);color:var(--ink);min-width:0;overflow-wrap:anywhere}
+.bar-r{display:flex;align-items:center;gap:10px}
+.badge{font:500 11px/1 var(--f-mono);color:var(--ink-3);border:1px dashed var(--line-2);border-radius:999px;padding:5px 10px;white-space:nowrap}
+.btn{font:500 13px/1 var(--f-body);color:var(--ink);background:var(--deck);border:1px solid var(--line-2);border-radius:8px;padding:9px 13px;cursor:pointer}
+.btn:hover{border-color:var(--ink-3)}
+.btn:disabled{opacity:.5;cursor:default}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12.5px;color:var(--ink-2);padding-bottom:12px}
+.legend span{display:inline-flex;align-items:center;gap:7px}
+.legend i,.qwho i,.rowbtn i{width:8px;height:8px;border-radius:50%;background:var(--c);box-shadow:0 0 8px var(--c);flex:none;display:inline-block}
+.stage{position:relative}
+#world{display:block;width:100%;border-radius:14px;touch-action:manipulation}
+
+.qcard{position:absolute;z-index:2;background:var(--raise);border:1px solid var(--line-2);border-radius:12px;padding:14px 16px 12px;box-shadow:0 18px 50px rgba(0,0,0,.5);transition:opacity .15s ease,transform .15s ease}
+.qcard.swap{opacity:0;transform:translateY(6px)}
+.qhead{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font:500 11.5px/1.3 var(--f-mono);color:var(--ink-3)}
+.qkind{color:var(--c)}
+.qwho{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:9px;font-size:12.5px;color:var(--ink-2);min-width:0}
+.qdots{display:inline-flex;gap:3px}
+.qtitle{font:600 17px/1.3 var(--f-body);color:var(--ink);margin-top:3px;text-wrap:balance;overflow-wrap:anywhere}
+.qwhy{font-size:13px;line-height:1.45;color:var(--ink-2);margin-top:3px}
+.qopts{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.opt{display:inline-flex;align-items:center;gap:8px;font:500 13px/1.2 var(--f-body);color:var(--ink);background:transparent;border:1px solid var(--line-2);border-radius:8px;padding:8px 11px;cursor:pointer;text-align:left}
+.opt:hover{border-color:var(--ink-3)}
+.opt.primary{background:var(--ink);border-color:var(--ink);color:var(--night)}
+kbd{font:500 10.5px/1 var(--f-mono);border:1px solid currentColor;border-radius:4px;padding:2px 5px;opacity:.65}
+.qfoot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:10px;font:400 11px/1.4 var(--f-mono);color:var(--ink-3)}
+.qscore{min-width:0;overflow-wrap:anywhere}
+.later{flex:none;display:inline-flex;align-items:center;gap:6px;background:none;border:0;color:var(--ink-2);font:500 12px/1 var(--f-body);cursor:pointer;padding:4px}
+.reply{display:block;width:100%;margin-top:10px;background:var(--deck);color:var(--ink);border:1px solid var(--line-2);border-radius:8px;padding:9px 11px;font:400 14px/1.3 var(--f-body)}
+.reply::placeholder{color:var(--ink-3)}
+.thumb{display:block;width:100%;height:72px;margin-top:10px;border-radius:8px;border:1px solid var(--line)}
+.qlist{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:5px;font-size:13px;line-height:1.4;color:var(--ink-2)}
+.qlist li{position:relative;padding-left:14px;min-width:0;overflow-wrap:anywhere}
+.qlist li::before{content:"";position:absolute;left:2px;top:.55em;width:5px;height:5px;border-radius:50%;background:var(--ink-3)}
+.qlist .more{color:var(--ink-3)}
+.qprop{margin:10px 0 0;padding:9px 11px;border:1px solid var(--line-2);border-radius:8px;background:var(--deck);font-size:13px;line-height:1.45;color:var(--ink-2)}
+.qprop b{color:var(--ink);font-weight:600}
+button:focus-visible,.reply:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+
+.apanel{position:absolute;z-index:3;background:var(--raise);border:1px solid var(--line-2);border-radius:12px;padding:14px 14px 12px;box-shadow:0 18px 50px rgba(0,0,0,.55);font-size:13px;line-height:1.45}
+.ph{display:flex;align-items:flex-start;gap:10px}
+.pdot{width:12px;height:12px;border-radius:50%;background:var(--c,var(--idle));box-shadow:0 0 10px var(--c,var(--idle));margin-top:5px;flex:none}
+.pt{min-width:0;flex:1}
+.pname{font:600 15px/1.3 var(--f-body)}
+.psub{font-size:12px;color:var(--ink-2)}
+.pclose{flex:none;background:none;border:0;color:var(--ink-2);font:400 20px/1 var(--f-body);cursor:pointer;padding:2px 6px;border-radius:6px}
+.pclose:hover{color:var(--ink)}
+.pstate{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:12px;color:var(--ink-3)}
+.chip{display:inline-flex;align-items:center;font:500 11.5px/1 var(--f-mono);color:var(--c);border:1px solid var(--c);border-radius:999px;padding:4px 9px}
+.prows{display:grid;grid-template-columns:80px minmax(0,1fr);gap:6px 10px;margin:12px 0 0}
+.prows dt{color:var(--ink-3);font-size:12px;padding-top:1px}
+.prows dd{margin:0;min-width:0;overflow-wrap:anywhere}
+.psec{font-size:12px;color:var(--ink-3);margin-top:12px;padding-top:10px;border-top:1px solid var(--line)}
+.pdone{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;font:400 12px/1.4 var(--f-mono);color:var(--ink-2);max-height:156px;overflow:auto}
+.pdone li{display:grid;grid-template-columns:42px minmax(0,1fr);gap:8px}
+.pdone time{color:var(--ink-3)}
+.presult{margin:10px 0 0;font-size:14px;color:var(--ink)}
+.pact{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+.hold{position:relative;overflow:hidden}
+.hold::after{content:"";position:absolute;left:0;bottom:0;height:2px;width:100%;background:var(--fail);transform:scaleX(0);transform-origin:left}
+.hold.holding::after{transform:scaleX(1);transition:transform .9s linear}
+.plink{background:none;border:0;padding:0;font:inherit;color:var(--ink);text-decoration:underline;text-decoration-color:var(--line-2);text-underline-offset:3px;cursor:pointer}
+.rlist{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:2px}
+.rowbtn{display:grid;grid-template-columns:10px auto minmax(0,1fr);align-items:center;gap:8px;width:100%;background:none;border:0;border-radius:6px;padding:5px 6px;color:var(--ink-2);font:400 12.5px/1.35 var(--f-body);text-align:left;cursor:pointer}
+.rowbtn:hover{background:var(--deck)}
+.rowbtn b{color:var(--ink);font-weight:500}
+.rowbtn span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.muted{color:var(--ink-3);font-size:12.5px;padding:5px 6px}
+.pnote{margin:10px 0 0;font-size:12px;color:var(--ink-3)}
+.peek{position:absolute;z-index:4;pointer-events:none;background:var(--raise);border:1px solid var(--line-2);border-radius:8px;padding:6px 10px;font:400 12px/1.3 var(--f-body);color:var(--ink);white-space:nowrap;max-width:min(340px,92%);overflow:hidden;text-overflow:ellipsis;box-shadow:0 8px 24px rgba(0,0,0,.45)}
+.replay{position:absolute;z-index:4;top:12px;left:50%;transform:translateX(-50%);width:min(440px,calc(100% - 24px));background:var(--raise);border:1px solid var(--line-2);border-radius:12px;padding:12px 14px;box-shadow:0 18px 50px rgba(0,0,0,.55)}
+.rp-top{display:flex;justify-content:space-between;gap:10px;font-size:13px}
+.rp-top span{font-family:var(--f-mono);color:var(--ink-2)}
+.rp-bar{height:3px;background:var(--line);border-radius:2px;margin-top:9px;overflow:hidden}
+.rp-bar i{display:block;height:100%;background:var(--ink);transform-origin:left}
+.rp-tally{margin-top:8px;font:400 12px/1.4 var(--f-mono);color:var(--ink-2)}
+.toast{position:absolute;z-index:5;top:12px;left:50%;transform:translateX(-50%);width:max-content;max-width:min(460px,calc(100% - 24px));background:var(--raise);border:1px solid var(--line-2);border-radius:10px;padding:9px 13px;font-size:13px;color:var(--ink);box-shadow:0 12px 30px rgba(0,0,0,.5)}
+.replay:not([hidden]) ~ .toast{top:104px}
+.hint{font-size:13px;color:var(--ink-3);margin:12px 0 0}
+
+.spec{margin-top:64px}
+.sec{display:grid;grid-template-columns:minmax(0,270px) minmax(0,1fr);gap:16px 56px;padding-block:40px;border-top:1px solid var(--line)}
+.sec-l{min-width:0}
+.tag{font:500 11.5px/1 var(--f-mono);color:var(--ink-3)}
+.sec h2{font:600 clamp(24px,2.6vw,30px)/1.12 var(--f-display);letter-spacing:-.01em;margin:10px 0 8px;text-wrap:balance}
+.sec-l p{margin:0;color:var(--ink-2);font-size:15px;line-height:1.5}
+.sec-r{min-width:0;display:grid;gap:18px;align-content:start}
+.sec-r > p{margin:0;max-width:68ch}
+.sec-r h3{font:600 15px/1.3 var(--f-body);margin:8px 0 -6px;color:var(--ink)}
+.list{list-style:none;margin:0;padding:0;display:grid;gap:9px;max-width:72ch}
+.list li{position:relative;padding-left:20px;overflow-wrap:anywhere}
+.list li::before{content:"";position:absolute;left:3px;top:.68em;width:6px;height:6px;border-radius:50%;background:var(--ink-3)}
+.formula{margin:0;font:500 clamp(14px,1.9vw,19px)/1.5 var(--f-mono);color:var(--ink);background:var(--deck);border:1px solid var(--line);border-radius:10px;padding:16px 18px;overflow-x:auto;white-space:nowrap}
+.formula .op{color:var(--ink-3)}
+.terms,.keys{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:8px 18px;margin:0;max-width:72ch}
+.terms dt{font:500 13.5px/1.5 var(--f-mono);color:var(--ink)}
+.terms dd,.keys dd{margin:0;color:var(--ink-2)}
+.keys dt{color:var(--ink)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:10px}
+table{border-collapse:collapse;width:100%;min-width:640px;font-size:13.5px;font-variant-numeric:tabular-nums}
+th{font:500 11.5px/1.3 var(--f-mono);color:var(--ink-3);text-align:left;padding:10px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+td{padding:10px 12px;border-bottom:1px solid var(--line);color:var(--ink-2)}
+tr:last-child td{border-bottom:0}
+td.n,th.n{text-align:right;font-family:var(--f-mono)}
+td.card{color:var(--ink)}
+td.ord{font:600 13px var(--f-mono);color:var(--ink)}
+.cap{font-size:13px;color:var(--ink-3);margin:-8px 0 0}
+.budget{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px}
+.budget div{border-top:1px solid var(--line-2);padding-top:10px}
+.budget b{display:block;font:600 22px/1.1 var(--f-display);color:var(--ink)}
+.budget span{font-size:13px;color:var(--ink-2)}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
+.tile{background:var(--deck);border:1px solid var(--line);border-radius:10px;padding:8px 12px 12px;display:grid;gap:4px;align-content:start}
+.tile svg{display:block;width:100%;height:auto}
+.tile p{margin:0;font-size:13px;line-height:1.45;color:var(--ink-2)}
+.tile p b{color:var(--ink);font-weight:600}
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 20px;list-style:none;margin:0;padding:0}
+.states li{display:flex;gap:10px;align-items:baseline;font-size:14px;color:var(--ink-2)}
+.states i{width:9px;height:9px;border-radius:50%;background:var(--c);box-shadow:0 0 9px var(--c);flex:none;transform:translateY(1px)}
+.states b{color:var(--ink);font-weight:500}
+.cols3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:28px}
+.cols3 h3{margin:0 0 10px}
+.phases{list-style:none;margin:0;padding:0;display:grid}
+.phases li{display:grid;grid-template-columns:44px minmax(0,1fr);gap:4px 14px;padding-block:14px;border-top:1px solid var(--line)}
+.phases li:first-child{border-top:0;padding-top:0}
+.phases .num{font:600 28px/1 var(--f-display);color:var(--ink-3)}
+.phases b{display:block;font-weight:600;color:var(--ink)}
+.phases p{margin:2px 0 0;color:var(--ink-2)}
+.phases .dw{font:400 12.5px/1.45 var(--f-mono);color:var(--ink-3);margin-top:6px}
+.note{font:400 12.5px/1.5 var(--f-mono);color:var(--ink-3);border-top:1px solid var(--line);padding-top:24px;margin-top:8px}
+code{font:500 .92em var(--f-mono);color:var(--ink);background:var(--deck);border:1px solid var(--line);border-radius:5px;padding:1px 5px}
+@media (max-width:860px){.sec{grid-template-columns:minmax(0,1fr);gap:12px;padding-block:32px}.cols3{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:520px){.terms,.keys{grid-template-columns:minmax(0,1fr);gap:2px 0}.terms dd,.keys dd{margin-bottom:8px}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<radialGradient id="g-work"><stop offset="0" stop-color="#6FE7FF" stop-opacity=".8"/><stop offset=".35" stop-color="#6FE7FF" stop-opacity=".22"/><stop offset="1" stop-color="#6FE7FF" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-think"><stop offset="0" stop-color="#93B4FF" stop-opacity=".7"/><stop offset=".35" stop-color="#93B4FF" stop-opacity=".2"/><stop offset="1" stop-color="#93B4FF" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-wait"><stop offset="0" stop-color="#FFB23F" stop-opacity=".85"/><stop offset=".35" stop-color="#FFB23F" stop-opacity=".25"/><stop offset="1" stop-color="#FFB23F" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-idle"><stop offset="0" stop-color="#6B7689" stop-opacity=".45"/><stop offset="1" stop-color="#6B7689" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-fail"><stop offset="0" stop-color="#FF5A6A" stop-opacity=".8"/><stop offset=".35" stop-color="#FF5A6A" stop-opacity=".22"/><stop offset="1" stop-color="#FF5A6A" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-done"><stop offset="0" stop-color="#4BE38F" stop-opacity=".7"/><stop offset="1" stop-color="#4BE38F" stop-opacity="0"/></radialGradient>
+<radialGradient id="g-ink"><stop offset="0" stop-color="#E6EAF1" stop-opacity=".9"/><stop offset="1" stop-color="#E6EAF1" stop-opacity="0"/></radialGradient>
+</defs></svg>
+
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Appgea Panel · the Live section, first step of the move to Bevy · 4 Nov 2026 · v2</div>
+  <h1>Panel Live</h1>
+  <p class="lede">A new section of Panel, next to Review. Every agent on your Mac is a glowing dot, every project a room. Only business reaches you: a call to make, a call made for you, what got done, what could be better. Talk is one key on every card.</p>
+  <p class="goal"><b>Goal: your day with the agents fits in two hours.</b> You, 2 Nov: “I spend 11 hours in front of the computer to catch up.”</p>
+</header>
+
+<section aria-label="Live demo with sample activity">
+  <div class="bar">
+    <div class="bar-l"><span class="onair" aria-hidden="true"></span><span class="narr" id="narr">Starting the world</span></div>
+    <div class="bar-r"><span class="badge">Sample activity</span><button type="button" class="btn" id="replayBtn">Replay last 2 hours</button></div>
+  </div>
+  <div class="legend" aria-label="What the colours mean">
+    <span><i style="--c:var(--work)"></i>Working</span><span><i style="--c:var(--think)"></i>Planning</span><span><i style="--c:var(--wait)"></i>Wants to talk</span><span><i style="--c:var(--idle)"></i>Idle</span><span><i style="--c:var(--fail)"></i>Stuck</span><span><i style="--c:var(--done)"></i>Done, then an ember</span>
+  </div>
+  <div class="stage" id="stage">
+    <canvas id="world" role="img" aria-label="Sample world: eight project rooms with glowing agent dots, a row of quiet projects, This Mac, and your ring with the queue card"></canvas>
+    <div class="qcard" id="qcard" aria-live="polite"></div>
+    <div class="apanel" id="apanel" hidden></div>
+    <div class="peek" id="peek" hidden></div>
+    <div class="replay" id="replay" hidden></div>
+    <div class="toast" id="toast" role="status" hidden></div>
+  </div>
+  <p class="hint">Click any dot, room or ember. Answer the card with Enter, 2 or 3. T talks about it. Space opens the room behind it. ↓ moves it to later. Esc closes a panel.</p>
+</section>
+
+<main class="spec">
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Decided</div><h2>What I decided for you</h2><p>You asked me to decide. Each line can be overruled.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>Live is a new section of Panel, next to Review. It is the first step of moving Panel's UI to Bevy, one section at a time. Nothing else is cut.</li>
+    <li>Rooms are projects, not harnesses. You think in apps, money and stores. The harness is a letter on the dot.</li>
+    <li>Only business reaches you: Decide, Decided, Done, Better and Talk. No permission prompts.</li>
+    <li>Talk is on every card. It opens a conversation with the agent behind it, with the card attached.</li>
+    <li>Every motion is a playbook entry that says what it tells you. Haiku picks an entry for new events and proposes new animations.</li>
+    <li>Every dot opens a panel. Every stopped agent leaves an ember that holds its report.</li>
+    <li>Light means state. Words sit on quiet panels, as your quiet Mac rule from #1158 says.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Look</div><h2>Light means state</h2><p>Words sit still.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>Glow is only for dots, beams and threads, and it always means a state. Nothing glows for decoration.</li>
+    <li>Every word sits on a quiet panel: flat, grey, one accent, Title Case labels, no hover lifts. That is today's Panel style rule, kept as is.</li>
+    <li>No XP, streaks, quests or scores. The game feel comes from a living world you can read at a glance.</li>
+    <li>A working dot glows still. It pulses once when it starts a new step. A world where nothing changes draws no frames.</li>
+    <li>Live is always dark. Glow needs a dark room.</li>
+  </ul></div>
+</section>
+
+<section class="sec" id="attention">
+  <div class="sec-l"><div class="tag">Attention</div><h2>What reaches you</h2><p>Business only. Each card answers one of your needs, and Talk is on every card.</p></div>
+  <div class="sec-r">
+    <dl class="terms">
+      <dt>Decide</dt><dd>A business call only you can make: price, scope, store, what a product is, final art. These are your agenda, the open <code>you</code> asks. Your tap writes the same <code>Answer:</code> line a Slack tap writes, through <code>board answer</code>.</dd>
+      <dt>Decided</dt><dd>Calls agents made in your place, each with its why. Today they scroll by in #news. Here they come as one card per project: keep them all, undo one, or talk.</dd>
+      <dt>Done</dt><dd>What got done since you last looked, per project: issues closed, releases sent, attempts that failed. The reports are one click away.</dd>
+      <dt>Better</dt><dd>What could be done better, with a proposal: a step that keeps losing time, a test that keeps failing, the same bug twice. Do it files the work, because you asked.</dd>
+      <dt>Talk</dt><dd>An agent wants your view before it goes on. The box types into its session, with the card attached. A stopped agent's session is resumed.</dd>
+    </dl>
+    <p>Permission prompts never reach you. Agents run in auto mode. A prompt that hangs shows as a red stuck dot, which Mahmut Hoca handles.</p>
+    <h3>The order</h3>
+    <p class="formula">priority <span class="op">=</span> stake <span class="op">×</span> (1 <span class="op">+</span> wait <span class="op">÷</span> 60) <span class="op">÷</span> minutes</p>
+    <dl class="terms">
+      <dt>stake</dt><dd>App weight times kind weight. App: 3 for a live app that earns, 2 for a live app, 1 for apps in progress and tools. Kind: Decide 3, Better 2, Talk 2, Decided 1, Done 1.</dd>
+      <dt>wait</dt><dd>Minutes since the card arrived. A low card still rises, so nothing starves.</dd>
+      <dt>minutes</dt><dd>What it costs you. Decide 1, Better 1.5, Talk 2, Decided 0.5, Done 1. Live times your real answers and replaces these guesses.</dd>
+    </dl>
+    <p>This is Smith's rule from scheduling: value per minute of your time, highest first. A one-minute price call for Tavla comes before a long read about a tool.</p>
+    <h3>The six cards in the demo, at load</h3>
+    <div class="tbl"><table>
+      <thead><tr><th>Order</th><th>Card</th><th class="n">Stake</th><th class="n">Waited</th><th class="n">Minutes</th><th class="n">Priority</th></tr></thead>
+      <tbody>
+        <tr><td class="ord">1</td><td class="card">Tavla · Decide · Tavla Plus monthly price</td><td class="n">9</td><td class="n">40 min</td><td class="n">1</td><td class="n">15.00</td></tr>
+        <tr><td class="ord">2</td><td class="card">Koza · Decide · trial length after birth</td><td class="n">6</td><td class="n">75 min</td><td class="n">1</td><td class="n">13.50</td></tr>
+        <tr><td class="ord">3</td><td class="card">Tavla · Done · since 09:10</td><td class="n">3</td><td class="n">30 min</td><td class="n">1</td><td class="n">4.50</td></tr>
+        <tr><td class="ord">4</td><td class="card">Interbellum · Better · typecheck keeps failing</td><td class="n">2</td><td class="n">2 h</td><td class="n">1.5</td><td class="n">4.00</td></tr>
+        <tr><td class="ord">5</td><td class="card">Interbellum · Decided · 3 calls made for you</td><td class="n">1</td><td class="n">20 min</td><td class="n">0.5</td><td class="n">2.67</td></tr>
+        <tr><td class="ord">6</td><td class="card">Weekcut · Talk · one free export a week?</td><td class="n">4</td><td class="n">15 min</td><td class="n">2</td><td class="n">2.50</td></tr>
+      </tbody></table></div>
+    <p class="cap">Six cards, about 7 minutes of you. Both money calls come first. The Better card waited longest, so it climbed past two newer cards.</p>
+    <h3>Rules</h3>
+    <ul class="list">
+      <li>Decided and Done come as one card per project, never one per item.</li>
+      <li>The card in front of you never changes under your hand. New cards line up behind it.</li>
+      <li>Only a Decide card on a stop may ping you, and never in quiet hours. The rest wait.</li>
+      <li>The queue says how long it will take, like “6 cards · about 7 min”.</li>
+      <li>An empty queue dims your ring, and the top line says nothing needs you. You can leave.</li>
+      <li>Rooms never move and the recommended answer is always in the same spot, so your eyes and hand learn the map.</li>
+    </ul>
+    <h3>Path budget</h3>
+    <div class="budget">
+      <div><b>1 key</b><span>for a decision</span></div>
+      <div><b>1 key</b><span>to talk about any card</span></div>
+      <div><b>1 click</b><span>to see what an agent is doing</span></div>
+      <div><b>2 clicks</b><span>to a stopped agent's report</span></div>
+      <div><b>0 keys</b><span>to get back to where you were</span></div>
+    </div>
+    <h3>Keys</h3>
+    <dl class="keys">
+      <dt><kbd>Enter</kbd></dt><dd>The recommended answer.</dd>
+      <dt><kbd>2</kbd> <kbd>3</kbd></dt><dd>The other answers.</dd>
+      <dt><kbd>T</kbd></dt><dd>Talk about this card.</dd>
+      <dt><kbd>Space</kbd></dt><dd>Open the room behind the card.</dd>
+      <dt><kbd>↓</kbd></dt><dd>Later. The card comes back in a while.</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Close a panel.</dd>
+    </dl>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Dot</div><h2>Reading a dot</h2><p>Eight signals, no reading needed.</p></div>
+  <div class="sec-r">
+    <div class="tiles">
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><circle cx="36" cy="40" r="32" fill="url(#g-work)"/><circle cx="36" cy="40" r="9.5" fill="#6FE7FF"/><circle cx="84" cy="40" r="25" fill="url(#g-work)"/><circle cx="84" cy="40" r="7.5" fill="#6FE7FF"/><circle cx="126" cy="40" r="19" fill="url(#g-work)"/><circle cx="126" cy="40" r="5.8" fill="#6FE7FF"/></svg><p><b>Size</b> is the model. Opus or Fable, Sonnet or Sol, Haiku or Flash.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><circle cx="22" cy="40" r="20" fill="url(#g-work)"/><circle cx="22" cy="40" r="6.5" fill="#6FE7FF"/><circle cx="51" cy="40" r="20" fill="url(#g-think)"/><circle cx="51" cy="40" r="6.5" fill="#93B4FF"/><circle cx="80" cy="40" r="22" fill="url(#g-wait)"/><circle cx="80" cy="40" r="6.5" fill="#FFB23F"/><circle cx="109" cy="40" r="14" fill="url(#g-idle)"/><circle cx="109" cy="40" r="6.5" fill="#6B7689"/><circle cx="138" cy="40" r="20" fill="url(#g-fail)"/><circle cx="138" cy="40" r="6.5" fill="#FF5A6A"/></svg><p><b>Colour</b> is the state. Working, thinking, waits on you, idle, stuck.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><g font-family="IBM Plex Mono, ui-monospace, monospace" font-size="11" font-weight="600" fill="#0A0D13" text-anchor="middle"><circle cx="28" cy="40" r="24" fill="url(#g-work)"/><circle cx="28" cy="40" r="10" fill="#6FE7FF"/><text x="28" y="44">C</text><circle cx="62" cy="40" r="24" fill="url(#g-work)"/><circle cx="62" cy="40" r="10" fill="#6FE7FF"/><text x="62" y="44">X</text><circle cx="96" cy="40" r="24" fill="url(#g-work)"/><circle cx="96" cy="40" r="10" fill="#6FE7FF"/><text x="96" y="44">G</text><circle cx="130" cy="40" r="24" fill="url(#g-work)"/><circle cx="130" cy="40" r="10" fill="#6FE7FF"/><text x="130" y="44">O</text></g></svg><p><b>The letter</b> is the harness. C Claude Code, X Codex, G Grok, O OpenCode, M Gemini, K Kimi.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><circle cx="80" cy="40" r="30" fill="url(#g-work)"/><ellipse cx="80" cy="40" rx="19" ry="16" fill="none" stroke="#333D50" stroke-dasharray="2 3"/><circle cx="80" cy="40" r="8.5" fill="#6FE7FF"/><circle cx="99" cy="40" r="2.8" fill="#6FE7FF"/><circle cx="70.5" cy="53.9" r="2.8" fill="#6FE7FF"/><circle cx="70.5" cy="26.1" r="2.8" fill="#6FE7FF"/></svg><p><b>Small dots circling it</b> are its subagents. They fly back in when they finish.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><line x1="30" y1="58" x2="130" y2="24" stroke="#E6EAF1" stroke-opacity=".45" stroke-width="1.6"/><circle cx="30" cy="58" r="24" fill="url(#g-think)"/><circle cx="30" cy="58" r="7.5" fill="#93B4FF"/><circle cx="130" cy="24" r="20" fill="url(#g-work)"/><circle cx="130" cy="24" r="6" fill="#6FE7FF"/><circle cx="86" cy="39" r="11" fill="url(#g-ink)"/><circle cx="86" cy="39" r="2" fill="#E6EAF1"/></svg><p><b>A beam</b> flashes when one agent starts another. Hover a dot to see its family.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><path d="M36 31 C36 66 104 60 110 60" fill="none" stroke="#FFB23F" stroke-opacity=".55" stroke-width="1.4"/><circle cx="36" cy="24" r="24" fill="url(#g-wait)"/><circle cx="36" cy="24" r="7.5" fill="#FFB23F"/><circle cx="72" cy="55" r="9" fill="url(#g-wait)"/><circle cx="124" cy="60" r="14" fill="#0A0D13" stroke="#FFB23F" stroke-width="1.5"/><text x="124" y="63.5" text-anchor="middle" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="9" fill="#E6EAF1">You</text></svg><p><b>An amber thread</b> runs from a room or an agent to your ring while its card waits.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><line x1="18" y1="58" x2="142" y2="58" stroke="#232B3A"/><circle cx="34" cy="50" r="10" fill="url(#g-done)"/><circle cx="34" cy="50" r="3.4" fill="#4BE38F" fill-opacity=".8"/><circle cx="52" cy="50" r="10" fill="url(#g-fail)" opacity=".7"/><circle cx="52" cy="50" r="3.4" fill="#FF5A6A" fill-opacity=".7"/><circle cx="70" cy="50" r="3.4" fill="#6B7689"/><circle cx="88" cy="50" r="3.4" fill="none" stroke="#FF5A6A" stroke-width="1.3"/><circle cx="106" cy="50" r="3.4" fill="#4BE38F" fill-opacity=".45"/></svg><p><b>An ember</b> on the shelf is an agent that stopped. Click it for the report.</p></div>
+      <div class="tile"><svg viewBox="0 0 160 80" aria-hidden="true"><g fill="none" stroke="#333D50"><ellipse cx="24" cy="34" rx="15" ry="10"/><ellipse cx="61" cy="34" rx="15" ry="10"/><ellipse cx="98" cy="34" rx="15" ry="10"/><ellipse cx="135" cy="34" rx="15" ry="10"/></g><circle cx="98" cy="34" r="20" fill="url(#g-work)"/><circle cx="98" cy="34" r="6" fill="#6FE7FF"/><g font-family="IBM Plex Sans, system-ui, sans-serif" font-size="9.5" fill="#717C90" text-anchor="middle"><text x="24" y="64">Plan</text><text x="61" y="64">Build</text><text x="98" y="64">Check</text><text x="135" y="64">Ship</text></g></svg><p><b>Where it stands</b> is how far its work is: Plan, Build, Check or Ship.</p></div>
+    </div>
+    <ul class="states">
+      <li><i style="--c:var(--work)"></i><span><b>Working.</b> Cyan, still, one pulse per new step.</span></li>
+      <li><i style="--c:var(--think)"></i><span><b>Planning.</b> Blue and still.</span></li>
+      <li><i style="--c:var(--wait)"></i><span><b>Wants to talk.</b> Amber blink, thread to you.</span></li>
+      <li><i style="--c:var(--idle)"></i><span><b>Idle.</b> Grey and still.</span></li>
+      <li><i style="--c:var(--fail)"></i><span><b>Stuck or failed.</b> Red, slow blink.</span></li>
+      <li><i style="--c:var(--done)"></i><span><b>Done.</b> A green flash, then an ember.</span></li>
+    </ul>
+    <p>Names show on hover, on the selected dot, on a dot that wants to talk, and on a stuck dot. The rest stay quiet.</p>
+  </div>
+</section>
+
+<section class="sec" id="playbook">
+  <div class="sec-l"><div class="tag">Playbook</div><h2>Animations that mean something</h2><p>Every motion is a playbook entry. Haiku picks one for anything new.</p></div>
+  <div class="sec-r">
+    <p>An entry names its trigger, what moves, what it tells you, how long it lasts and how often it may play. An entry that cannot say what it tells you does not ship.</p>
+    <h3>First entries, built by hand</h3>
+    <dl class="terms">
+      <dt>Arrive</dt><dd>A beam from the parent to the new dot: who started whom.</dd>
+      <dt>Step</dt><dd>One soft pulse when a dot starts a new step. Between steps it glows still.</dd>
+      <dt>Move</dt><dd>The dot glides to Plan, Build, Check or Ship, only after it has stayed there 10 seconds, so it never jitters.</dd>
+      <dt>Subagents</dt><dd>Small dots orbit, then fly back in.</dd>
+      <dt>Card</dt><dd>A light leaves the room and lands in your ring: something new for you.</dd>
+      <dt>Answer lands</dt><dd>Your answer travels from the ring back into the room.</dd>
+      <dt>Shipped</dt><dd>A ring of light opens around the room when a release goes out.</dd>
+      <dt>Done</dt><dd>A green flash, then an ember on the shelf.</dd>
+      <dt>Failed</dt><dd>A red flicker, then a red ember.</dd>
+      <dt>Stuck</dt><dd>A slow red blink and a red room edge.</dd>
+      <dt>Clash</dt><dd>A red line between two dots that edit one file.</dd>
+      <dt>Hot Mac</dt><dd>The base warms to amber.</dd>
+    </dl>
+    <h3>The director</h3>
+    <ul class="list">
+      <li>Every event goes to plain rules first. A known kind plays its entry at once.</li>
+      <li>An unknown kind goes to Haiku in a batch every 30 seconds. Haiku answers with an entry and its settings, with “too small to show”, or with a new animation idea: name, trigger, what moves and what it tells you.</li>
+      <li>Each answer is saved for that kind, so a new kind costs one call, once.</li>
+      <li>New ideas join the playbook's proposals. An agent builds them, the taste gate checks them, and you see a short clip only when the gate is unsure.</li>
+      <li>Haiku also writes each agent's line in business words, like “Fixing the reconnect bug that drops online matches”. At most one line per agent every 3 minutes.</li>
+      <li>A daily cap on Haiku calls shows on This Mac. Without Haiku, Live still draws everything from rules.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Agent</div><h2>The agent panel</h2><p>What it is doing and what it has done, one click away.</p></div>
+  <div class="sec-r">
+    <ul class="list">
+      <li><b>Hover</b> shows a peek: name, state and the current step.</li>
+      <li><b>Click</b> opens the panel beside the dot. A thin line ties it to the dot. You can pin several.</li>
+    </ul>
+    <dl class="terms">
+      <dt>Title</dt><dd>Name, harness, model, project, running time.</dd>
+      <dt>Task</dt><dd>The board issue, or the first line of your prompt.</dd>
+      <dt>Now</dt><dd>The tool it runs, with a timer. “Running flutter test · 0:42”.</dd>
+      <dt>Started by</dt><dd>Its parent, one click away. You, Mahmut Hoca, board work or a script.</dd>
+      <dt>Family</dt><dd>Its subagents and the workers it started.</dd>
+      <dt>Done so far</dt><dd>Each step, newest first: files edited, tests, commits, subagents, your answers. A file opens in your editor. A commit opens in your git tool.</dd>
+      <dt>Actions</dt><dd>Talk types into its terminal. Terminal opens the live terminal. Stop needs a one-second hold, so a slip never kills an agent.</dd>
+    </dl>
+    <p>Every row comes from what the agent already writes: its session log, the board, wip and git. Nothing new is asked of the agents.</p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Reports</div><h2>When an agent stops</h2><p>It leaves an ember. The ember holds its report.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>The report is built the moment the process ends, from facts only. The first line of its last message, its board result, its wip done notes, its commits and files, the pictures it sent, its time and tokens.</li>
+    <li>The outcome is one of five: Done, Failed, Stopped, Crashed, Stuck.</li>
+    <li>Crashed means the process vanished with no last message. The report then lists the files it left busy in wip.</li>
+    <li>No AI call. It costs nothing and is ready at once.</li>
+    <li>Embers glow on the room's shelf for 12 hours. Then the report lives in the Logbook, searchable by project, agent and day.</li>
+    <li>A report an agent files through Panel's own report tool joins the same card.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Rooms</div><h2>Rooms are projects</h2><p>You think in apps. The building is your portfolio.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>Each project with an agent in the last 24 hours gets a room. The rest sit in the Quiet row and wake into a room when an agent starts there.</li>
+    <li>At most eight rooms show in full, the busiest by stake. The rest shrink to one line with their dots inline.</li>
+    <li>HQ is the ops folder. Mahmut Hoca, the scouts, board runs and the Manager live there. Their beams into app rooms show fleets at work.</li>
+    <li>Elsewhere holds agents outside any project, like a session in your home folder.</li>
+    <li>Rooms keep fixed places in portfolio order. You can drag them once. They never reshuffle.</li>
+    <li>The room sign shows Now, one line per agent, and Last, the latest stopped agent's result. Its panel adds open issues and yesterday's revenue from RevenueCat for apps that earn.</li>
+    <li>An amber edge marks a room with a card for you. A red edge marks a room with a stuck agent.</li>
+    <li>This Mac sits at the base: heat, CPU, the two <code>testlock</code> bays with who holds them, and each harness's weekly quota.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Move</div><h2>Moving to Bevy, section by section</h2><p>Live goes first. Nothing else is cut.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>Live is a new row in Panel's sidebar, next to Review. <code>appgeapanel://live</code> opens it.</li>
+    <li>Inside the section, Bevy draws. It runs as WebAssembly in Panel's own window, on WebGPU, or WebGL2 where WebGPU is missing.</li>
+    <li>The world model runs natively in Panel's Rust backend and streams to the section.</li>
+    <li>Text boxes, like Talk, are plain HTML over the Bevy canvas. Typing Turkish just works.</li>
+    <li>The same Bevy code runs natively later, when the shell itself moves.</li>
+    <li>Next in line: Review, then Reports, then the terminal wall. A section moves only when its Bevy version is faster and you like it more.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Out</div><h2>Kept out</h2><p>Each of these would cost you attention, money or trust.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>No XP, streaks, quests, levels or scores.</li>
+    <li>No glow on text and no glow for decoration.</li>
+    <li>No prompts, raw logs or command text on screen. Secrets live there. Labels are one line and scrubbed.</li>
+    <li>No permission prompts or technical yes or no in your queue.</li>
+    <li>No AI in the core loop. Rules draw everything. Haiku only names new kinds and writes plain lines, batched, saved and capped.</li>
+    <li>No fake motion. Every dot is a real process. A still dot is idle.</li>
+    <li>No layout that reshuffles.</li>
+    <li>No ping per event. Only a Decide card on a stop may ping you.</li>
+    <li>No characters, faces or look taken from a known game.</li>
+    <li>This Mac only for now. Other Macs come later.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Build</div><h2>How it is built</h2><p>All Rust. The same engine crates, a new face.</p></div>
+  <div class="sec-r">
+    <h3>Kept</h3>
+    <ul class="list">
+      <li><code>panel-core</code>, <code>panel-ingress</code>, <code>panel-terminal</code>, <code>panel-store</code>. About 2.4k lines with no UI in them.</li>
+    </ul>
+    <h3>New</h3>
+    <ul class="list">
+      <li><code>panel-world</code> finds every agent on the Mac and keeps rooms, dots, beams and events as one live model.</li>
+      <li><code>panel-attention</code> builds the cards from your agenda, the Decided lines, closes and slow steps, and orders them with one pure function. It gets the one test, because a wrong order is the bug that costs you most.</li>
+      <li><code>panel-reports</code> builds the report when a process ends.</li>
+      <li><code>panel-director</code> holds the playbook, plays known kinds by rule and asks Haiku about new ones.</li>
+      <li><code>panel-live</code> is the Bevy app, built to WebAssembly and loaded by the Live section.</li>
+      <li>Ingress stops dropping agents Panel did not start. They go to their project room, or to Elsewhere.</li>
+      <li>Board, fleets and Mahmut Hoca pass a parent tag to every agent they start. Today <code>board.py work</code> runs under launchd, so the process list alone loses who started it.</li>
+    </ul>
+    <h3>Where the facts come from</h3>
+    <ul class="list">
+      <li>The process list every 2 seconds: who runs, and who started whom.</li>
+      <li>Claude session logs and their subagent logs, read as they grow. Codex session logs the same way.</li>
+      <li>Fleet state files: which issue each worker holds and how it ended.</li>
+      <li>wip logs: who edits which file, and the done notes.</li>
+      <li>The board, at most every 5 minutes: issue titles, your agenda of open <code>you</code> asks, and the <code>Decided:</code> lines of closed issues.</li>
+      <li>Panel hooks, when Panel hosts the agent: instant step changes and the end of each turn.</li>
+      <li><code>testlock</code> for the bays. The macOS thermal state for heat.</li>
+      <li>Panel is public. The Appgea sources, fleets, wip and the board, load as a module. Everyone else still gets a working Live from the process list and session logs.</li>
+    </ul>
+    <h3>Budgets</h3>
+    <ul class="list">
+      <li>Nothing changing: no frames drawn. Still glow costs nothing. Only changes animate.</li>
+      <li>Animating: up to 30 frames a second while Live is open, none when another section is open.</li>
+      <li>Haiku: a daily cap on calls, shown on This Mac.</li>
+      <li>The watcher stays under 3% of one core.</li>
+      <li>First frame in under 1 second.</li>
+      <li>IBM Plex Sans and Mono, bundled. Open license, every Turkish letter, the same look on Mac and Windows.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Risk</div><h2>Tested first</h2><p>Four things could break the plan. Each gets a spike before any art.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li><b>Bevy in Panel's window.</b> Test: Bevy's glow on WebGPU in this Mac's WebKit and in Windows WebView2, with WebGL2 as the fallback.</li>
+    <li><b>Load time.</b> The WebAssembly file must start in under a second from disk.</li>
+    <li><b>Who started whom.</b> Needs the parent tag in board, fleets and Mahmut Hoca's prompt. Without it, a beam starts from HQ, marked unknown.</li>
+    <li><b>Thin logs.</b> Grok, OpenCode, Gemini and Kimi show from the process list first. Their panels fill in as we learn to read their logs.</li>
+    <li><b>Noisy ideas.</b> Haiku may propose motion nobody needs. The “what it tells you” line and the taste gate filter it.</li>
+  </ul></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Plan</div><h2>Phases</h2><p>Each phase works on its own.</p></div>
+  <div class="sec-r"><ol class="phases">
+    <li><span class="num">0</span><div><b>Spikes</b><p>A live text tree of every real agent with its parent. Bevy drawing a glowing test room inside Panel's Live row.</p><div class="dw">Done when both run on this Mac.</div></div></li>
+    <li><span class="num">1</span><div><b>Live, watching</b><p>Real rooms, dots, beams, panels, embers and reports, with the first playbook entries.</p><div class="dw">Done when you can say what every agent does without opening a terminal.</div></div></li>
+    <li><span class="num">2</span><div><b>The cards</b><p>Decide from your agenda, Decided, Done, Better and Talk, in one order.</p><div class="dw">Done when a day's agenda is answered from Live alone.</div></div></li>
+    <li><span class="num">3</span><div><b>The director</b><p>Haiku picks entries for new kinds, writes the business lines and proposes new animations.</p><div class="dw">Done when a new event kind gets an animation within a minute.</div></div></li>
+    <li><span class="num">4</span><div><b>Replay and Logbook</b><p>The night replay and the searchable Logbook.</p><div class="dw">Done when a night of fleets replays in under a minute.</div></div></li>
+  </ol></div>
+</section>
+
+<section class="sec">
+  <div class="sec-l"><div class="tag">Later</div><h2>Aware</h2><p>The world already holds every fact. Awareness reads it.</p></div>
+  <div class="sec-r"><ul class="list">
+    <li>Live keeps every fact as one stream. Later, a narrator reads that stream and speaks in plain lines, like “Tavla's fleet is stuck on one flaky test. Nothing else needs you.”</li>
+    <li>Mahmut Hoca can read the same stream to plan, so the chief and you see the same world.</li>
+    <li>Today the top line is plain rules: agents, rooms, cards for you, what is stuck.</li>
+  </ul></div>
+</section>
+
+<p class="note">Concept for the Bevy rebuild of Appgea Panel. The activity in the demo is sample data with your real project names. The real Live reads your Mac.</p>
+</main>
+</div>
+
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const css = getComputedStyle(document.documentElement);
+const tok = (n, f) => (css.getPropertyValue(n) || '').trim() || f;
+const C = {
+  night: tok('--night', '#0A0D13'), deck: tok('--deck', '#0E121A'), wall: tok('--wall', '#11161F'), raise: tok('--raise', '#171D29'),
+  line: tok('--line', '#232B3A'), line2: tok('--line-2', '#333D50'), ink: tok('--ink', '#E6EAF1'), ink2: tok('--ink-2', '#9AA4B6'), ink3: tok('--ink-3', '#717C90'),
+  work: tok('--work', '#6FE7FF'), think: tok('--think', '#93B4FF'), wait: tok('--wait', '#FFB23F'), idle: tok('--idle', '#6B7689'), fail: tok('--fail', '#FF5A6A'), done: tok('--done', '#4BE38F')
+};
+const stage = $('#stage'), cv = $('#world'), ctx = cv.getContext('2d');
+const qEl = $('#qcard'), pEl = $('#apanel'), peekEl = $('#peek'), toastEl = $('#toast'), repEl = $('#replay'), narrEl = $('#narr'), replayBtn = $('#replayBtn');
+const RM = !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches);
+const FB = '"IBM Plex Sans", system-ui, sans-serif', FM = '"IBM Plex Mono", ui-monospace, Menlo, monospace', FD = '"Bricolage Grotesque", "IBM Plex Sans", sans-serif';
+
+const rand = (a, b) => a + Math.random() * (b - a);
+const randi = (a, b) => Math.floor(rand(a, b + 1));
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const esc = (s) => String(s).replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+const hex7 = () => (Math.random().toString(16).slice(2) + '0000000').slice(0, 7);
+function rgba(hex, a) { const n = parseInt(hex.slice(1), 16); return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + a + ')'; }
+
+const STATE_COL = { work: C.work, think: C.think, wait: C.wait, idle: C.idle, fail: C.fail };
+const STATE_NAME = { work: 'Working', think: 'Planning', wait: 'Wants to talk', idle: 'Idle', fail: 'Stuck' };
+const OUT_COL = { Done: C.done, Failed: C.fail, Crashed: C.fail, Stopped: C.idle, Stuck: C.wait };
+const HARNESS = { claude: ['C', 'Claude Code'], codex: ['X', 'Codex'], opencode: ['O', 'OpenCode'], grokbot: ['G', 'Grok Bot'] };
+const TIER = { Fable: 9.5, Opus: 9.5, Grok: 8.5, Sonnet: 7.5, Sol: 7.5, Terra: 7.5, Haiku: 5.8, 'Go Flash': 5.8 };
+const STATIONS = ['think', 'code', 'test', 'ship'];
+const ST_LABEL = { think: 'Plan', code: 'Build', test: 'Check', ship: 'Ship' };
+const DUR = { think: [5, 8], code: [8, 13], test: [6, 9], ship: [4, 6] };
+const dur = (st) => rand(DUR[st][0], DUR[st][1]);
+const RANK = { wait: 0, fail: 1, work: 2, think: 3, idle: 4 };
+
+const ROOMS = [
+  { id: 'hq', name: 'HQ', tag: 'Ops folder', weight: 1, files: ['runbooks/board.py', 'BOARD.md'], test: 'board next', issues: 4 },
+  { id: 'tavla', name: 'Tavla', tag: 'Live', weight: 3, files: ['lib/game/board_view.dart', 'lib/net/match_client.dart'], test: 'flutter test', issues: 6 },
+  { id: 'interbellum', name: 'Interbellum', tag: 'Web', weight: 1, files: ['apps/web/src/map/modes.ts', 'apps/web/src/ui/strip.tsx'], test: 'npm run typecheck', issues: 11 },
+  { id: 'panel', name: 'Appgea Panel', tag: 'Tool', weight: 1, files: ['next/crates/panel-world/src/lib.rs', 'next/apps/live/src/main.rs'], test: 'cargo check', issues: 5 },
+  { id: 'keymaster', name: 'Key Master', tag: 'Live', weight: 2, files: ['Shop/BittingView.swift', 'Shop/GradeModel.swift'], test: 'xcodebuild test', issues: 3 },
+  { id: 'weekcut', name: 'Weekcut', tag: 'Live', weight: 2, files: ['Export/ExportSheet.swift', 'Captions/Review.swift'], test: 'swift test', issues: 2 },
+  { id: 'koza', name: 'Koza', tag: 'Live', weight: 2, files: ['Timeline/EmptyState.swift', 'timeline/Timeline.kt'], test: './gradlew test', issues: 4 },
+  { id: 'elsewhere', name: 'Elsewhere', tag: 'No project', weight: 1, files: ['~/notes.md'], test: 'ls', issues: 0 }
+];
+const ROOM = {}; ROOMS.forEach((r) => { ROOM[r.id] = r; r.embers = []; r.em = []; });
+const QUIET = ['Sudokov', 'Pisti', 'Solitaire', 'Memor', 'ClearDay', 'Cardly', 'Hayrola', 'DroneXtreme', '2048 Cities', 'Snakev', 'Günün Hadisi', 'SagarDome', 'Payee', 'Fitstrail', 'VideoKit', 'Köken Ağacı', 'TavlaSkor', 'Pillow'];
+const TASKS = {
+  tavla: ['Dice sound plays twice', 'Reconnect drops the match after sleep', 'Chip art misaligned on iPad'],
+  keymaster: ['Shop price rounding', 'Heat meter text overflows', 'Tool tray order resets'],
+  koza: ['Feeding timer resets on rotate', 'Widget shows yesterday', 'Partner sync conflict copy'],
+  interbellum: ['Build desk text runs off the panel', 'Raid report crash', 'Front strength shows the wrong side']
+};
+const NAMES = ['Bamsı', 'Boğaç', 'Kazan', 'Banu', 'Beyrek', 'Dumrul', 'Yunus', 'Hızır', 'Cin Ali', 'Selcan', 'Uruz', 'Basat', 'Kanturalı', 'Bayındır'];
+let nameI = 0, cid = 1;
+
+const S = { t: 0, rt: 0, speed: 1, nid: 1, agents: [], cards: [], beams: [], parts: [], panel: null, sel: null, hover: null, cur: null, rendered: undefined, inView: true, kbd: true, issue: 1214, nextSpawn: 14, nextShip: 30, spawnRoom: null, flights: [], rings: [], haiku: 41, tally: { started: 0, done: 0, failed: 0 }, replay: null, clock0: 14 * 60 + 20, roomSig: '' };
+const byId = (id) => S.agents.find((a) => a.id === id);
+const alive = () => S.agents.filter((a) => a.alive);
+const nameOf = (id) => (byId(id) || {}).name || 'An agent';
+function clock(off) { const m = Math.floor(S.clock0 + S.t / 60 + (off || 0)); const h = (((Math.floor(m / 60)) % 24) + 24) % 24, mm = ((m % 60) + 60) % 60; return String(h).padStart(2, '0') + ':' + String(mm).padStart(2, '0'); }
+function fmtMin(m) { return m < 1 ? 'under 1 min' : Math.round(m) + ' min'; }
+function fmtClock(sec) { sec = Math.max(0, Math.floor(sec)); return Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0'); }
+function fmtDur(sec) { if (sec < 60) return Math.round(sec) + ' s'; const m = Math.round(sec / 30) / 2; return (m % 1 ? Math.floor(m) + '½' : m) + ' min'; }
+
+/* ---------- agents ---------- */
+function log(a, text, ago) { a.done.push({ t: clock(-(ago || 0)), text }); if (a.done.length > 30) a.done.shift(); }
+/* Business words, the way Haiku will write them from the issue title and recent steps. */
+function nowFor(a) {
+  const t = a.persistent ? '' : (a.task || '').replace(/^#\d+\s*/, '');
+  if (!t) return { think: 'Planning the next step', code: 'Building', test: 'Checking the work', ship: 'Shipping' }[a.station];
+  if (a.station === 'think') return 'Planning: ' + t;
+  if (a.station === 'code') return 'Fixing: ' + t;
+  if (a.station === 'test') return 'Checking: ' + t;
+  return 'Shipping: ' + t;
+}
+function goto(a, st, state) { a.station = st; a.stationSince = S.t; a.now = nowFor(a); a.state = state || (st === 'think' ? 'think' : 'work'); a.flash = S.rt; }
+function addAgent(o) {
+  const a = Object.assign({ id: S.nid++, alive: true, subs: 0, subsUntil: 0, done: [], children: [], parent: null, fails: 0, timer: rand(3, 7), x: 0, y: 0, dx: 0, placed: false }, o);
+  a.born = S.t - (o.age || 0) * 60;
+  a.station = o.station || 'think';
+  a.stationSince = S.t - (o.inStation != null ? o.inStation : rand(5, 40));
+  a.state = o.state || (a.station === 'think' ? 'think' : 'work');
+  a.now = o.now || nowFor(a);
+  a.r = TIER[a.model] || 7;
+  S.agents.push(a);
+  return a;
+}
+function resume(a, st, text) { if (!a || !a.alive) return; log(a, text); goto(a, st); a.timer = dur(st); }
+
+function advance(a) {
+  if (a.persistent === 'chief') { a.timer = rand(6, 10); a.now = pick(['Watching the fleets', 'Reading the board', 'Checking the routine']); return; }
+  if (a.state === 'fail') { if (a.stuck) return; goto(a, 'code'); log(a, 'Fixing the failing test'); a.timer = dur('code'); return; }
+  if (a.state === 'idle') { goto(a, 'think'); a.timer = dur('think'); return; }
+  switch (a.station) {
+    case 'think': goto(a, 'code'); break;
+    case 'code':
+      log(a, 'Edited ' + randi(1, 4) + ' files in ' + pick(ROOM[a.room].files));
+      goto(a, 'test');
+      break;
+    case 'test':
+      if (Math.random() < 0.13) {
+        a.fails++; log(a, 'Tests failed: 1 of ' + randi(30, 140));
+        if (a.fails >= 2 && !a.persistent) { finish(a, 'Failed'); return; }
+        a.state = 'fail'; a.now = 'Tests failed'; a.timer = 4; return;
+      }
+      log(a, 'Tests passed'); goto(a, 'ship'); break;
+    default:
+      log(a, 'Committed ' + hex7());
+      if (a.persistent === 'chat') {
+        if (Math.random() < 0.4 && active().length < 9) { a.state = 'wait'; a.now = 'Wants to talk'; pushCard(talkCard(a, 0, pick(a.turnMsgs))); return; }
+        goto(a, 'think'); break;
+      }
+      if (Math.random() < 0.35) addDecided(a);
+      finish(a, 'Done'); return;
+  }
+  a.timer = dur(a.station);
+}
+const CALLS = {
+  tavla: ['Dice sound plays once per roll, because players reported the double', 'Reconnect waits 20 seconds before the match is lost, because short drops are common'],
+  keymaster: ['Shop prices round to 5 coins, because odd prices read as bugs', 'The heat meter shortens to one word on small phones'],
+  koza: ['The feeding timer keeps running through rotation, because parents rotate at night', 'The widget refreshes at midnight, because it showed yesterday'],
+  interbellum: ['Build desk text wraps instead of cutting, because it ran off the panel', 'Raid reports keep the last 20 raids, because older ones were never opened']
+};
+/* Calls made in your place join one Decided card per project. */
+function addDecided(a) {
+  const pool = CALLS[a.room]; if (!pool) return;
+  const text = pick(pool); log(a, 'Decided: ' + text); S.haiku++;
+  const c = S.cards.find((x) => !x.gone && x.kind === 'Decided' && x.room === a.room);
+  if (c) { if (!c.items.includes(text)) c.items.push(text); return; }
+  pushCard(decidedCard(a.room, 0, [text]));
+}
+/* Closes and releases join one Done card per project. */
+function addDone(room, text) {
+  if (room === 'hq' || room === 'elsewhere') return;
+  const c = S.cards.find((x) => !x.gone && x.kind === 'Done' && x.room === room);
+  if (c) { c.items.push(text); return; }
+  pushCard(doneCard(room, 0, [text]));
+}
+function shipRelease() {
+  const r = ROOM[pick(['tavla', 'keymaster', 'koza', 'weekcut'])];
+  r.ver = (r.ver || randi(20, 40)) + 1;
+  S.rings.push({ room: r.id, t0: S.rt });
+  addDone(r.id, 'Sent ' + r.name + ' build ' + r.ver + ' to TestFlight');
+}
+function makeReport(a, outcome) {
+  const m = a.task.match(/^#\d+/); const issue = m ? m[0] : ''; const title = a.task.replace(/^#\d+\s*/, '');
+  let result;
+  if (outcome === 'Done') result = a.lastWord ? a.lastWord : (issue ? 'Done ' + issue + ': ' + title + '. Fix committed.' : 'Finished: ' + title + '.');
+  else if (outcome === 'Stopped') result = 'Stopped by you. Last step: ' + a.now.toLowerCase() + '.';
+  else if (outcome === 'Failed') result = (issue ? 'Released ' + issue + '. ' : '') + 'Tests kept failing.';
+  else result = 'Ended.';
+  const p = a.parent ? byId(a.parent) : null;
+  return { name: a.name, harness: a.harness, model: a.model, room: a.room, outcome, result, changes: a.done.slice(-5), minutes: Math.max(1, Math.round((S.t - a.born) / 60)), tokens: randi(90, 640) + 'k', by: p ? p.name : (a.by || 'You'), ended: clock(), issue };
+}
+function finish(a, outcome) {
+  if (!a.alive) return;
+  a.alive = false; a.subs = 0;
+  burst(a.x, a.y, OUT_COL[outcome] || C.done);
+  const r = ROOM[a.room]; const rep = makeReport(a, outcome);
+  r.embers.unshift(rep); if (r.embers.length > 9) r.embers.pop();
+  if (outcome === 'Done') S.tally.done++; else if (outcome === 'Failed' || outcome === 'Crashed') S.tally.failed++;
+  if ((outcome === 'Done' || outcome === 'Failed') && !a.persistent) addDone(a.room, (outcome === 'Done' ? 'Done: ' : 'Failed and released: ') + a.task);
+  S.cards.forEach((c) => { if (!c.gone && c.agents.includes(a.id)) { c.agents = c.agents.filter((id) => id !== a.id); if (!c.agents.length) c.gone = true; } });
+  if (S.panel && S.panel.type === 'agent' && S.panel.id === a.id) openReport(rep);
+  if (S.sel === a.id) S.sel = null;
+  if (S.hover === a.id) S.hover = null;
+}
+function spawnWorker() {
+  if (alive().length >= 15) return;
+  const room = S.spawnRoom || pick(['tavla', 'tavla', 'keymaster', 'koza', 'interbellum']);
+  S.spawnRoom = null; S.haiku++;
+  const harness = pick(['opencode', 'codex', 'opencode']);
+  const model = harness === 'codex' ? pick(['Sol', 'Terra']) : 'Go Flash';
+  const name = NAMES[nameI++ % NAMES.length];
+  const a = addAgent({ name, harness, model, room, station: 'think', parent: S.mahmut.id, task: '#' + (S.issue++) + ' ' + pick(TASKS[room]), inStation: 0 });
+  const r = ROOM[room]; a.x = r.x + 6; a.y = r.y + r.h * 0.6; a.placed = true;
+  log(a, 'Claimed the issue');
+  S.mahmut.children.push(a.id); log(S.mahmut, 'Started ' + name + ' in ' + r.name);
+  S.beams.push({ from: S.mahmut.id, to: a.id, t0: S.rt });
+  S.tally.started++;
+}
+function step(dt) {
+  S.t += dt;
+  for (const a of S.agents) {
+    if (!a.alive) continue;
+    if (a.subsUntil && S.t >= a.subsUntil) { a.subsUntil = 0; a.subs = 0; log(a, '2 subagents finished'); }
+    if (a.state === 'wait' || (a.state === 'fail' && a.stuck)) continue;
+    a.timer -= dt;
+    if (a.timer <= 0) advance(a);
+  }
+  if (S.t >= S.nextSpawn) { spawnWorker(); S.nextSpawn = S.t + rand(24, 38); }
+  if (S.t >= S.nextShip) { shipRelease(); S.nextShip = S.t + rand(50, 80); }
+  if (S.stuck && S.t >= S.stuck.at) { const z = S.stuck.a; S.stuck = null; if (z.alive) { log(S.mahmut, 'Stopped ' + z.name + ': no progress for 15 min'); log(z, 'Mahmut Hoca stopped it'); z.lastWord = 'Stopped by Mahmut Hoca after 15 minutes with no progress.'; finish(z, 'Stopped'); } }
+}
+function burst(x, y, col) { if (RM) return; for (let i = 0; i < 14; i++) { const an = Math.random() * Math.PI * 2, sp = rand(30, 90); S.parts.push({ x, y, vx: Math.cos(an) * sp, vy: Math.sin(an) * sp, life: rand(0.6, 1.1), max: 1.1, col }); } }
+
+/* ---------- cards and the queue order ---------- */
+const THUMB = '<svg class="thumb" viewBox="0 0 320 110" preserveAspectRatio="xMidYMid slice" role="img" aria-label="Sample picture: a crescent moon over the words Your first day starts here"><rect width="320" height="110" fill="#F2EBE1"/><circle cx="160" cy="36" r="18" fill="#E3B873"/><circle cx="168" cy="31" r="16" fill="#F2EBE1"/><circle cx="120" cy="24" r="2" fill="#C9B79C"/><circle cx="204" cy="20" r="1.6" fill="#C9B79C"/><circle cx="212" cy="44" r="2.2" fill="#C9B79C"/><text x="160" y="76" text-anchor="middle" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="13" font-weight="600" fill="#4A3F35">Your first day starts here</text><rect x="122" y="85" width="76" height="16" rx="8" fill="#4A3F35"/><text x="160" y="96.5" text-anchor="middle" font-family="IBM Plex Sans, system-ui, sans-serif" font-size="9" fill="#F2EBE1">Add a feed</text></svg>';
+function card(o) { return Object.assign({ id: 'c' + cid++, created: S.t, gone: false, snooze: 0, pre: 0, extra: null, agents: [], items: [] }, o); }
+function pushCard(c) { S.cards.push(c); S.flights.push({ dir: 'in', room: c.room, t0: S.rt }); return c; }
+const KIND = { Decide: { w: 3, min: 1, col: C.wait }, Better: { w: 2, min: 1.5, col: C.think }, Talk: { w: 2, min: 2, col: C.wait }, Decided: { w: 1, min: 0.5, col: C.ink2 }, Done: { w: 1, min: 1, col: C.done } };
+const talkOpt = { label: 'Talk', talk: true };
+const SRC = { Done: 'Closes and releases', Decided: 'Decided lines', Better: 'The improve scout' };
+function listHTML(items) { return '<ul class="qlist">' + items.slice().reverse().slice(0, 4).map((t) => '<li>' + esc(t) + '</li>').join('') + (items.length > 4 ? '<li class="more">+' + (items.length - 4) + ' more</li>' : '') + '</ul>'; }
+function landAnswer(c, text) { S.flights.push({ dir: 'out', room: c.room, t0: S.rt }); toast(text); }
+function decideCard(room, issue, q, why, opts, pre, extra) {
+  return card({ kind: 'Decide', room, issue, pre, title: () => q, why: () => why, extra: extra ? () => extra : null,
+    options: opts.map((label, i) => ({ label, fx: (c) => landAnswer(c, 'Answer sent: board answer ' + issue.slice(1) + ' ' + (i + 1) + ' --via live') })).concat([talkOpt]) });
+}
+function decidedCard(room, pre, items) {
+  return card({ kind: 'Decided', room, pre, items: items.slice(),
+    title: (c) => c.items.length + (c.items.length === 1 ? ' call' : ' calls') + ' made for you in ' + ROOM[room].name,
+    why: () => 'Agents decided these in your place. Each says why.', extra: (c) => listHTML(c.items),
+    options: [{ label: 'Keep all', fx: (c) => landAnswer(c, 'Kept. They stay decided.') }, { label: 'Undo one', fx: (c) => landAnswer(c, 'Pick the call to undo. Live writes an Answer line and the agent reverts it.') }, talkOpt] });
+}
+function doneCard(room, pre, items) {
+  return card({ kind: 'Done', room, pre, items: items.slice(),
+    title: () => ROOM[room].name + ' since you last looked', why: (c) => c.items.length + (c.items.length === 1 ? ' thing' : ' things') + ' happened. Each report sits on the room’s shelf.', extra: (c) => listHTML(c.items),
+    options: [{ label: 'Got it', fx: () => {} }, { label: 'Open the room', fx: () => openRoom(ROOM[room]) }, talkOpt] });
+}
+function betterCard(room, pre, title, why, proposal) {
+  return card({ kind: 'Better', room, pre, title: () => title, why: () => why, extra: () => '<p class="qprop"><b>Proposal.</b> ' + esc(proposal) + '</p>',
+    options: [{ label: 'Do it', fx: (c) => { landAnswer(c, 'Filed because you asked. Mahmut Hoca starts a builder.'); S.nextSpawn = S.t + 1; S.spawnRoom = room; } }, { label: 'Not now', fx: () => {} }, talkOpt] });
+}
+function talkCard(a, pre, msg) {
+  return card({ kind: 'Talk', room: a.room, agents: [a.id], pre, title: () => msg, why: () => a.name + ' wants your view before it goes on.',
+    extra: () => '<input id="reply" class="reply" type="text" maxlength="160" placeholder="Reply to ' + esc(a.name) + '. Enter sends." autocomplete="off">',
+    options: [
+      { label: 'Send', fx: (c) => { const el = $('#reply'); const v = el ? el.value.trim() : ''; resume(a, 'think', v ? 'You: ' + v : 'You: go on'); landAnswer(c, 'Sent to ' + a.name + '’s session.'); } },
+      { label: 'Not now', fx: () => { if (a.alive) { a.state = 'idle'; a.now = 'Waiting to talk, later'; a.timer = 40; } } }
+    ] });
+}
+function score(c) {
+  const k = KIND[c.kind], wait = c.pre + (S.t - c.created) / 60, w = ROOM[c.room].weight;
+  return { w, kw: k.w, wait, min: k.min, p: w * k.w * (1 + wait / 60) / k.min };
+}
+const active = () => S.cards.filter((c) => !c.gone && !(c.snooze > S.t));
+function sorted() { return active().map((c) => ({ c, s: score(c) })).sort((a, b) => b.s.p - a.s.p); }
+function curCard() {
+  let c = S.cards.find((x) => x.id === S.cur && !x.gone && !(x.snooze > S.t));
+  if (!c) { const s = sorted(); c = s.length ? s[0].c : null; S.cur = c ? c.id : null; }
+  return c;
+}
+
+/* ---------- seed: sample activity with real project names ---------- */
+function seed() {
+  const M = addAgent({ name: 'Mahmut Hoca', harness: 'grokbot', model: 'Grok', room: 'hq', station: 'think', state: 'think', persistent: 'chief', task: 'Hourly routine: keep the board moving', by: 'Routine, every hour', age: 41, now: 'Watching the fleets' });
+  S.mahmut = M;
+  log(M, 'Ran board next', 38); log(M, 'Started a 3-worker fleet on Tavla', 19); log(M, 'Started Scout in HQ', 12);
+  const sc = addAgent({ name: 'Scout', harness: 'claude', model: 'Sonnet', room: 'hq', station: 'code', parent: M.id, task: 'improve scout: yesterday’s slow steps', age: 12 });
+  M.children.push(sc.id); log(sc, 'Read 459 session timings', 10); log(sc, 'Found 3 steps over 10 min', 4);
+  const K = addAgent({ name: 'Keloğlan', harness: 'claude', model: 'Opus', room: 'panel', station: 'code', persistent: 'chat', task: 'Build the Live section', by: 'You', age: 52, turnMsgs: ['The world tree shows every agent now. Should HQ also show the scouts that already finished?', 'Bevy draws inside Panel now. Should Live open on its own when a Decide card arrives?'] });
+  log(K, 'Read the Panel architecture and the board', 48); log(K, 'Wrote the Live concept', 20); log(K, 'Committed 8c41d2e', 2); log(K, 'Started panel-world', 1);
+  const kr = addAgent({ name: 'Köroğlu', harness: 'claude', model: 'Fable', room: 'interbellum', station: 'code', subs: 2, task: '#1203 Map mode names cut to “Governm…”', by: 'board work', age: 18 });
+  kr.subsUntil = 14;
+  log(kr, 'Read #1203 and the strip code', 17); log(kr, 'Started 2 subagents to measure every label', 13); log(kr, 'Edited apps/web/src/map/modes.ts', 9); log(kr, 'Decided: shorter names, because they fit the strip', 6);
+  const bt = addAgent({ name: 'Battal', harness: 'codex', model: 'Sol', room: 'interbellum', station: 'test', task: '#1206 Two war scores on the peace table', by: 'board work', age: 9 });
+  log(bt, 'Edited apps/web/src/ui/peace.tsx', 3);
+  const fleet = ['Hacivat', 'Tuzsuz', 'Çelebi'].map((n, i) => {
+    const a = addAgent({ name: n, harness: 'opencode', model: 'Go Flash', room: 'tavla', station: i === 2 ? 'code' : 'test', parent: M.id, task: '#' + (1197 + i) + ' ' + TASKS.tavla[i], age: 19 });
+    M.children.push(a.id); log(a, 'Claimed the issue', 19); log(a, 'Edited ' + ROOM.tavla.files[i % 2], 6); log(a, 'Started flutter test', 2);
+    return a;
+  });
+  const kg = addAgent({ name: 'Karagöz', harness: 'claude', model: 'Sonnet', room: 'koza', station: 'code', task: '#1207 Empty state for the timeline', by: 'board work', age: 27 });
+  log(kg, 'Drew the empty state in SwiftUI and Compose', 15); log(kg, 'Sent a contact sheet to Review', 9);
+  const ns = addAgent({ name: 'Nasreddin', harness: 'codex', model: 'Terra', room: 'keymaster', station: 'code', task: '#1211 Bitting grade off by one pin', by: 'board work', age: 14 });
+  log(ns, 'Found the off-by-one in GradeModel', 5);
+  const dk = addAgent({ name: 'Dede Korkut', harness: 'codex', model: 'Sol', room: 'weekcut', station: 'think', state: 'wait', persistent: 'chat', task: 'Your session: the export sheet', by: 'You', age: 36, now: 'Wants to talk', turnMsgs: ['Should the export preset become the default for new projects?', 'Two coaches want exports without the watermark during the trial. Talk first?'] });
+  log(dk, 'Fixed the export sheet on iPad', 8); log(dk, 'swift test passed: 118 of 118', 5); log(dk, 'Finished its turn', 4);
+  const z = addAgent({ name: 'Adsız', harness: 'claude', model: 'Haiku', room: 'elsewhere', station: 'code', state: 'fail', stuck: true, task: 'claude -p in your home folder', by: 'A script', age: 25, now: 'No progress for 12 min' });
+  log(z, 'Ran a Bash command', 12);
+  S.stuck = { a: z, at: 26 };
+
+  pushCard(decideCard('tavla', '#1220', 'Tavla Plus için aylık fiyat ne olsun?', 'Sample numbers: the trial converts at 4.1%. Similar Turkish board games charge $3.99.', ['$2.99 kalsın', '$3.99 dene, 2 hafta'], 40));
+  pushCard(decideCard('koza', '#1224', 'Doğumdan sonra deneme süresi kaç gün olsun?', 'The paywall shows only after a week of use. Both lengths fit the store rules.', ['7 gün', '14 gün'], 75));
+  pushCard(doneCard('tavla', 30, ['Done: #1188 match reconnects after sleep', 'Done: #1185 bear-off arrow on the right side', 'Sent Tavla build 31 to TestFlight', 'Failed and released: #1191 reconnect test is flaky']));
+  pushCard(betterCard('interbellum', 120, 'Typecheck keeps failing in strip.tsx', 'It failed 3 times this week. Each failure cost an agent about 40 minutes.', 'Split the strip component and add a typed props check, so the next change fails fast.'));
+  pushCard(decidedCard('interbellum', 20, ['Map mode names shortened to Gov, Econ and War, because they fit the strip', 'The peace table shows one war score, the attacker’s, because two confused players', 'Raid reports keep the last 20 raids, because older ones were never opened']));
+  pushCard(talkCard(dk, 15, 'Two coaches asked for one free export a week. Export is the only paywall. Talk before I build anything?'));
+
+  const E = (room, o, steps) => ROOM[room].embers.push(Object.assign({ room, changes: steps.map((s) => ({ t: s[0], text: s[1] })) }, o));
+  E('tavla', { name: 'Yiğit', harness: 'opencode', model: 'Go Flash', outcome: 'Done', result: 'Done #1188: match reconnects after sleep. Fix committed.', minutes: 23, tokens: '412k', by: 'Mahmut Hoca', ended: '13:52', issue: '#1188' }, [['13:31', 'Claimed #1188'], ['13:40', 'Edited lib/net/match_client.dart'], ['13:47', 'Tests passed: 42 of 42'], ['13:50', 'Committed 3f2a91c'], ['13:52', 'board done #1188']]);
+  E('tavla', { name: 'Selcan', harness: 'codex', model: 'Terra', outcome: 'Done', result: 'Done #1185: bear-off arrow shows on the right side. Fix committed.', minutes: 17, tokens: '233k', by: 'Mahmut Hoca', ended: '13:20', issue: '#1185' }, [['13:04', 'Claimed #1185'], ['13:12', 'Edited lib/game/board_view.dart'], ['13:18', 'Tests passed'], ['13:20', 'board done #1185']]);
+  E('interbellum', { name: 'Bekri', harness: 'codex', model: 'Sol', outcome: 'Failed', result: 'Released #1190. Typecheck kept failing in strip.tsx.', minutes: 31, tokens: '388k', by: 'board work', ended: '13:44', issue: '#1190' }, [['13:13', 'Claimed #1190'], ['13:25', 'Edited apps/web/src/ui/strip.tsx'], ['13:38', 'Typecheck failed 3 times'], ['13:44', 'board release #1190 with a note']]);
+  E('panel', { name: 'Kaygusuz', harness: 'claude', model: 'Sonnet', outcome: 'Crashed', result: 'The process ended with no last message.', minutes: 14, tokens: '96k', by: 'You', ended: '13:06', issue: '' }, [['12:52', 'Edited next/crates/panel-ingress/src/router.rs'], ['13:06', 'No commit. 1 file left busy in wip'], ['13:06', 'wip puts it in the next batch']]);
+  E('weekcut', { name: 'Hızır', harness: 'codex', model: 'Terra', outcome: 'Done', result: 'Caption review keeps line breaks. Fix committed.', minutes: 26, tokens: '301k', by: 'board work', ended: '12:58', issue: '' }, [['12:32', 'Read Captions/Review.swift'], ['12:49', 'swift test passed'], ['12:58', 'Committed 91be0a4']]);
+  E('hq', { name: 'Routine', harness: 'claude', model: 'Haiku', outcome: 'Done', result: 'Filed 2 routine issues for today.', minutes: 4, tokens: '41k', by: 'Mahmut Hoca', ended: '13:40', issue: '' }, [['13:36', 'Read the routine list'], ['13:40', 'Filed 2 issues']]);
+  E('keymaster', { name: 'Banu', harness: 'codex', model: 'Sol', outcome: 'Stopped', result: 'Stopped by you. It needed a design call first.', minutes: 9, tokens: '88k', by: 'board work', ended: '13:15', issue: '' }, [['13:06', 'Read the shop screen'], ['13:15', 'You stopped it']]);
+  E('koza', { name: 'Burla', harness: 'claude', model: 'Sonnet', outcome: 'Done', result: 'Done #1179: feeding timer survives rotation. Fix committed.', minutes: 21, tokens: '254k', by: 'board work', ended: '13:28', issue: '#1179' }, [['13:07', 'Claimed #1179'], ['13:22', './gradlew test passed'], ['13:28', 'board done #1179']]);
+}
+
+/* ---------- layout ---------- */
+let W = 0, H = 0, dpr = 1;
+const L = { quiet: [], bays: [], holders: [] };
+const bg = document.createElement('canvas'), bctx = bg.getContext('2d');
+const OFF = [[0, 0], [19, -13], [-19, -13], [19, 13], [-19, 13], [0, -25], [0, 25], [36, 0], [-36, 0]];
+function stationPt(r, i) { const fx = r.x + 14, fw = r.w - 28; return { x: fx + fw * (i + 0.5) / 4, y: r.y + L.floorMid }; }
+function rr(c, x, y, w, h, r) { c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath(); }
+function layout() {
+  W = Math.round(stage.clientWidth); if (!W) return;
+  dpr = Math.min(2, window.devicePixelRatio || 1);
+  const phone = W < 640, wide = W >= 900;
+  L.phone = phone; L.wide = wide;
+  const pad = phone ? 10 : 18, gap = phone ? 8 : 12, cols = wide ? 4 : 2;
+  L.pad = pad;
+  const rw = (W - pad * 2 - gap * (cols - 1)) / cols, rh = wide ? 206 : (phone ? 190 : 200);
+  ROOMS.forEach((r, i) => { const c = i % cols, row = Math.floor(i / cols); r.x = pad + c * (rw + gap); r.y = pad + row * (rh + gap); r.w = rw; r.h = rh; });
+  L.floorMid = (84 + rh - 34) / 2 - 2;
+  L.offScale = clamp((rw - 28) / 4 / 50, 0.62, 1);
+  let y = pad + Math.ceil(ROOMS.length / cols) * (rh + gap) + 4;
+  ctx.font = '500 11px ' + FB;
+  const qx0 = pad + 52;
+  const place = (n) => {
+    const out = []; let x = qx0, ln = 0;
+    const items = QUIET.slice(0, n); if (n < QUIET.length) items.push('+' + (QUIET.length - n) + ' more');
+    for (const name of items) { const w = Math.ceil(ctx.measureText(name).width) + 18; if (x + w > W - pad && x > qx0) { ln++; x = qx0; } out.push({ x, y: y + ln * 26, w, h: 20, name }); x += w + 6; }
+    return { out, ln };
+  };
+  let shown = QUIET.length, res = place(shown);
+  while (res.ln >= 2 && shown > 1) { shown--; res = place(shown); }
+  L.quiet = res.out; L.quietY = y;
+  y += (res.ln + 1) * 26 + 6;
+  const bh = wide ? 58 : 88;
+  L.base = { x: pad, y, w: W - pad * 2, h: bh };
+  if (wide) { const bx = pad + 270; L.bays = [{ x: bx, y: y + 12, w: 150, h: 34 }, { x: bx + 160, y: y + 12, w: 150, h: 34 }]; }
+  else { const bw = (W - pad * 2 - 28 - 10) / 2; L.bays = [{ x: pad + 14, y: y + 44, w: bw, h: 32 }, { x: pad + 24 + bw, y: y + 44, w: bw, h: 32 }]; }
+  y += bh + 14;
+  if (!phone) { const cardW = Math.min(500, W - pad * 2 - 150); const sx = (W - 130 - cardW) / 2; L.ring = { x: sx + 50, y: y + 86, r: 36 }; L.card = { x: sx + 130, y, w: cardW }; H = y + 290 + pad; }
+  else { L.ring = { x: W / 2, y: y + 36, r: 30 }; L.card = { x: pad, y: y + 92, w: W - pad * 2 }; H = y + 92 + 300 + pad; }
+  L.minH = H;
+  qEl.style.left = L.card.x + 'px'; qEl.style.top = L.card.y + 'px'; qEl.style.width = L.card.w + 'px';
+  sizeCanvas();
+  ellCache.clear();
+  if (S.panel) placePanel();
+}
+function sizeCanvas() { cv.style.height = H + 'px'; cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); drawBg(); }
+function ensureHeight() { if (!L.card) return; const need = Math.ceil(L.card.y + qEl.offsetHeight + L.pad + 4); if (need > H) { H = need; sizeCanvas(); } }
+function drawBg() {
+  bg.width = cv.width; bg.height = cv.height; bctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  bctx.fillStyle = C.night; bctx.fillRect(0, 0, W, H);
+  bctx.fillStyle = rgba(C.ink3, 0.16);
+  for (let x = 12; x < W; x += 24) for (let yy = 12; yy < H; yy += 24) bctx.fillRect(x, yy, 1, 1);
+  rr(bctx, 0.5, 0.5, W - 1, H - 1, 14); bctx.strokeStyle = C.line; bctx.lineWidth = 1; bctx.stroke();
+  bctx.font = '500 11px ' + FB; bctx.textBaseline = 'middle';
+  bctx.fillStyle = C.ink3; bctx.fillText('Quiet', L.pad + 2, L.quietY + 10);
+  for (const q of L.quiet) { rr(bctx, q.x + 0.5, q.y + 0.5, q.w - 1, q.h - 1, 10); bctx.fillStyle = C.deck; bctx.fill(); bctx.strokeStyle = C.line; bctx.stroke(); bctx.fillStyle = C.ink3; bctx.fillText(q.name, q.x + 9, q.y + 10.5); }
+  bctx.textBaseline = 'alphabetic';
+}
+
+/* ---------- drawing ---------- */
+const sprites = {};
+function sprite(col) {
+  if (sprites[col]) return sprites[col];
+  const s = document.createElement('canvas'); s.width = s.height = 128; const g = s.getContext('2d');
+  const gr = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gr.addColorStop(0, rgba(col, 0.85)); gr.addColorStop(0.18, rgba(col, 0.42)); gr.addColorStop(0.5, rgba(col, 0.1)); gr.addColorStop(1, rgba(col, 0));
+  g.fillStyle = gr; g.fillRect(0, 0, 128, 128); return (sprites[col] = s);
+}
+function glow(x, y, r, col, a) { ctx.globalAlpha = clamp(a, 0, 1); ctx.drawImage(sprite(col), x - r, y - r, r * 2, r * 2); ctx.globalAlpha = 1; }
+const ellCache = new Map();
+function ell(text, maxW) {
+  const key = ctx.font + '|' + Math.round(maxW) + '|' + text; let v = ellCache.get(key); if (v !== undefined) return v;
+  v = text;
+  if (ctx.measureText(v).width > maxW) { let lo = 0, hi = text.length; while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (ctx.measureText(text.slice(0, mid) + '…').width <= maxW) lo = mid; else hi = mid - 1; } v = text.slice(0, lo) + '…'; }
+  if (ellCache.size > 900) ellCache.clear(); ellCache.set(key, v); return v;
+}
+function bez(a, b, c, d, u) { const v = 1 - u; return { x: v * v * v * a.x + 3 * v * v * u * b.x + 3 * v * u * u * c.x + u * u * u * d.x, y: v * v * v * a.y + 3 * v * v * u * b.y + 3 * v * u * u * c.y + u * u * u * d.y }; }
+
+function drawRoom(r, here, t) {
+  const sel = S.panel && S.panel.type === 'room' && S.panel.id === r.id;
+  const waiting = here.filter((a) => a.state === 'wait').length, cards = active().filter((c) => c.room === r.id).length, stuck = here.some((a) => a.stuck);
+  r.waiting = waiting;
+  rr(ctx, r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1, 10);
+  ctx.fillStyle = sel ? C.raise : C.wall; ctx.fill();
+  ctx.lineWidth = 1; ctx.strokeStyle = stuck ? rgba(C.fail, 0.55) : (cards ? rgba(C.wait, 0.42) : (sel ? C.line2 : C.line)); ctx.stroke();
+  const x = r.x + 14, maxW = r.w - 28;
+  ctx.textAlign = 'right'; ctx.font = '500 10.5px ' + FB; ctx.fillStyle = C.ink3;
+  const tag = r.tag + (here.length ? ' · ' + here.length : ''); const tw = ctx.measureText(tag).width;
+  ctx.fillText(tag, r.x + r.w - 14, r.y + 22);
+  ctx.textAlign = 'left'; ctx.font = '600 ' + (L.phone ? 12 : 13) + 'px ' + FB; ctx.fillStyle = C.ink;
+  ctx.fillText(ell(r.name, maxW - tw - 10), x, r.y + 22);
+  const order = here.slice().sort((a, b) => RANK[a.state] - RANK[b.state] || a.id - b.id);
+  ctx.font = '400 ' + (L.phone ? 10 : 11) + 'px ' + FM;
+  if (!order.length) { ctx.fillStyle = C.ink3; ctx.fillText('Nobody here now', x, r.y + 42); }
+  order.slice(0, 2).forEach((a, i) => {
+    const yy = r.y + 42 + i * 15;
+    ctx.fillStyle = STATE_COL[a.state]; ctx.beginPath(); ctx.arc(x + 3, yy - 4, 2.6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = C.ink2; ctx.fillText(ell(a.name + ': ' + a.now, maxW - 12), x + 12, yy);
+  });
+  const last = r.embers[0];
+  ctx.fillStyle = C.ink3; ctx.fillText(ell(last ? 'Last: ' + last.result : 'Last: nothing yet', maxW), x, r.y + 73);
+  ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(r.x + 10, r.y + 82.5); ctx.lineTo(r.x + r.w - 10, r.y + 82.5); ctx.stroke();
+  ctx.font = '500 10px ' + FB; ctx.textAlign = 'center';
+  for (let i = 0; i < 4; i++) {
+    const p = stationPt(r, i);
+    ctx.strokeStyle = rgba(C.line2, 0.6); ctx.beginPath(); ctx.ellipse(p.x, p.y, 22 * L.offScale + 4, 14 * L.offScale + 3, 0, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = C.ink3; ctx.fillText(ST_LABEL[STATIONS[i]], p.x, r.y + r.h - 31);
+  }
+  ctx.textAlign = 'left';
+  const sy = r.y + r.h - 14;
+  ctx.strokeStyle = C.line; ctx.beginPath(); ctx.moveTo(r.x + 10, sy + 8.5); ctx.lineTo(r.x + r.w - 10, sy + 8.5); ctx.stroke();
+  r.em = [];
+  const maxE = Math.max(1, Math.floor((r.w - 28) / 14));
+  r.embers.slice(0, maxE).forEach((e, i) => {
+    const ex = r.x + 17 + i * 14, col = OUT_COL[e.outcome] || C.idle, al = Math.max(0.32, 0.85 - i * 0.07);
+    if (e.outcome !== 'Stopped') { ctx.globalCompositeOperation = 'lighter'; glow(ex, sy, 9, col, al * 0.55); ctx.globalCompositeOperation = 'source-over'; }
+    ctx.globalAlpha = al; ctx.beginPath(); ctx.arc(ex, sy, 3.2, 0, Math.PI * 2);
+    if (e.outcome === 'Crashed') { ctx.strokeStyle = col; ctx.lineWidth = 1.3; ctx.stroke(); ctx.lineWidth = 1; } else { ctx.fillStyle = col; ctx.fill(); }
+    ctx.globalAlpha = 1;
+    r.em.push({ x: ex, y: sy, rep: e });
+  });
+}
+function drawBase(live, t) {
+  const b = L.base;
+  rr(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 10); ctx.fillStyle = C.deck; ctx.fill(); ctx.strokeStyle = C.line; ctx.lineWidth = 1; ctx.stroke();
+  const working = live.filter((a) => a.state === 'work').length;
+  const cpu = clamp(Math.round(18 + working * 6 + 3 * Math.sin(t * 0.7)), 5, 96);
+  ctx.textAlign = 'left';
+  ctx.font = '600 12px ' + FB; ctx.fillStyle = C.ink; ctx.fillText('This Mac', b.x + 14, b.y + 24);
+  ctx.font = '400 11px ' + FM; ctx.fillStyle = C.ink2;
+  const heat = 'Heat: ' + (cpu > 75 ? 'warm' : 'cool');
+  let cx;
+  if (L.wide) { ctx.fillText(heat, b.x + 14, b.y + 42); cx = b.x + 120; }
+  else { ctx.fillText(heat, b.x + 84, b.y + 24); cx = b.x + 190; }
+  ctx.fillText('CPU ' + cpu + '%', cx, b.y + 24);
+  rr(ctx, cx, b.y + 32, 100, 4, 2); ctx.fillStyle = C.line; ctx.fill();
+  rr(ctx, cx, b.y + 32, Math.max(4, cpu), 4, 2); ctx.fillStyle = cpu > 75 ? C.wait : C.ink3; ctx.fill();
+  if (L.wide) { ctx.font = '400 11px ' + FM; ctx.fillStyle = C.ink3; ctx.fillText('Haiku ' + S.haiku + ' of 400 today', cx, b.y + 50); }
+  const holders = live.filter((a) => a.station === 'test' && a.state === 'work').sort((a, c) => a.stationSince - c.stationSince).slice(0, 2);
+  L.holders = holders;
+  L.bays.forEach((bay, i) => {
+    const h = holders[i];
+    rr(ctx, bay.x + 0.5, bay.y + 0.5, bay.w - 1, bay.h - 1, 7); ctx.fillStyle = h ? rgba(C.work, 0.07) : C.wall; ctx.fill(); ctx.strokeStyle = h ? rgba(C.work, 0.35) : C.line; ctx.stroke();
+    ctx.font = '500 10px ' + FB; ctx.fillStyle = C.ink3; ctx.fillText('testlock bay ' + (i + 1), bay.x + 9, bay.y + 13);
+    ctx.font = '400 11px ' + FM; ctx.fillStyle = h ? C.ink : C.ink3;
+    ctx.fillText(ell(h ? h.name + ' · ' + ROOM[h.room].test : 'Free', bay.w - 18), bay.x + 9, bay.y + 27);
+  });
+  if (L.wide) {
+    const qx = b.x + b.w - 190;
+    [['Claude week', 46 + Math.floor(S.t / 90)], ['Codex week', 31 + Math.floor(S.t / 140)]].forEach((q, i) => {
+      const v = Math.min(99, q[1]), yy = b.y + 22 + i * 20;
+      ctx.font = '400 11px ' + FM; ctx.fillStyle = C.ink2; ctx.fillText(q[0] + ' ' + v + '%', qx, yy);
+      rr(ctx, qx + 120, yy - 6, 60, 4, 2); ctx.fillStyle = C.line; ctx.fill();
+      rr(ctx, qx + 120, yy - 6, Math.max(4, 0.6 * v), 4, 2); ctx.fillStyle = C.ink3; ctx.fill();
+    });
+  }
+}
+
+function threadPath(c) {
+  const ring = L.ring, a = c.agents.length ? byId(c.agents[0]) : null, r = ROOM[c.room];
+  const p0 = a && a.alive ? { x: a.x, y: a.y + a.r } : { x: r.x + r.w / 2, y: r.y + r.h };
+  return [p0, { x: p0.x, y: p0.y + 90 }, { x: ring.x, y: ring.y - ring.r - 110 }, { x: ring.x, y: ring.y - ring.r }];
+}
+function drawLinks(live, t) {
+  ctx.setLineDash([2, 4]); ctx.lineWidth = 1;
+  L.holders.forEach((a, i) => { const bay = L.bays[i]; ctx.strokeStyle = rgba(C.work, 0.26); ctx.beginPath(); ctx.moveTo(a.x, a.y + a.r + 2); ctx.lineTo(bay.x + bay.w / 2, bay.y); ctx.stroke(); });
+  const focus = byId(S.hover) || byId(S.sel);
+  if (focus && focus.alive) {
+    ctx.strokeStyle = rgba(C.ink, 0.35);
+    const fam = [];
+    if (focus.parent) { const p = byId(focus.parent); if (p && p.alive) fam.push(p); }
+    focus.children.forEach((id) => { const c = byId(id); if (c && c.alive) fam.push(c); });
+    fam.forEach((o) => { ctx.beginPath(); ctx.moveTo(focus.x, focus.y); ctx.lineTo(o.x, o.y); ctx.stroke(); });
+  }
+  ctx.setLineDash([]);
+  if (S.panel && S.panel.type === 'agent' && !pEl.hidden) {
+    const a = byId(S.panel.id);
+    if (a && a.alive) {
+      const l = pEl.offsetLeft, tp = pEl.offsetTop, w = pEl.offsetWidth, h = pEl.offsetHeight;
+      const inside = a.x >= l && a.x <= l + w && a.y >= tp && a.y <= tp + h;
+      if (!inside) { const px = a.x < l ? l : (a.x > l + w ? l + w : a.x), py = clamp(a.y, tp + 18, tp + h - 18); ctx.strokeStyle = rgba(C.ink, 0.4); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(px, py); ctx.stroke(); }
+    }
+  }
+  /* Playbook "Card": one thread per waiting card, bright for the card in front of you. */
+  const ring = L.ring, cur = S.cards.find((c) => c.id === S.cur);
+  ctx.lineWidth = 1.2;
+  active().forEach((c) => {
+    const P = threadPath(c), isCur = cur && cur.id === c.id;
+    ctx.strokeStyle = rgba(C.wait, isCur ? 0.42 : 0.12); ctx.beginPath(); ctx.moveTo(P[0].x, P[0].y); ctx.bezierCurveTo(P[1].x, P[1].y, P[2].x, P[2].y, P[3].x, P[3].y); ctx.stroke();
+  });
+  ctx.globalCompositeOperation = 'lighter';
+  /* Playbook "Card" and "Answer lands": a light flies to your ring, or back to the room. */
+  S.flights.forEach((f) => {
+    const u = clamp((t - f.t0) / 1.1, 0, 1), e = u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const P = threadPath({ room: f.room, agents: [] }), q = bez(P[0], P[1], P[2], P[3], f.dir === 'in' ? e : 1 - e);
+    glow(q.x, q.y, 14, f.dir === 'in' ? C.wait : C.ink, 0.95 * (1 - u * 0.4));
+  });
+  /* Playbook "Shipped": a ring of light opens around the room. */
+  S.rings.forEach((g) => {
+    const r = ROOM[g.room], u = clamp((t - g.t0) / 1.6, 0, 1), s = 4 + u * 16;
+    ctx.strokeStyle = rgba(C.done, 0.7 * (1 - u)); ctx.lineWidth = 2;
+    rr(ctx, r.x - s, r.y - s, r.w + s * 2, r.h + s * 2, 10 + s); ctx.stroke();
+  });
+  S.beams.forEach((b) => {
+    const f = byId(b.from), to = byId(b.to); if (!f || !to) return;
+    const age = t - b.t0, k = Math.max(0, 1 - age / 2.4);
+    ctx.strokeStyle = rgba(C.ink, 0.55 * k); ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(f.x, f.y); ctx.lineTo(to.x, to.y); ctx.stroke();
+    const u = Math.min(1, age / 0.8); glow(f.x + (to.x - f.x) * u, f.y + (to.y - f.y) * u, 18, C.ink, k);
+  });
+  ctx.globalCompositeOperation = 'source-over'; ctx.lineWidth = 1;
+}
+function drawDots(live, t) {
+  const tt = RM ? 0 : t;
+  ctx.globalCompositeOperation = 'lighter';
+  for (const a of live) {
+    const col = STATE_COL[a.state], ph = a.id * 1.7; let gr = a.r * 4, al;
+    /* Still glow by state. Only "Wants to talk" and "Stuck" blink. */
+    if (RM) al = a.state === 'idle' ? 0.2 : 0.7;
+    else if (a.state === 'work') al = 0.8;
+    else if (a.state === 'think') al = 0.55;
+    else if (a.state === 'wait') { gr *= 1.15; al = 0.55 + 0.4 * (0.5 + 0.5 * Math.sin(t * 4.5 + ph)); }
+    else if (a.state === 'idle') { gr *= 0.75; al = 0.2; }
+    else al = 0.35 + 0.45 * (0.5 + 0.5 * Math.sin(t * 2.2 + ph));
+    a.dx = 0;
+    glow(a.x, a.y, gr, col, al);
+    /* Playbook "Step": one soft pulse when a new step starts. */
+    const st = a.flash != null ? t - a.flash : 9;
+    if (!RM && st < 0.9) { const u = st / 0.9; glow(a.x, a.y, a.r * (3 + 5 * u), col, 0.55 * (1 - u)); }
+    for (let i = 0; i < a.subs; i++) { const an = tt * 1.8 + i * Math.PI * 2 / a.subs + ph; glow(a.x + Math.cos(an) * (a.r + 10), a.y + Math.sin(an) * (a.r + 8), 8, col, 0.7); }
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  for (const a of live) {
+    const col = STATE_COL[a.state], x = a.x + a.dx, y = a.y;
+    ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x, y, a.r, 0, Math.PI * 2); ctx.fill();
+    if (a.r >= 7) { ctx.fillStyle = 'rgba(8,11,16,0.82)'; ctx.font = '600 ' + Math.round(a.r * 1.15) + 'px ' + FM; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(HARNESS[a.harness][0], x, y + 0.5); ctx.textBaseline = 'alphabetic'; }
+    else { ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.beginPath(); ctx.arc(x, y, a.r * 0.38, 0, Math.PI * 2); ctx.fill(); }
+    for (let i = 0; i < a.subs; i++) { const an = tt * 1.8 + i * Math.PI * 2 / a.subs + a.id * 1.7; ctx.fillStyle = col; ctx.beginPath(); ctx.arc(a.x + Math.cos(an) * (a.r + 10), a.y + Math.sin(an) * (a.r + 8), 2.6, 0, Math.PI * 2); ctx.fill(); }
+    const isSel = S.sel === a.id, isHov = S.hover === a.id;
+    if (isSel || isHov) { ctx.strokeStyle = rgba(C.ink, isSel ? 0.9 : 0.5); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(x, y, a.r + 5, 0, Math.PI * 2); ctx.stroke(); ctx.lineWidth = 1; }
+    if (isSel || isHov || (a.state === 'wait' && ROOM[a.room].waiting === 1) || a.stuck) {
+      ctx.font = '500 10.5px ' + FB; ctx.textAlign = 'center'; ctx.fillStyle = a.state === 'wait' ? C.wait : C.ink2;
+      ctx.fillText(ell(a.name, 90), x, y + a.r + 14);
+    }
+    ctx.textAlign = 'left';
+  }
+}
+function drawParts() { if (!S.parts.length) return; ctx.globalCompositeOperation = 'lighter'; for (const p of S.parts) glow(p.x, p.y, 7, p.col, p.life / p.max); ctx.globalCompositeOperation = 'source-over'; }
+function drawRing(t) {
+  const r = L.ring, n = active().length;
+  if (n) { ctx.globalCompositeOperation = 'lighter'; glow(r.x, r.y, r.r * 2.4, C.wait, RM ? 0.4 : 0.32 + 0.12 * Math.sin(t * 2)); ctx.globalCompositeOperation = 'source-over'; }
+  ctx.fillStyle = C.night; ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = n ? rgba(C.wait, 0.85) : rgba(C.ink, 0.6); ctx.lineWidth = 1.5; ctx.stroke(); ctx.lineWidth = 1;
+  ctx.textAlign = 'center'; ctx.fillStyle = C.ink; ctx.font = '700 ' + (L.phone ? 20 : 24) + 'px ' + FD; ctx.fillText(String(n), r.x, r.y + (L.phone ? 7 : 8));
+  ctx.font = '500 10.5px ' + FB; ctx.fillStyle = C.ink2; ctx.fillText('You', r.x, r.y + r.r + 15);
+  ctx.textAlign = 'left';
+}
+function draw() {
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+  ctx.drawImage(bg, 0, 0, W, H);
+  const live = alive(), t = S.rt;
+  for (const r of ROOMS) drawRoom(r, live.filter((a) => a.room === r.id), t);
+  drawBase(live, t);
+  drawLinks(live, t);
+  drawDots(live, t);
+  drawParts();
+  drawRing(t);
+}
+function moveDots(rdt) {
+  const groups = {}, k = RM ? 1 : 1 - Math.exp(-rdt * 3.2);
+  for (const a of S.agents) {
+    if (!a.alive) continue;
+    const key = a.room + ':' + a.station; const i = groups[key] = (groups[key] == null ? 0 : groups[key] + 1);
+    const sp = stationPt(ROOM[a.room], STATIONS.indexOf(a.station)), o = OFF[i % OFF.length];
+    const tx = sp.x + o[0] * L.offScale, ty = sp.y + o[1] * L.offScale;
+    if (!a.placed) { a.x = tx; a.y = ty; a.placed = true; } else { a.x += (tx - a.x) * k; a.y += (ty - a.y) * k; }
+  }
+  for (const p of S.parts) { p.x += p.vx * rdt; p.y += p.vy * rdt; p.vx *= 0.94; p.vy *= 0.94; p.life -= rdt; }
+  S.parts = S.parts.filter((p) => p.life > 0);
+  S.beams = S.beams.filter((b) => S.rt - b.t0 < 2.4);
+  S.flights = S.flights.filter((f) => S.rt - f.t0 < 1.1);
+  S.rings = S.rings.filter((g) => S.rt - g.t0 < 1.6);
+}
+
+/* ---------- the queue card ---------- */
+function renderCard() {
+  const c = curCard(); S.rendered = c ? c.id : null;
+  if (!c) {
+    const n = alive().filter((a) => a.state === 'work' || a.state === 'think').length;
+    qEl.innerHTML = '<div class="qhead"><span class="qkind" style="--c:' + C.done + '">Live</span><span class="qpos">0 cards</span></div><div class="qtitle">Nothing needs you</div><div class="qwhy">' + n + ' agents working. You can leave. New calls wait here.</div>';
+    ensureHeight(); return;
+  }
+  const talking = S.talking === c.id;
+  const opts = talking
+    ? '<button type="button" class="opt primary" data-talk="send">Send <kbd>Enter</kbd></button><button type="button" class="opt" data-talk="back">Back <kbd>Esc</kbd></button>'
+    : c.options.map((o, i) => '<button type="button" class="opt' + (i === 0 ? ' primary' : '') + '" data-opt="' + i + '">' + esc(o.label) + ' <kbd>' + (o.talk ? 'T' : i === 0 ? 'Enter' : i + 1) + '</kbd></button>').join('');
+  const box = talking ? '<input id="talk" class="reply" type="text" maxlength="200" placeholder="Talk to ' + esc(talkTarget(c)) + ' about this. Enter sends." autocomplete="off">' : '';
+  qEl.innerHTML = '<div class="qhead"><span class="qkind" style="--c:' + KIND[c.kind].col + '">' + esc(c.kind) + '</span><span class="qpos" id="qpos"></span></div>' +
+    '<div class="qwho" id="qwho"></div><div class="qtitle">' + esc(c.title(c)) + '</div><div class="qwhy" id="qwhy"></div>' +
+    (c.extra ? c.extra(c) : '') + box + '<div class="qopts">' + opts + '</div>' +
+    '<div class="qfoot"><span class="qscore" id="qscore"></span><button type="button" class="later" data-later="1">Later <kbd>↓</kbd></button></div>';
+  S.itemsSig = c.items.length;
+  updateCard(); ensureHeight();
+  if (talking) { const el = $('#talk'); if (el) el.focus({ preventScroll: true }); }
+}
+function talkTarget(c) {
+  const a = c.agents.length ? byId(c.agents[0]) : null; if (a && a.alive) return a.name;
+  const here = alive().find((x) => x.room === c.room && !x.persistent); return here ? here.name : 'Mahmut Hoca';
+}
+function sendTalk(c) {
+  const el = $('#talk'), v = el ? el.value.trim() : ''; if (!v) { if (el) el.focus(); return; }
+  const who = talkTarget(c); S.talking = null;
+  landAnswer(c, 'Sent to ' + who + ' with the card attached. The card comes back with the reply.');
+  c.snooze = S.t + 60; S.cur = null; swapCard();
+}
+function updateCard() {
+  const c = curCard();
+  if ((c ? c.id : null) !== S.rendered) return renderCard();
+  if (!c) return;
+  if (c.items.length !== S.itemsSig && S.talking !== c.id) return renderCard();
+  const s = score(c), list = active(), total = list.reduce((sum, x) => sum + KIND[x.kind].min, 0);
+  const pos = $('#qpos'), who = $('#qwho'), why = $('#qwhy'), sc = $('#qscore');
+  if (pos) pos.textContent = '1 of ' + list.length + ' · about ' + Math.max(1, Math.round(total)) + ' min';
+  if (who) {
+    const ag = c.agents.map(byId).filter(Boolean), src = c.issue ? 'Your agenda · ' + c.issue : (ag.length ? ag.map((a) => a.name).join(', ') : SRC[c.kind] || 'Agents');
+    const html = '<span class="qdots">' + (ag.length ? ag.map((a) => '<i style="--c:' + STATE_COL[a.state] + '"></i>').join('') : '<i style="--c:' + KIND[c.kind].col + '"></i>') + '</span><span>' + esc(src) + ' · ' + esc(ROOM[c.room].name) + '</span>';
+    if (who.innerHTML !== html) who.innerHTML = html;
+  }
+  if (why) why.textContent = c.why(c);
+  if (sc) sc.textContent = ROOM[c.room].name + ' ×' + s.w + ' · ' + c.kind + ' ×' + s.kw + ' · waited ' + fmtMin(s.wait) + ' · about ' + s.min + ' min of you → ' + s.p.toFixed(2);
+}
+function swapCard() { qEl.classList.add('swap'); setTimeout(() => { renderCard(); qEl.classList.remove('swap'); }, RM ? 0 : 150); }
+function startTalk(c) {
+  if (c.kind === 'Talk') { const r = $('#reply'); if (r) r.focus(); return; }
+  S.talking = c.id; renderCard();
+}
+function answer(c, i) {
+  if (!c || c.gone) return; const o = c.options[i]; if (!o) return;
+  if (o.talk) return startTalk(c);
+  S.talking = null; o.fx(c); c.gone = true; S.cur = null; swapCard(); if (S.panel && S.panel.type === 'agent') refreshPanel(true);
+}
+function later(c) { S.talking = null; c.snooze = S.t + 90; S.cur = null; toast(c.kind + ' card moved to later. It comes back in a while.'); swapCard(); }
+qEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return; const c = curCard(); if (!c) return;
+  if (b.dataset.later) return later(c);
+  if (b.dataset.talk === 'send') return sendTalk(c);
+  if (b.dataset.talk === 'back') { S.talking = null; return renderCard(); }
+  if (b.dataset.opt != null) answer(c, +b.dataset.opt);
+});
+qEl.addEventListener('keydown', (e) => {
+  const c = curCard(); if (!c) return;
+  if (e.target.id === 'reply' && e.key === 'Enter') { e.preventDefault(); answer(c, 0); }
+  if (e.target.id === 'talk' && e.key === 'Enter') { e.preventDefault(); sendTalk(c); }
+  if (e.target.id === 'talk' && e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); S.talking = null; renderCard(); }
+});
+
+/* ---------- panels ---------- */
+function openAgent(a) { if (!a || !a.alive) return; S.panel = { type: 'agent', id: a.id }; S.sel = a.id; showPeek(null); renderPanel(); }
+function openReport(rep) { S.panel = { type: 'report', rep }; S.sel = null; renderPanel(); }
+function openRoom(r) { S.panel = { type: 'room', id: r.id }; S.sel = null; S.roomSig = roomSig(r.id); renderPanel(); }
+function closePanel() { S.panel = null; S.sel = null; pEl.hidden = true; }
+const closeBtn = '<button type="button" class="pclose" data-close="1" aria-label="Close panel">×</button>';
+function agentHTML(a) {
+  const h = HARNESS[a.harness], r = ROOM[a.room], p = a.parent ? byId(a.parent) : null;
+  const by = p ? '<button type="button" class="plink" data-agent="' + p.id + '">' + esc(p.name) + '</button>' : esc(a.by || 'You');
+  return '<div class="ph"><span class="pdot" id="pdot"></span><div class="pt"><div class="pname">' + esc(a.name) + '</div><div class="psub">' + h[1] + ' · ' + esc(a.model) + ' · ' + esc(r.name) + '</div></div>' + closeBtn + '</div>' +
+    '<div class="pstate"><span class="chip" id="pchip"></span><span id="page"></span></div>' +
+    '<dl class="prows"><dt>Task</dt><dd>' + esc(a.task) + '</dd><dt>Now</dt><dd id="pnow"></dd><dt>Started by</dt><dd>' + by + '</dd><dt>Family</dt><dd id="pfam"></dd></dl>' +
+    '<div class="psec">Done so far</div><ol class="pdone" id="pdone"></ol>' +
+    '<div class="pact"><button type="button" class="opt" data-act="talk">Talk</button><button type="button" class="opt" data-act="term">Terminal</button><button type="button" class="opt hold" data-act="stop">Hold to stop</button></div>';
+}
+function reportHTML(e) {
+  const col = OUT_COL[e.outcome] || C.idle, h = HARNESS[e.harness] || ['?', e.harness];
+  return '<div class="ph"><span class="pdot" style="--c:' + col + '"></span><div class="pt"><div class="pname">' + esc(e.name) + '</div><div class="psub">' + h[1] + ' · ' + esc(e.model) + ' · ' + esc(ROOM[e.room].name) + '</div></div>' + closeBtn + '</div>' +
+    '<div class="pstate"><span class="chip" style="--c:' + col + '">' + e.outcome + '</span><span>ended ' + e.ended + '</span></div>' +
+    '<p class="presult">' + esc(e.result) + '</p>' +
+    '<div class="psec">What it did</div><ol class="pdone">' + e.changes.map((d) => '<li><time>' + d.t + '</time><span>' + esc(d.text) + '</span></li>').join('') + '</ol>' +
+    '<dl class="prows"><dt>Ran</dt><dd>' + e.minutes + ' min · ' + e.tokens + ' tokens</dd><dt>Started by</dt><dd>' + esc(e.by) + '</dd><dt>Made from</dt><dd>Last message, board result, wip done and git. No AI call.</dd></dl>' +
+    '<div class="pact"><button type="button" class="opt" data-act="transcript">Open transcript</button>' + (e.issue ? '<button type="button" class="opt" data-act="issue">Open ' + esc(e.issue) + '</button>' : '') + '</div>';
+}
+function roomSig(id) { return alive().filter((a) => a.room === id).map((a) => a.id + a.state + a.now).join('|') + '#' + ROOM[id].embers.length; }
+function roomHTML(r) {
+  const here = alive().filter((a) => a.room === r.id).sort((a, b) => RANK[a.state] - RANK[b.state] || a.id - b.id);
+  const nowList = here.length ? here.map((a) => '<li><button type="button" class="rowbtn" data-agent="' + a.id + '"><i style="--c:' + STATE_COL[a.state] + '"></i><b>' + esc(a.name) + '</b><span>' + esc(a.now) + '</span></button></li>').join('') : '<li class="muted">Nobody here now</li>';
+  const rec = r.embers.length ? r.embers.slice(0, 5).map((e, i) => '<li><button type="button" class="rowbtn" data-ember="' + i + '"><i style="--c:' + (OUT_COL[e.outcome] || C.idle) + '"></i><b>' + esc(e.name) + '</b><span>' + esc(e.result) + '</span></button></li>').join('') : '<li class="muted">Nothing yet today</li>';
+  return '<div class="ph"><div class="pt"><div class="pname">' + esc(r.name) + '</div><div class="psub">' + esc(r.tag) + ' · ' + here.length + ' agents · ' + r.issues + ' open issues</div></div>' + closeBtn + '</div>' +
+    '<div class="psec">Now</div><ul class="rlist">' + nowList + '</ul><div class="psec">Recently</div><ul class="rlist">' + rec + '</ul>' +
+    (r.weight >= 2 ? '<p class="pnote">Yesterday’s revenue from RevenueCat shows here for apps that earn.</p>' : '');
+}
+function renderPanel() {
+  const P = S.panel; if (!P) { pEl.hidden = true; return; }
+  let html;
+  if (P.type === 'agent') { const a = byId(P.id); if (!a) return closePanel(); html = agentHTML(a); }
+  else if (P.type === 'report') html = reportHTML(P.rep);
+  else html = roomHTML(ROOM[P.id]);
+  pEl.innerHTML = html; pEl.hidden = false; placePanel(); refreshPanel(true);
+}
+function refreshPanel(force) {
+  const P = S.panel; if (!P || P.type !== 'agent' || pEl.hidden) return;
+  const a = byId(P.id); if (!a) return;
+  const col = STATE_COL[a.state];
+  const dot = $('#pdot'); if (dot) dot.style.setProperty('--c', col);
+  const chip = $('#pchip'); if (chip) { chip.style.setProperty('--c', col); chip.textContent = STATE_NAME[a.state]; }
+  const age = $('#page'); if (age) age.textContent = 'running ' + fmtMin((S.t - a.born) / 60);
+  const now = $('#pnow'); if (now) now.textContent = a.now + (a.state === 'work' ? ' · ' + fmtClock(S.t - a.stationSince) : '');
+  const fam = $('#pfam');
+  if (fam) { const kids = a.children.map(byId).filter((k) => k && k.alive); const parts = []; if (a.subs) parts.push(a.subs + ' subagents'); if (kids.length) parts.push(kids.map((k) => '<button type="button" class="plink" data-agent="' + k.id + '">' + esc(k.name) + '</button>').join(', ')); const html = parts.length ? parts.join(' · ') : 'None'; if (fam.innerHTML !== html) fam.innerHTML = html; }
+  const done = $('#pdone');
+  if (done && (force || done.dataset.n !== String(a.done.length))) { done.dataset.n = a.done.length; done.innerHTML = a.done.slice().reverse().slice(0, 8).map((d) => '<li><time>' + d.t + '</time><span>' + esc(d.text) + '</span></li>').join(''); }
+}
+function anchorOf(P) {
+  if (P.type === 'agent') { const a = byId(P.id); if (a) return { x: a.x, y: a.y }; }
+  if (P.type === 'report') { for (const r of ROOMS) for (const em of r.em) if (em.rep === P.rep) return { x: em.x, y: em.y }; const r = ROOM[P.rep.room]; return { x: r.x + r.w / 2, y: r.y + r.h - 14 }; }
+  if (P.type === 'room') { const r = ROOM[P.id]; return { x: r.x + r.w, y: r.y + 10, room: r }; }
+  return { x: W / 2, y: 40 };
+}
+function placePanel() {
+  if (!S.panel || pEl.hidden) return;
+  const A = anchorOf(S.panel), pw = L.phone ? W - 24 : 304;
+  pEl.style.width = pw + 'px';
+  const ph = pEl.offsetHeight; let left, top;
+  if (L.phone) { left = 12; top = A.y + 22; if (top + ph > H - 8) top = Math.max(8, A.y - 22 - ph); }
+  else if (A.room) { left = A.room.x + A.room.w + 10; if (left + pw > W - 10) left = A.room.x - 10 - pw; left = clamp(left, 10, W - pw - 10); top = clamp(A.room.y, 10, Math.max(10, H - ph - 10)); }
+  else { left = A.x + 26; if (left + pw > W - 10) left = A.x - 26 - pw; left = clamp(left, 10, W - pw - 10); top = clamp(A.y - 44, 10, Math.max(10, H - ph - 10)); }
+  pEl.style.left = left + 'px'; pEl.style.top = top + 'px';
+}
+pEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.close) return closePanel();
+  if (b.dataset.agent) return openAgent(byId(+b.dataset.agent));
+  if (b.dataset.ember != null && S.panel && S.panel.type === 'room') { const rep = ROOM[S.panel.id].embers[+b.dataset.ember]; if (rep) openReport(rep); return; }
+  const act = b.dataset.act;
+  if (act === 'talk') toast('Talk opens a reply box here. What you type goes into this agent’s terminal.');
+  else if (act === 'term') toast('Opens this agent’s live terminal, drawn by Bevy.');
+  else if (act === 'transcript') toast('Opens the full session log in your viewer. Live never shows raw logs.');
+  else if (act === 'issue') toast('Opens the issue on GitHub.');
+});
+let holdT = null;
+pEl.addEventListener('pointerdown', (e) => {
+  const b = e.target.closest('[data-act="stop"]'); if (!b) return;
+  b.classList.add('holding');
+  holdT = setTimeout(() => { holdT = null; const a = S.panel && S.panel.type === 'agent' ? byId(S.panel.id) : null; if (a && a.alive) { log(a, 'You stopped it'); finish(a, 'Stopped'); } }, 900);
+});
+const cancelHold = () => { if (holdT) { clearTimeout(holdT); holdT = null; } pEl.querySelectorAll('.holding').forEach((x) => x.classList.remove('holding')); };
+['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => pEl.addEventListener(ev, cancelHold));
+
+/* ---------- peek, toast, pointer, keys ---------- */
+function peekAt(text, x, y) { peekEl.textContent = text; peekEl.hidden = false; const w = peekEl.offsetWidth; peekEl.style.left = clamp(x - w / 2, 6, Math.max(6, W - w - 6)) + 'px'; peekEl.style.top = Math.max(6, y - 40) + 'px'; }
+function showPeek(a) { if (!a) { peekEl.hidden = true; return; } peekAt(a.name + ' · ' + STATE_NAME[a.state] + ' · ' + a.now, a.x, a.y - a.r); }
+let toastT = 0;
+function toast(msg) { toastEl.textContent = msg; toastEl.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => { toastEl.hidden = true; }, 2800); }
+function pt(e) { const b = cv.getBoundingClientRect(); return { x: e.clientX - b.left, y: e.clientY - b.top }; }
+function hitAgent(p) { let best = null, bd = 1e9; for (const a of S.agents) { if (!a.alive) continue; const d = Math.hypot(a.x - p.x, a.y - p.y); if (d < a.r + 8 && d < bd) { bd = d; best = a; } } return best; }
+function hitEmber(p) { for (const r of ROOMS) for (const em of r.em) if (Math.hypot(em.x - p.x, em.y - p.y) < 8) return em; return null; }
+function hitRoom(p) { return ROOMS.find((r) => p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h) || null; }
+function hitQuiet(p) { return L.quiet.find((q) => p.x >= q.x && p.x <= q.x + q.w && p.y >= q.y && p.y <= q.y + q.h) || null; }
+cv.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'touch') return;
+  const p = pt(e), a = hitAgent(p), em = a ? null : hitEmber(p);
+  S.hover = a ? a.id : null;
+  cv.style.cursor = (a || em || hitQuiet(p) || hitRoom(p)) ? 'pointer' : 'default';
+  if (a && !(S.panel && S.panel.type === 'agent' && S.panel.id === a.id)) showPeek(a);
+  else if (em) peekAt(em.rep.name + ' · ' + em.rep.outcome + ' · ' + em.rep.result, em.x, em.y);
+  else showPeek(null);
+});
+cv.addEventListener('pointerleave', () => { S.hover = null; showPeek(null); });
+cv.addEventListener('click', (e) => {
+  const p = pt(e), a = hitAgent(p);
+  if (a) return openAgent(a);
+  const em = hitEmber(p); if (em) { showPeek(null); return openReport(em.rep); }
+  const q = hitQuiet(p);
+  if (q) return toast(q.name.charAt(0) === '+' ? 'More quiet projects. Each wakes into a room when an agent starts there.' : q.name + ' is quiet: no agent in 24 hours. It wakes into a room when one starts.');
+  if (Math.hypot(p.x - L.ring.x, p.y - L.ring.y) < L.ring.r + 6) return toast('Your ring counts the cards that wait on you. The card beside it is the one to answer now.');
+  const r = hitRoom(p); if (r) return openRoom(r);
+  closePanel();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const tg = e.target, tag = tg && tg.tagName ? tg.tagName.toLowerCase() : '';
+  if (tag === 'input' || tag === 'textarea') { if (e.key === 'Escape') tg.blur(); return; }
+  if (e.key === 'Escape') { if (S.panel) { closePanel(); e.preventDefault(); } return; }
+  if (!S.kbd) return;
+  if (tag === 'button' && (e.key === 'Enter' || e.key === ' ')) return;
+  const c = curCard(); if (!c) return;
+  if (e.key === 'Enter' || e.key === '1') {
+    e.preventDefault();
+    if (c.kind === 'Talk' && e.key === 'Enter') { const r = $('#reply'); if (r) { r.focus(); return; } }
+    answer(c, 0);
+  } else if (e.key === '2' || e.key === '3') { const i = +e.key - 1; if (c.options[i] && !c.options[i].talk) { e.preventDefault(); answer(c, i); } }
+  else if (e.key === 't' || e.key === 'T') { e.preventDefault(); startTalk(c); }
+  else if (e.key === ' ') { e.preventDefault(); const a = byId(c.agents[0]); if (a && a.alive) openAgent(a); else openRoom(ROOM[c.room]); }
+  else if (e.key === 'ArrowDown') { e.preventDefault(); later(c); }
+});
+
+/* ---------- top line and replay ---------- */
+function narr() {
+  const live = alive(), rooms = new Set(live.map((a) => a.room)).size, w = active().length, stuck = live.filter((a) => a.stuck).length;
+  let best = ROOMS[0], bn = -1; ROOMS.forEach((r) => { const n = live.filter((a) => a.room === r.id).length; if (n > bn) { bn = n; best = r; } });
+  const mins = Math.max(1, Math.round(active().reduce((s, c) => s + KIND[c.kind].min, 0)));
+  narrEl.textContent = clock() + '  ' + live.length + ' agents in ' + rooms + ' rooms. ' + (w ? w + (w === 1 ? ' card' : ' cards') + ' for you, about ' + mins + ' min.' : 'Nothing needs you.') + (stuck ? ' ' + stuck + ' stuck, Mahmut Hoca is on it.' : '') + ' Busiest: ' + best.name + '.';
+}
+replayBtn.addEventListener('click', () => { if (S.replay) return; S.replay = { t0: S.rt, dur: 7, tally: Object.assign({}, S.tally) }; S.speed = 22; replayBtn.disabled = true; repEl.hidden = false; tickReplay(); });
+function tickReplay() {
+  const R = S.replay; if (!R) return;
+  const k = clamp((S.rt - R.t0) / R.dur, 0, 1), m = Math.round(430 + 120 * k);
+  const hh = String(Math.floor(m / 60)).padStart(2, '0'), mm = String(m % 60).padStart(2, '0');
+  const d = (key) => S.tally[key] - R.tally[key];
+  repEl.innerHTML = '<div class="rp-top"><b>While you were away</b><span>07:10 → ' + hh + ':' + mm + '</span></div><div class="rp-bar"><i style="transform:scaleX(' + k.toFixed(3) + ')"></i></div><div class="rp-tally">' + d('started') + ' started · ' + d('done') + ' done · ' + d('failed') + ' failed · ' + active().length + ' wait on you · sample replay</div>';
+  if (k >= 1) { S.speed = 1; S.replay = null; replayBtn.disabled = false; setTimeout(() => { if (!S.replay) repEl.hidden = true; }, 3500); }
+}
+
+/* ---------- loop and start ---------- */
+let last = performance.now();
+function frame(now) {
+  const rdt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!document.hidden && S.inView && W) { S.rt += rdt; step(rdt * S.speed); moveDots(rdt * (S.speed > 1 ? 2.2 : 1)); draw(); }
+  requestAnimationFrame(frame);
+}
+setInterval(() => {
+  if (document.hidden || !W) return;
+  updateCard(); refreshPanel(false); narr();
+  if (S.panel && S.panel.type === 'room') { const sig = roomSig(S.panel.id); if (sig !== S.roomSig) { S.roomSig = sig; renderPanel(); } }
+}, 500);
+setInterval(tickReplay, 200);
+if ('IntersectionObserver' in window) new IntersectionObserver((es) => { const en = es[es.length - 1]; S.inView = en.isIntersecting; S.kbd = en.intersectionRatio >= 0.3; }, { threshold: [0, 0.3, 0.6] }).observe(stage);
+if ('ResizeObserver' in window) new ResizeObserver(() => { const w = Math.round(stage.clientWidth); if (w && w !== W) { layout(); S.agents.forEach((a) => { a.placed = false; }); moveDots(0); placePanel(); } }).observe(stage);
+else window.addEventListener('resize', () => { layout(); S.agents.forEach((a) => { a.placed = false; }); });
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => { layout(); S.agents.forEach((a) => { a.placed = false; }); moveDots(0); renderCard(); placePanel(); });
+
+seed(); S.flights = []; layout(); moveDots(0); renderCard(); narr();
+if (W >= 1100) { const k = S.agents.find((a) => a.name === 'Köroğlu'); if (k) openAgent(k); }
+draw();
+requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
