@@ -50,6 +50,7 @@ import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
 import type { SupportHandle } from "./features/support";
 import { mountReview } from "./features/review";
+import { mountLive, type LiveHandle } from "./features/live";
 import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import { moduleGet, modulePost } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
@@ -351,6 +352,9 @@ let supportLoading: Promise<SupportHandle> | null = null;
 let supportActive = false;
 let reviewActive = false;
 let review: ReturnType<typeof mountReview>;
+/** Every agent on this Mac, drawn by Bevy. Mounted at boot, polled only while open. */
+let live: LiveHandle;
+let liveActive = false;
 /** Every agent session, reported or not, read from each agent's own store. */
 let history: HistoryHandle;
 let historyActive = false;
@@ -729,6 +733,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   exitTerminals();
   // Whatever took the glass has handed it back — the project chrome is the screen again. Said
   // here once rather than in each drop*(), which do not know what replaces them.
@@ -1194,6 +1199,7 @@ function showSettings(): void {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   settingsActive = true;
   mainZone().hidden = true;
   el("settingsScreen").hidden = false;
@@ -1242,6 +1248,7 @@ function showTerminals(at?: number): void {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   if (terminalsActive) {
     if (at !== undefined) terminals.select(at);
     return;
@@ -1269,6 +1276,7 @@ function showHome(): void {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   // The workspace comes down properly — the deck takes its panes back before Home takes the glass.
   if (terminalsActive) exitTerminals();
   if (homeActive) return;
@@ -1304,6 +1312,7 @@ function showNotebook(): void {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   if (notebookActive) return;
   notebookActive = true;
   mainZone().hidden = true;
@@ -1338,6 +1347,9 @@ function dropNotebook(): void {
 
 /** Project desk reads release evidence and project memory directly. */
 function showSprint(): void {
+  dropSupport();
+  dropReview();
+  dropLive();
   dropHistory();
   dropSettings();
   dropChat();
@@ -1388,6 +1400,7 @@ function showOpsMap(): void {
   dropSprint();
   dropSupport();
   dropReview();
+  dropLive();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (opsMapActive) return;
@@ -1437,6 +1450,7 @@ function showBoard(): void {
   dropSprint();
   dropSupport();
   dropReview();
+  dropLive();
   dropOpsMap();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1563,6 +1577,7 @@ async function launchScout(
 function showSupport(): void {
   dropHistory();
   dropReview();
+  dropLive();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1607,6 +1622,7 @@ function dropSupport(): void {
  *  that land while you are elsewhere. From a project, it goes straight into that project's work. */
 function showReview(projectId?: string): void {
   if (projectId && review.openProject(projectId)) return;
+  dropLive();
   dropSupport();
   dropHistory();
   dropSettings();
@@ -1633,11 +1649,41 @@ function dropReview(): void {
   el("reviewScreen").hidden = true;
 }
 
+/** Live: every agent on this Mac in its project's room, and who started whom. */
+function showLive(): void {
+  dropSupport();
+  dropReview();
+  dropHistory();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  dropOpsMap();
+  dropBoard();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  if (liveActive) return;
+  liveActive = true;
+  mainZone().hidden = true;
+  el("liveScreen").hidden = false;
+  live.open();
+  paintNav();
+  paintProjects();
+}
+
+function dropLive(): void {
+  if (!liveActive) return;
+  live.clear();
+  liveActive = false;
+  el("liveScreen").hidden = true;
+}
+
 /** History: every agent session across the portfolio, reported or not. A screen like Support —
  *  one list for one person — opened from its row, from Home, or from an appgeapanel:// link. */
 function showHistory(focus?: { query?: string; session?: string }): void {
   dropSupport();
   dropReview();
+  dropLive();
   dropSettings();
   dropChat();
   dropNotebook();
@@ -1737,6 +1783,9 @@ function followAppLink(url: string): void {
     case "review":
       showReview();
       return;
+    case "live":
+      showLive();
+      return;
     case "manager":
       chat.showCpo();
       return;
@@ -1795,6 +1844,7 @@ function showChat(): void {
   dropSupport();
   dropHistory();
   dropReview();
+  dropLive();
   chatActive = true;
   mainZone().hidden = true;
   paintNav();
@@ -1864,6 +1914,7 @@ const offProject = (): boolean =>
   boardActive ||
   supportActive ||
   reviewActive ||
+  liveActive ||
   historyActive;
 
 /** Navigation and run actions share the project selected on the visible surface. */
@@ -2148,9 +2199,10 @@ function paintNav(): void {
   el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
   // and only the row you are actually on carries the accent.
-  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || historyActive);
+  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || liveActive || historyActive);
   el("historyButton").classList.toggle("is-on", historyActive);
   el("reviewButton").classList.toggle("is-on", reviewActive);
+  el("liveButton").classList.toggle("is-on", liveActive);
   el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
@@ -4194,6 +4246,7 @@ async function boot(): Promise<void> {
     },
   });
 
+  live = mountLive(el("liveScreen"));
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
     projectPath: (id) => state(id)?.project.path ?? null,
@@ -4456,6 +4509,7 @@ async function boot(): Promise<void> {
   el("boardButton").addEventListener("click", () => showBoard());
   el("supportButton").addEventListener("click", () => showSupport());
   el("reviewButton").addEventListener("click", () => showReview());
+  el("liveButton").addEventListener("click", () => showLive());
   el("historyButton").addEventListener("click", () => showHistory());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.

@@ -1,0 +1,121 @@
+/**
+ * Live — the stage Bevy draws, with its words in HTML on top, and the tree below it.
+ *
+ * The stage is always dark: its tokens do not flip in the light theme. Everything outside the
+ * stage uses Panel's own tokens and stays quiet.
+ *
+ * MOTION: none in CSS. Bevy draws the stage. Labels move with `transform` only.
+ */
+
+.live[hidden] { display: none; }
+
+.live {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  background: var(--bg);
+  padding: 18px 22px 0;
+  gap: 12px;
+}
+
+.live-bar {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.live-title { font-size: var(--text-lg); font-weight: 700; color: var(--ink); }
+.live-tally {
+  font-size: var(--text-md);
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.live-body {
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding-bottom: 22px;
+}
+
+.live-stage {
+  position: relative;
+  min-height: 160px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--live-stage);
+}
+.live-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  outline: none;
+}
+.live-labels {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.live-room-name,
+.live-dot-name {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live-room-name {
+  font-size: var(--text-md);
+  font-weight: 650;
+  color: var(--live-ink);
+}
+.live-dot-name {
+  max-width: 96px;
+  font-size: var(--text-xs);
+  color: var(--live-ink-dim);
+  pointer-events: auto;
+}
+.live-note {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 12px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--live-ink-dim);
+}
+
+.live-h2 {
+  margin: 0 0 8px;
+  font-size: var(--text-md);
+  font-weight: 650;
+  color: var(--ink);
+}
+.live-list { list-style: none; margin: 0; padding: 0; }
+.live-row {
+  display: grid;
+  grid-template-columns: 10px minmax(90px, 160px) minmax(0, 1fr) auto minmax(0, 200px);
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-md);
+}
+.live-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.live-state {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.live-state.is-busy { background: var(--live-work); }
+.live-who { color: var(--ink); font-weight: 600; }
+.live-what, .live-via { color: var(--ink-dim); }
+.live-when { color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.live-empty { padding: 10px 0; font-size: var(--text-md); color: var(--ink-dim); }

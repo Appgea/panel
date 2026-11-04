@@ -343,6 +343,11 @@
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 16 5-5 4 4 2-2 5 5"/><circle cx="15.5" cy="9" r="1.5"/></svg></span>
             Review <span id="reviewBadge" class="nav-badge" hidden>0</span>
           </button>
+          <!-- Every agent on this Mac, live, by project. The first section Bevy draws. -->
+          <button id="liveButton" class="nav-row" type="button" title="Live: every agent on this Mac">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><path d="M7.8 7.8a6 6 0 0 0 0 8.4M16.2 7.8a6 6 0 0 1 0 8.4M5 5a10 10 0 0 0 0 14M19 5a10 10 0 0 1 0 14"/></svg></span>
+            Live
+          </button>
         </nav>
 
         <!-- Project memory and private notes. -->
@@ -444,6 +449,7 @@
            the queue is one queue, and splitting it per project would make eleven of it. -->
       <section id="supportScreen" class="support" hidden></section>
       <section id="reviewScreen" class="review" hidden></section>
+      <section id="liveScreen" class="live" hidden></section>
       <!-- HISTORY: every agent session across the portfolio, from each agent's own store. -->
       <section id="historyScreen" class="history" hidden></section>
 

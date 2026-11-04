@@ -83,6 +83,7 @@ export function placeLabel(place: Place): { kind: string; name: string } {
 export type AppLink =
   | { to: "home" }
   | { to: "review" }
+  | { to: "live" }
   | { to: "manager" }
   | { to: "history"; query?: string; session?: string }
   | { to: "project"; project: string; place?: Place }
@@ -107,6 +108,7 @@ export function parseAppLink(url: string): AppLink | null {
   switch (verb) {
     case "home":
     case "review":
+    case "live":
     case "manager":
       return id ? null : { to: verb };
     case "history": {

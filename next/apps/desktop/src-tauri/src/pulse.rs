@@ -61,7 +61,7 @@ pub fn standings() -> Vec<Standing> {
 ///
 /// `dir` is relative to the company root. The suffix match covers an ops tree that lives
 /// somewhere else, the same fallback the sprint board uses.
-fn owning_app<'a>(path: &Path, root: &Path, apps: &'a [PortfolioApp]) -> Option<&'a PortfolioApp> {
+pub(crate) fn owning_app<'a>(path: &Path, root: &Path, apps: &'a [PortfolioApp]) -> Option<&'a PortfolioApp> {
     path.ancestors().find_map(|folder| {
         apps.iter().find(|app| {
             !app.dir.is_empty() && (folder == root.join(&app.dir) || folder.ends_with(&app.dir))

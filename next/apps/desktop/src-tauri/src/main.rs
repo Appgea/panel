@@ -14,6 +14,7 @@ mod flags;
 mod history;
 mod launch;
 mod leases;
+mod live;
 mod made;
 mod modules;
 mod notebook;
@@ -1034,6 +1035,12 @@ async fn project_dashboard(project: String) -> Result<GitState, String> {
 #[tauri::command]
 async fn ops_map() -> Result<ops_map::OpsMap, String> {
     off_main(ops_map::read).await
+}
+
+/// Every agent running on this Mac, for the Live section. Polled only while Live is open.
+#[tauri::command]
+async fn live_world() -> Result<live::World, String> {
+    off_main(|| Ok(live::scan())).await
 }
 
 /// Each project's row in its company's `portfolio.yaml`, for the sidebar's lanes.
@@ -4373,6 +4380,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            live_world,
             launch_context,
             manager_project,
             main_folder_project,

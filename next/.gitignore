@@ -2,6 +2,8 @@ target/
 node_modules/
 dist/
 apps/desktop/src-tauri/gen/
+# Live's Bevy view, built from apps/live by ui/scripts/build-live.mjs on every UI build.
+apps/desktop/ui/public/live/
 .DS_Store
 *.log
 # A saved `board json` (?real=1) and review deck (?swipe=1&real=1) for the board harness. Real issue text, never committed.

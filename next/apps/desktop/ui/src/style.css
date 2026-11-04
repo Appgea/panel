@@ -10,6 +10,9 @@
  *   - Section labels in Title Case, not tracked capitals.
  *   - Controls answer in place. Nothing lifts on hover.
  *   - No XP, streaks or quests. Plain words: issues, sessions, done.
+ *   - One exception: Live's stage. There light means an agent's state, so its dots glow on an
+ *     always-dark stage. Owner, 2026-11-04: "Agents must be cool small glowy dots, bold."
+ *     Everything around the stage stays quiet. The glow lives in Bevy, never in CSS.
  * A new colour or a hard-coded hex in a feature file is the drift this rule exists to stop.
  *
  * THE MOTION BUDGET — this is a hard rule, not a preference. The whole reason Appgea Panel
@@ -50,6 +53,13 @@
      label. Dark hues are bright, so this is near-black; the light theme flips it to white
      (see the light block). Anything painting text on a --m-* / --accent fill reads this. */
   --on-accent: #08090d;
+
+  /* Live's stage is dark in both themes, because glow needs a dark room. `--live-stage` is also
+     Bevy's clear colour in apps/live/src/lib.rs. Change both together. */
+  --live-stage: #0a0d13;
+  --live-ink: #e6eaf1;
+  --live-ink-dim: #8e98ab;
+  --live-work: #6fe7ff;
 
   /* ---- Module hues ----
    * Every module wears the one accent. Ten module hues made each screen its own style, and the
