@@ -14,6 +14,7 @@ watches them, tells you which one needs you, and hands you the few files you hav
 | find a config file/key, per-project manifest, or ops-tree file | [CONFIGURATION.md](CONFIGURATION.md) |
 | write or run an extension (module) | [MODULES.md](MODULES.md) |
 | the Git tab's design | [next/GIT.md](../next/GIT.md) |
+| change how Panel looks: the quiet native Mac style and the motion budget | the header of [style.css](../next/apps/desktop/ui/src/style.css) |
 | contribute / dev mode | [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ## One-minute orientation
