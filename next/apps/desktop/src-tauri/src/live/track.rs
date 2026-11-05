@@ -75,8 +75,18 @@ pub struct Track {
     pub last_ms: u64,
     /// The board issue the agent last named, like `#1162`. The view looks its title up.
     pub issue: Option<u32>,
+    /// Paths the agent read, wrote or named in a command, newest last. They place it in the
+    /// project it works on (mod.rs `Rooms::area`). Never sent to the view.
+    pub paths: VecDeque<String>,
+    /// The transcript this was read from. Its subagents sit in a folder beside it.
+    pub path: PathBuf,
+    /// A subagent's own transcript, where every record is a sidechain.
+    side: bool,
     read_len: u64,
 }
+
+/// Paths kept per agent for placing it.
+const PATHS: usize = 30;
 
 /// Which transcript format a session writes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,7 +139,7 @@ impl Track {
             "user" | "assistant" => {}
             _ => return,
         }
-        if record["isSidechain"] == true {
+        if record["isSidechain"] == true && !self.side {
             return;
         }
         let at = record["timestamp"].as_str().and_then(parse_ms).unwrap_or(self.last_ms);
@@ -160,7 +170,11 @@ impl Track {
                 "text" => self.said(block["text"].as_str().unwrap_or_default()),
                 "tool_use" => {
                     let id = block["id"].as_str().unwrap_or_default().to_string();
-                    let Some(step) = step(block["name"].as_str().unwrap_or_default(), &block["input"], at) else { continue };
+                    let input = &block["input"];
+                    for p in input["command"].as_str().map(path_hints).unwrap_or_default().into_iter().chain(input["file_path"].as_str().map(str::to_string)) {
+                        self.saw_path(p);
+                    }
+                    let Some(step) = step(block["name"].as_str().unwrap_or_default(), input, at) else { continue };
                     if let Some(f) = step.file.as_ref().filter(|_| step.station == Station::Build) {
                         if !self.files.contains(f) {
                             self.files.push(f.clone());
@@ -176,6 +190,14 @@ impl Track {
                 _ => {}
             }
         }
+    }
+
+    pub(crate) fn saw_path(&mut self, p: String) {
+        self.paths.retain(|x| *x != p);
+        if self.paths.len() >= PATHS {
+            self.paths.pop_front();
+        }
+        self.paths.push_back(p);
     }
 
     fn said(&mut self, text: &str) {
@@ -223,7 +245,11 @@ impl Track {
             ("response_item", "custom_tool_call" | "function_call" | "local_shell_call") => {
                 let id = p["call_id"].as_str().unwrap_or_default().to_string();
                 let station = self.done.back().map(|s| s.station).unwrap_or(Station::Build);
-                let verb = super::verbs::of_tool(p["name"].as_str().unwrap_or("shell"), codex_command(p).as_deref());
+                let command = codex_command(p);
+                for hint in command.as_deref().map(path_hints).unwrap_or_default() {
+                    self.saw_path(hint);
+                }
+                let verb = super::verbs::of_tool(p["name"].as_str().unwrap_or("shell"), command.as_deref());
                 let step = Step { at_ms: at, label: CODEX_COMMAND.into(), station, file: None, helper: false, asks: false, verb };
                 if !id.is_empty() && !self.open.iter().any(|(o, _)| *o == id) {
                     self.open.push((id, step));
@@ -294,6 +320,87 @@ fn step(name: &str, input: &Value, at_ms: u64) -> Option<Step> {
     };
     let verb = super::verbs::of_tool(name, s("command"));
     Some(Step { at_ms, label: clip(&label, 90), station, file, helper, asks, verb })
+}
+
+/// The absolute paths a shell command names, like `cd ~/x/tavla && …`. Only the paths are kept,
+/// never the command, so no secret rides along.
+pub(crate) fn path_hints(command: &str) -> Vec<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    command
+        .split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | ';' | '&' | '|' | '(' | ')' | '=' | '`'))
+        .filter_map(|t| {
+            let t = t.trim_end_matches([',', ':']);
+            if let Some(rest) = t.strip_prefix("~/") {
+                Some(format!("{home}/{rest}"))
+            } else {
+                (t.starts_with('/') && t.len() > 1 && !t.starts_with("/dev/")).then(|| t.to_string())
+            }
+        })
+        .take(4)
+        .collect()
+}
+
+/// A subagent that still runs, read from `<session>/subagents/agent-<id>.jsonl` and its meta file.
+#[derive(Debug, Clone)]
+pub struct Sub {
+    pub id: String,
+    /// The agent type, like `Explore` or `general-purpose`.
+    pub kind: Option<String>,
+    /// What the parent asked it to do, in the parent's own words.
+    pub what: Option<String>,
+    pub model: Option<String>,
+    pub started_ms: Option<u64>,
+    pub track: Track,
+}
+
+/// A subagent whose meta never said `finished` counts as gone once its transcript is this quiet,
+/// so a crashed one does not haunt the map.
+const SUB_QUIET_MS: u64 = 15 * 60 * 1000;
+
+fn subs_cache() -> &'static Mutex<HashMap<PathBuf, Track>> {
+    static SUBS: OnceLock<Mutex<HashMap<PathBuf, Track>>> = OnceLock::new();
+    SUBS.get_or_init(Default::default)
+}
+
+/// The running subagents of each transcript in `parents`. A finished one costs one small meta
+/// read. A running one's transcript is followed like any other, from the bytes added since.
+pub fn subs(parents: &[PathBuf], now_ms: u64) -> HashMap<PathBuf, Vec<Sub>> {
+    let mut cache = subs_cache().lock().unwrap_or_else(|p| p.into_inner());
+    let mut live = std::collections::HashSet::new();
+    let mut out = HashMap::new();
+    let ms = |t: std::time::SystemTime| t.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).ok();
+    for parent in parents {
+        let Ok(entries) = std::fs::read_dir(parent.with_extension("").join("subagents")) else { continue };
+        let mut found = Vec::new();
+        for e in entries.flatten() {
+            let path = e.path();
+            let Some(id) = path.file_name().and_then(|n| n.to_str()).and_then(|n| n.strip_prefix("agent-")).and_then(|n| n.strip_suffix(".jsonl")).map(str::to_string) else { continue };
+            let Ok(meta_fs) = e.metadata() else { continue };
+            if now_ms.saturating_sub(meta_fs.modified().ok().and_then(ms).unwrap_or(0)) > SUB_QUIET_MS {
+                continue;
+            }
+            let meta: Value = std::fs::read(path.with_extension("meta.json")).ok().and_then(|raw| serde_json::from_slice(&raw).ok()).unwrap_or(Value::Null);
+            if meta["finished"] == true {
+                continue;
+            }
+            let track = cache.entry(path.clone()).or_insert_with(|| Track { side: true, ..Track::default() });
+            refresh(track, &path, Kind::Claude);
+            live.insert(path.clone());
+            let text = |k: &str| meta[k].as_str().map(str::to_string).filter(|s| !s.is_empty());
+            found.push(Sub {
+                kind: text("agentType"),
+                what: text("description"),
+                model: track.model.clone().or_else(|| text("model")),
+                started_ms: meta_fs.created().ok().and_then(ms),
+                track: track.clone(),
+                id,
+            });
+        }
+        found.sort_by(|a, b| a.started_ms.cmp(&b.started_ms).then(a.id.cmp(&b.id)));
+        out.insert(parent.clone(), found);
+    }
+    cache.retain(|p, _| live.contains(p));
+    out
 }
 
 /// The shell text of a Codex call: `arguments` is a JSON string with `cmd` or a `command`
@@ -398,6 +505,7 @@ pub fn read(home: &Path, sessions: &[(String, Kind)]) -> (HashMap<String, Track>
             all.insert(session.clone(), (path, *kind, Track::default()));
         }
         let (path, kind, track) = all.get_mut(session).expect("inserted above");
+        track.path = path.clone();
         refresh(track, path, *kind);
         out.insert(session.clone(), track.clone());
     }
@@ -436,7 +544,8 @@ fn find_codex(home: &Path, session: &str) -> Option<PathBuf> {
 pub(crate) fn refresh(track: &mut Track, path: &Path, kind: Kind) {
     let len = path.metadata().map(|m| m.len()).unwrap_or(0);
     if len < track.read_len {
-        *track = Track::default();
+        // Rewritten from the start. What says how to read it stays.
+        *track = Track { side: track.side, path: std::mem::take(&mut track.path), ..Track::default() };
     }
     if len == track.read_len {
         return;
@@ -538,6 +647,30 @@ mod tests {
         assert_eq!(t.recent(5)[0].label, "Run the dice tests");
         assert!(!format!("{:?}", t.recent(5)).contains("TOKEN"));
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// A background subagent's launch call returns at once, so only its own transcript shows it.
+    #[test]
+    fn a_running_subagent_is_read_from_its_own_transcript_and_a_finished_one_is_not() {
+        let dir = std::env::temp_dir().join(format!("live-subs-{}", std::process::id()));
+        let subs_dir = dir.join("s1").join("subagents");
+        std::fs::create_dir_all(&subs_dir).unwrap();
+        let parent = dir.join("s1.jsonl");
+        std::fs::write(&parent, "").unwrap();
+        let line = r#"{"isSidechain":true,"type":"assistant","timestamp":"2026-11-05T10:00:00Z","message":{"model":"claude-haiku-5-5","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"description":"List the live sources","command":"ls ~/x/panel"}}]}}"#;
+        for (id, meta) in [("a1", r#"{"agentType":"Explore","description":"Probe Live"}"#), ("a2", r#"{"agentType":"Plan","finished":true}"#)] {
+            std::fs::write(subs_dir.join(format!("agent-{id}.jsonl")), format!("{line}\n")).unwrap();
+            std::fs::write(subs_dir.join(format!("agent-{id}.meta.json")), meta).unwrap();
+        }
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64;
+        let got = subs(&[parent.clone()], now);
+        let _ = std::fs::remove_dir_all(&dir);
+        let list = &got[&parent];
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].kind.as_deref(), Some("Explore"));
+        assert_eq!(list[0].what.as_deref(), Some("Probe Live"));
+        assert_eq!(list[0].track.now().map(|s| s.label), Some("List the live sources".into()));
+        assert!(list[0].track.paths.iter().any(|p| p.ends_with("/x/panel")));
     }
 
     #[test]

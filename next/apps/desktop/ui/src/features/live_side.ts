@@ -102,8 +102,9 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const r = row(key, () => ctx.select({ kind: "agent", id: a.id }), a.id);
     r.dataset.key = key;
     const me = ctx.whoOf(a);
-    // Under its parent, "Helper of Zenne" says the parent twice.
-    const title = depth && me.title.startsWith("Helper of ") ? "Helper" : me.title;
+    // Under its parent, "Helper of Zenne" says the parent twice. A subagent is named by the job
+    // its parent gave it, like "#1332 HUD terms vs glossary", and its role moves to the hover.
+    const title = !depth ? me.title : a.helperKind ? (a.task ?? me.role) : me.title.startsWith("Helper of ") ? "Helper" : me.title;
     const room = ctx.roomName(ctx.roomOf(a));
     const iss = ctx.issueOf(a);
     const what = a.state === "idle" ? (iss ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? "Idle")) : doing(a);

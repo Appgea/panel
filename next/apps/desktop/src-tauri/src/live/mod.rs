@@ -11,6 +11,7 @@ mod embers;
 pub use embers::stopped_by_owner;
 mod jobs;
 mod mac;
+mod opencode;
 mod track;
 mod verbs;
 
@@ -107,6 +108,8 @@ pub struct Agent {
     pub panel: Option<String>,
     /// The board issue it last named.
     pub issue: Option<u32>,
+    /// Set on a subagent: its type, like `Explore`. Its `parent` is the agent that started it.
+    pub helper_kind: Option<String>,
 }
 
 /// A room is a project, or HQ, the home folder or Elsewhere.
@@ -192,6 +195,7 @@ pub fn scan() -> World {
     fold_wrappers(&mut agents, &procs);
     let fleet = fleet_workers(&home);
     let mut producers: HashMap<String, u32> = HashMap::new();
+    let mut claims: HashMap<String, (u32, String)> = HashMap::new();
     for a in &mut agents {
         let Some(w) = a.pid.and_then(|p| fleet.get(&p)) else { continue };
         if a.session.is_none() {
@@ -204,9 +208,25 @@ pub fn scan() -> World {
         if let Some(p) = w.producer {
             producers.insert(a.id.clone(), p);
         }
+        if let Some((n, title)) = &w.claim {
+            claims.insert(a.id.clone(), (*n, title.clone()));
+        }
     }
-    for (session, cwd, started, headless, busy) in codex_rollouts(&home) {
-        if agents.iter().any(|a| a.harness == Harness::Codex && (a.cwd == cwd || a.session.as_deref() == Some(session.as_str()))) {
+    let rollouts = codex_rollouts(&home);
+    for (session, cwd, started, headless, busy) in rollouts.iter().cloned() {
+        if agents.iter().any(|a| a.harness == Harness::Codex && a.session.as_deref() == Some(session.as_str())) {
+            continue;
+        }
+        // A Codex process names no session. When it is the only one in its folder and the folder
+        // has only this fresh rollout, that rollout is its transcript. Anything less is a guess.
+        let bare = |a: &Agent| a.harness == Harness::Codex && a.session.is_none() && a.cwd == cwd;
+        if agents.iter().filter(|a| bare(a)).count() == 1 && rollouts.iter().filter(|r| r.1 == cwd).count() == 1 {
+            if let Some(a) = agents.iter_mut().find(|a| bare(a)) {
+                a.session = Some(session);
+            }
+            continue;
+        }
+        if agents.iter().any(|a| a.harness == Harness::Codex && a.cwd == cwd) {
             continue;
         }
         let mut a = blank(format!("codex:{session}"), None, Harness::Codex, headless, Some(session), cwd, started, busy);
@@ -228,6 +248,18 @@ pub fn scan() -> World {
         .collect();
     let (tracks, ended) = track::read(&home, &sessions);
     let now = now_ms();
+    let wants: Vec<opencode::Want> = agents
+        .iter()
+        .filter(|a| a.harness == Harness::Opencode)
+        .map(|a| opencode::Want {
+            agent: a.id.clone(),
+            session: a.pid.and_then(|p| procs.get(&p)).and_then(|p| opencode::session_in_args(&p.args)),
+        })
+        .collect();
+    let oc = opencode::read(&wants, now);
+    let parents: Vec<PathBuf> = agents.iter().filter(|a| a.harness == Harness::Claude).filter_map(|a| tracks.get(a.session.as_ref()?)).map(|t| t.path.clone()).collect();
+    let subs = track::subs(&parents, now);
+    let mut helpers: Vec<Agent> = Vec::new();
     for a in &mut agents {
         if let Some(pid) = a.pid {
             let (parent, via) = lineage(pid, &procs, &by_pid);
@@ -240,10 +272,8 @@ pub fn scan() -> World {
         if folk.is_some() {
             a.name = folk;
         }
-        if a.room.is_empty() {
-            (a.room, a.room_name) = rooms.room_for(Path::new(&a.cwd));
-        }
-        let t = a.session.as_ref().and_then(|s| tracks.get(s));
+        let read = oc.get(&a.id);
+        let t = a.session.as_ref().and_then(|s| tracks.get(s)).or(read.map(|r| &r.track));
         let s = a.session.as_ref().and_then(|s| status.get(s));
         if let Some(t) = t {
             a.model = t.model.clone();
@@ -256,10 +286,35 @@ pub fn scan() -> World {
             a.files = t.files.iter().rev().take(40).cloned().collect();
             a.issue = t.issue;
         }
+        if let Some(r) = read {
+            a.session.get_or_insert_with(|| r.session.clone());
+            a.task = a.task.take().or_else(|| r.title.clone());
+        }
+        if let Some((n, title)) = claims.get(&a.id) {
+            // The claimed issue says more than a fleet session's stock title.
+            a.issue = Some(*n);
+            a.task = Some(title.clone());
+        }
+        if a.room.is_empty() {
+            (a.room, a.room_name) = rooms.area(a, t);
+        }
         (a.state, a.state_ms) = state_of(a, t, s, now);
+        let mine: Vec<(String, Option<String>, Option<String>, Option<String>, Option<u64>, &track::Track)> = match (t, read) {
+            (_, Some(r)) => r.subs.iter().map(|(id, title, st)| (id.clone(), None, title.clone(), st.model.clone(), None, st)).collect(),
+            (Some(t), None) => subs.get(&t.path).into_iter().flatten().map(|x| (x.id.clone(), x.kind.clone(), x.what.clone(), x.model.clone(), x.started_ms, &x.track)).collect(),
+            _ => Vec::new(),
+        };
+        // A foreground helper is an open step and a subagent file at once. Count it once.
+        a.helpers = a.helpers.saturating_sub(mine.len() as u32);
+        for (id, kind, what, model, started, st) in mine {
+            helpers.push(helper(a, id, kind, what, model, started, st, now));
+        }
     }
+    agents.extend(helpers);
     agents.sort_by(|a, b| a.room.cmp(&b.room).then(a.started_ms.cmp(&b.started_ms)).then(a.id.cmp(&b.id)));
-    let embers = embers::update(&agents, &ended, now);
+    // A subagent that ends is part of its parent's work, not news of its own.
+    let tops: Vec<Agent> = agents.iter().filter(|a| a.helper_kind.is_none()).cloned().collect();
+    let embers = embers::update(&tops, &ended, now);
     let pids: HashMap<u32, String> = agents.iter().filter_map(|a| Some((a.pid?, a.id.clone()))).collect();
     let mac = mac::read(&procs, &pids);
     let in_project = |p: &Path| crate::pulse::owning_app(p, &rooms.root, &rooms.apps).is_some();
@@ -288,6 +343,20 @@ struct FleetWorker {
     session: Option<String>,
     /// The process that started the fleet, when it says.
     producer: Option<u32>,
+    /// The issue it claimed, from the `#1068 claimed by …: <title>` line board prints in its log.
+    claim: Option<(u32, String)>,
+}
+
+/// The last issue a fleet worker's log says it claimed. Board prints the line near the top.
+fn claim_in_log(log: &Path) -> Option<(u32, String)> {
+    let mut head = String::new();
+    BufReader::new(fs::File::open(log).ok()?).take(64 << 10).read_to_string(&mut head).ok()?;
+    head.lines().rev().find_map(|l| {
+        let rest = l.trim().strip_prefix('#')?;
+        let (n, after) = rest.split_once(" claimed by ")?;
+        let title = after.split_once(": ").map(|(_, t)| t.trim().to_string()).filter(|t| !t.is_empty())?;
+        Some((n.parse().ok()?, title))
+    })
 }
 
 /// Running fleet workers by pid. Board writes these files. Without them, workers still show,
@@ -307,8 +376,10 @@ fn fleet_workers(home: &Path) -> HashMap<u32, FleetWorker> {
         let producer = v["producer_pid"].as_u64().and_then(|p| u32::try_from(p).ok());
         for w in v["workers"].as_array().into_iter().flatten().filter(|w| w["active"] == true) {
             let Some(pid) = w["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else { continue };
-            let session = w["log"].as_str().and_then(|log| codex_session_in_log(Path::new(log))).or_else(|| w["session"].as_str().map(str::to_string));
-            out.insert(pid, FleetWorker { kind: w["kind"].as_str().unwrap_or_default().to_string(), session, producer });
+            let log = w["log"].as_str().map(Path::new);
+            let session = log.and_then(codex_session_in_log).or_else(|| w["session"].as_str().map(str::to_string));
+            let claim = log.and_then(claim_in_log);
+            out.insert(pid, FleetWorker { kind: w["kind"].as_str().unwrap_or_default().to_string(), session, producer, claim });
         }
     }
     out
@@ -382,7 +453,31 @@ fn state_of(a: &Agent, t: Option<&track::Track>, s: Option<&ClaudeSession>, now:
 }
 
 fn agent(pid: u32, p: &Proc, harness: Harness, headless: bool, session: Option<String>, cwd: String, started: Option<u64>) -> Agent {
+    let started = started.or_else(|| p.age_s.map(|s| now_ms().saturating_sub(s * 1000)));
     blank(format!("pid:{pid}"), Some(pid), harness, headless, session, cwd, started, p.cpu >= BUSY_CPU)
+}
+
+/// A running subagent as an agent of its own, riding on `parent` in the parent's room.
+/// Its id is `<parent id>/<agent id>`.
+#[allow(clippy::too_many_arguments)]
+fn helper(parent: &Agent, id: String, kind: Option<String>, what: Option<String>, model: Option<String>, started: Option<u64>, t: &track::Track, now: u64) -> Agent {
+    let busy = now.saturating_sub(t.last_ms) < 60_000;
+    let mut h = blank(format!("{}/{id}", parent.id), None, parent.harness, true, None, parent.cwd.clone(), started.or(Some(t.last_ms).filter(|&m| m > 0)), busy);
+    h.parent = Some(parent.id.clone());
+    h.helper_kind = Some(kind.unwrap_or_else(|| "helper".into()));
+    h.room = parent.room.clone();
+    h.room_name = parent.room_name.clone();
+    h.model = model;
+    h.task = what.or_else(|| t.task());
+    h.now = t.now();
+    h.steps = t.recent(12);
+    h.step_count = t.steps;
+    h.last_text = t.last_text.clone();
+    h.helpers = t.helpers();
+    h.files = t.files.iter().rev().take(20).cloned().collect();
+    // With no session status, a step running means Work, words in the last minute Think.
+    (h.state, h.state_ms) = state_of(&h, Some(t), None, now);
+    h
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -413,6 +508,7 @@ fn blank(id: String, pid: Option<u32>, harness: Harness, headless: bool, session
         files: Vec::new(),
         panel: None,
         issue: None,
+        helper_kind: None,
     }
 }
 
@@ -770,6 +866,58 @@ impl Rooms {
         ("elsewhere".into(), "Elsewhere".into())
     }
 
+    /// Where an agent works, judged by its work and not its folder. Owner, 2026-11-05: "We
+    /// shouldn't rely on the folders to decide where they are. It is their operational area."
+    /// Each recent file it wrote counts 3, each path it read or named in a command 1, newer ones
+    /// more. Its folder adds 2, so it decides only a tie. With no path at all, an app named in
+    /// its task wins, and the folder comes last.
+    fn area(&self, a: &Agent, t: Option<&track::Track>) -> (String, String) {
+        let mut score: HashMap<String, (u32, String)> = HashMap::new();
+        let mut add = |path: &str, w: u32| {
+            // Skills and agent settings are how an agent works, not what it works on.
+            if ["/.appgeapanel/skills/", "/.claude/", "/.agents/", "/.codex/"].iter().any(|s| path.contains(s)) {
+                return;
+            }
+            let (key, name) = self.room_for(Path::new(path));
+            if key != "home" && key != "elsewhere" {
+                score.entry(key).or_insert((0, name)).0 += w;
+            }
+        };
+        if let Some(t) = t {
+            for (i, f) in t.files.iter().rev().take(12).enumerate() {
+                add(f, if i < 4 { 4 } else { 3 });
+            }
+            for (i, p) in t.paths.iter().rev().take(20).enumerate() {
+                add(p, if i < 6 { 2 } else { 1 });
+            }
+        }
+        add(&a.cwd, 2);
+        let worked = t.is_some_and(|t| !t.files.is_empty() || !t.paths.is_empty()) && score.values().any(|(s, _)| *s > 2);
+        if worked {
+            let best = score.into_iter().max_by(|x, y| x.1 .0.cmp(&y.1 .0).then_with(|| y.0.cmp(&x.0)));
+            if let Some((key, (_, name))) = best {
+                return (key, name);
+            }
+        }
+        if let Some(app) = a.task.as_deref().and_then(|task| self.named_in(task)) {
+            return (app.key.clone(), app.name.clone());
+        }
+        self.room_for(Path::new(&a.cwd))
+    }
+
+    /// The app a task names as a whole word, like "Cardly native iOS: parity pass". Longest name
+    /// first, so "Tavla Pro" beats "Tavla".
+    fn named_in(&self, task: &str) -> Option<&crate::sprints::PortfolioApp> {
+        let words: Vec<String> = task.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+        self.apps
+            .iter()
+            .filter(|app| {
+                let name: Vec<String> = app.name.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).map(str::to_lowercase).collect();
+                name.first().is_some_and(|n| n.len() >= 4) && words.windows(name.len()).any(|w| w == name.as_slice())
+            })
+            .max_by_key(|app| app.name.len())
+    }
+
     /// Every room an agent can stand in, in portfolio order: HQ first, the apps as
     /// `portfolio.yaml` lists them, then the home folder and Elsewhere. The view shows the ones
     /// with someone in them. A fleet worker in the company folder moves to its issue's app there.
@@ -806,6 +954,14 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `cargo test dump_live -- --ignored` writes this Mac's live world to /tmp/live.real.json.
+    #[test]
+    #[ignore]
+    fn dump_live() {
+        let w = scan();
+        std::fs::write("/tmp/live.real.json", serde_json::to_string_pretty(&w).unwrap()).unwrap();
+    }
 
     #[test]
     fn classify_tells_agents_from_their_servers() {
