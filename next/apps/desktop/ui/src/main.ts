@@ -14,7 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { icon } from "./icons";
-import { projectIconUrl, schemeOrigin } from "./project-assets";
+import { projectAssetUrl, projectIconUrl, schemeOrigin } from "./project-assets";
 import { withViewTransition } from "./motion";
 import { renderView } from "./registry";
 import { str } from "./views/dom";
@@ -53,7 +53,8 @@ import { mountReview } from "./features/review";
 import { mountLive, type LiveHandle, type LiveWorld } from "./features/live";
 import { mountForYou, type ForYouHandle } from "./features/foryou";
 import type { BoardFeed } from "./features/live_cards";
-import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
+import { agentName, fetchHistory, mountHistory, seenAt, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
+import type { ReportItem, SupportItem } from "./features/inbox_cards";
 import { moduleGet, modulePost } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
@@ -72,7 +73,6 @@ import {
   label as chordLabel,
   matches as chordMatches,
   matchesShortcut,
-  shortcutLabel,
 } from "./features/keymap";
 import { mountPulse } from "./features/pulse";
 import {
@@ -104,7 +104,7 @@ import {
 } from "./features/project_terminals";
 import { createWorkshop, type WorkshopHandle, type WorkshopPhase } from "./features/workshop";
 import { createProjectTools } from "./features/project_tools";
-import { errorNote } from "./errors";
+import { errorNote, errorText } from "./errors";
 import "./views";
 import "./motion.css";
 import "./style.css";
@@ -384,6 +384,12 @@ let chatActive = false;
 let chatFromWorkspace = false;
 let chatFromHome = false;
 let chatFromNotebook = false;
+/** A report opened from an Inbox card hands the glass back to the Inbox. */
+let chatFromForYou = false;
+/** Every agent report, for the Inbox's Report cards. The chat archive refills it. */
+let reportFeed: ReportItem[] = [];
+/** Sessions History last read, so an Inbox card can resume one by id. */
+let endedSessions = new Map<string, HistorySession>();
 /** Which pinned tab of the workspace is up. Mirrors of terminals.pinnedAt(), kept here because
  *  the hotkey guards below read them on every keystroke and they change only on a tab switch. */
 let runnerActive = false;
@@ -1607,7 +1613,8 @@ function showSupport(): void {
   screen.hidden = false;
   if (!support) screen.textContent = "Opening support…";
   const loading = supportLoading ?? import("./features/support").then(({ mountSupport }) => {
-    support = mountSupport(screen, { onUnread: paintSupportBadge });
+    // Opening Support reads everything in it. The Inbox's next read drops those cards.
+    support = mountSupport(screen, { onUnread: () => undefined });
     return support;
   });
   supportLoading = loading;
@@ -1756,14 +1763,11 @@ function historyProjectName(id: string): string {
   return state(id)?.project.name ?? id;
 }
 
-/** The nav badge and Home's strip: sessions that ended since you last opened History. One read
- *  of the transcripts, which after the first is only the bytes added since. */
+/** Home's strip: sessions that ended since you last opened History. One read of the
+ *  transcripts, which after the first is only the bytes added since. */
 function refreshHistorySignals(): void {
   void fetchHistory().then((data) => {
     const fresh = sinceSeen(data);
-    const badge = el("historyBadge");
-    badge.textContent = fresh.length > 99 ? "99+" : String(fresh.length);
-    badge.hidden = fresh.length === 0;
     home.away(fresh.map((session) => ({
       id: session.id,
       agent: session.agent,
@@ -1854,9 +1858,39 @@ function takeAppLinks(): void {
   void invoke<string[]>("take_links").then((urls) => urls.forEach(followAppLink)).catch(() => undefined);
 }
 
-/** The count of messages nobody has read yet. Same badge language as Inbox. */
-function paintSupportBadge(count: number): void {
-  const badge = el("supportBadge");
+const SUPPORT_PULL_MS = 30 * 60_000;
+let supportPulledAt = 0;
+/** Why the last pull fell short, shown on the Inbox with a door to Support's setup. */
+let supportProblem = "";
+
+/** A support message as the support module's log stores it. */
+type SupportMessage = {
+  id: string;
+  apps: string[];
+  form_title: string;
+  submitted_at: string;
+  email: string;
+  fields: { question: string; answer: string }[];
+  lead: string;
+};
+
+/** Its subject is the longest answer: the form's own title says which app, not what happened. */
+function supportItem(m: SupportMessage): SupportItem {
+  const longest = m.fields.reduce((best, f) => (f.answer.length > best.length ? f.answer : best), "");
+  return {
+    id: m.id,
+    app: m.apps[0] ?? "",
+    subject: (longest || m.lead || "(empty response)").replace(/\s+/g, " ").trim(),
+    email: m.email,
+    form: m.form_title,
+    fields: m.fields.map((f) => ({ q: f.question, a: f.answer })),
+    at: Date.parse(m.submitted_at) || Date.now(),
+  };
+}
+
+/** One count for everything that waits for you: the Inbox's cards. It replaced five badges. */
+function paintInboxBadge(count: number): void {
+  const badge = el("forYouBadge");
   badge.textContent = count > 99 ? "99+" : String(count);
   badge.hidden = count === 0;
 }
@@ -1880,6 +1914,7 @@ function showChat(): void {
   chatFromNotebook = notebookActive;
   chatFromSprint = sprintActive;
   chatFromOpsMap = opsMapActive;
+  chatFromForYou = forYouActive;
   dropSettings();
   // The workspace comes down properly — the deck takes its panes back before Chat takes the glass.
   if (terminalsActive) exitTerminals();
@@ -1921,6 +1956,8 @@ function exitChat(): void {
     showSprint();
   } else if (chatFromOpsMap) {
     showOpsMap();
+  } else if (chatFromForYou) {
+    showForYou();
   } else {
     mainZone().hidden = false;
   }
@@ -2247,58 +2284,25 @@ function paintNav(): void {
   el("runButton").classList.toggle("is-on", runsUp);
   el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
-  // and only the row you are actually on carries the accent.
-  el("chatNav").classList.toggle("is-active", chatActive || supportActive || reviewActive || liveActive || forYouActive || historyActive);
-  el("forYouButton").classList.toggle("is-on", forYouActive);
-  el("historyButton").classList.toggle("is-on", historyActive);
-  el("reviewButton").classList.toggle("is-on", reviewActive);
+  // and only the row you are actually on carries the accent. Reports, Support, History and
+  // Review have no rows: a card opens them to read one thing, and the Inbox row stays lit.
+  const readingFromInbox = chatActive || supportActive || reviewActive || historyActive;
+  el("chatNav").classList.toggle("is-active", readingFromInbox || liveActive || forYouActive);
+  el("forYouButton").classList.toggle("is-on", forYouActive || readingFromInbox);
   el("liveButton").classList.toggle("is-on", liveActive);
   el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
   el("boardButton").classList.toggle("is-on", boardActive);
-  el("supportButton").classList.toggle("is-on", supportActive);
   el("notebookButton").classList.toggle("is-on", notebookActive);
   // The gear is a door like any other row: lit while its screen is the one on the glass.
   el("settingsButton").classList.toggle("is-active", settingsActive);
 }
 
-/** The manager's lane, on its own row: parked on you, finished out of sight, or mid-turn. */
-function paintManagerNav(): void {
-  const badge = document.getElementById("cpoState");
-  const here = state(CPO_ID);
-  if (!badge) return;
-  const live = managerSession();
-  const attention = here ? attentionOf(here) : null;
-  const phase = live ? sessionPhase.get(live.id) : undefined;
-  const [label, tone, title] =
-    attention === "needs"
-      ? ["!", "warn", "The manager is waiting on you"]
-      : attention === "done"
-        ? ["✓", "ok", "The manager finished a turn"]
-        : phase === "work"
-          ? ["…", "work", "The manager is working"]
-          : ["", "", ""];
-  badge.hidden = !label;
-  badge.textContent = label;
-  badge.className = `nav-badge nav-state${tone ? ` t-${tone}` : ""}`;
-  badge.title = title;
-}
-
-/** Each sidebar destination reflects the section actually being shown. */
+/** Looking at the manager's pane is looking at the manager: its finished turn has been seen.
+ *  The Manager lost its row on 2026-11-05 ("its no more needed"); ⌘⇧M still opens it. */
 function paintChatNav(): void {
-  const selected = chat.currentSection();
-  // Looking at the manager's pane is looking at the manager: its finished turn has been seen.
-  if (selected === "manager") markSeen(CPO_ID);
-  paintManagerNav();
-  for (const [id, section] of [["chatButton", "reports"], ["cpoButton", "manager"]] as const) {
-    const button = el(id);
-    const on = chatActive && selected === section;
-    button.classList.toggle("is-on", on);
-    button.setAttribute("aria-pressed", String(on));
-    if (on) button.setAttribute("aria-current", "page");
-    else button.removeAttribute("aria-current");
-  }
+  if (chat.currentSection() === "manager") markSeen(CPO_ID);
 }
 
 /** Terminal shortcuts only act on a visible project terminal. */
@@ -3025,7 +3029,6 @@ function paintProjects(): void {
     window.clearTimeout(paintSoonTimer);
     paintSoonTimer = 0;
   }
-  paintManagerNav();
   // A repaint mid-drag would tear the row out of your hand. Hold it until the drop lands.
   if (dragging) {
     repaintQueued = true;
@@ -3529,21 +3532,9 @@ function registerProjectSurfaces(modules: PanelModule[]): void {
 async function refreshProjectSurfaces(): Promise<void> {
   const modules = await invoke<PanelModule[]>("list_modules").catch(() => []);
   registerProjectSurfaces(modules);
-  // Support is a sidebar row rather than a project tab, so nothing above hides it. A row that
-  // opens onto "module not installed" is worse than no row, so it follows the install directly.
   setupBoard(modules.some((module) => module.name === "scout"));
-  const supportOn = modules.some((module) => module.name === "support");
-  el("supportButton").hidden = !supportOn;
-  if (!supportOn) {
-    dropSupport();
-    el("supportBadge").hidden = true;
-  } else {
-    // The badge has to be true before the screen is ever opened, or it can only tell you what
-    // you already went and looked at. One read of a local file — the log is on disk.
-    void moduleGet<{ unread: number }>("/m/support/inbox?limit=0")
-      .then((seen) => paintSupportBadge(seen.unread))
-      .catch(() => undefined);
-  }
+  // Support's messages reach you as Inbox cards. Without the module there is nothing to open.
+  if (!modules.some((module) => module.name === "support")) dropSupport();
   const here = active ? state(active) : undefined;
   if (!here) return;
   syncModuleAvailability(here);
@@ -4326,7 +4317,65 @@ async function boot(): Promise<void> {
     openUrl: openLink,
     openTerminal,
     sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
-    seedManager: (text) => chat.seedCpo(text),
+    // The Inbox mounts before Review, and reads it only once the agents answer.
+    review: () => review?.fresh() ?? [],
+    reports: () => reportFeed,
+    support(fresh) {
+      if (!moduleInstalled("support")) return Promise.resolve(null);
+      // Pulling walks every app's Google Form, so it runs on Refresh or every half hour, not
+      // every minute. It used to wait for a Fetch press on the Support screen. It is not awaited:
+      // the board's cards must not wait on Google. What it pulls, or why it failed, shows on the
+      // next read.
+      if (fresh || Date.now() - supportPulledAt > SUPPORT_PULL_MS) {
+        supportPulledAt = Date.now();
+        void modulePost<{ errors: unknown[]; forms_unreachable: string[] }>("/m/support/fetch", {})
+          .then((pulled) => {
+            const bad = pulled.errors.length + pulled.forms_unreachable.length;
+            supportProblem = bad ? `${bad} support ${bad === 1 ? "form" : "forms"} could not be read.` : "";
+          })
+          .catch((error: unknown) => {
+            console.warn("[panel] support pull", error);
+            supportProblem = `Support forms could not be pulled: ${errorText(error, "unknown error")}.`;
+          });
+      }
+      return moduleGet<{ messages: SupportMessage[] }>("/m/support/inbox?unread=1&limit=50").then((inbox) => ({
+        items: inbox.messages.map(supportItem),
+        problem: supportProblem,
+      }));
+    },
+    openSupport: () => showSupport(),
+    ended: () =>
+      fetchHistory().then((data) => {
+        const ended = sinceSeen(data, 0);
+        endedSessions = new Map(ended.map((session) => [session.id, session]));
+        return {
+          floor: seenAt(),
+          items: ended.map((session) => ({
+            id: session.id,
+            project: session.project,
+            agent: agentName(session.agent),
+            title: session.title,
+            at: Date.parse(session.endedAt),
+            resumable: session.resume === "exact",
+          })),
+        };
+      }),
+    projectName: (id) => state(id)?.project.name ?? null,
+    pictureSrc: (project, path) => projectAssetUrl(project, path),
+    openReview: (project, paths) => review.openFiles(project, paths),
+    openReport: (post) => chat.reveal(post),
+    async resume(id) {
+      const session = endedSessions.get(id);
+      if (!session) throw new Error("History no longer lists that session");
+      await resumeConversation(session);
+    },
+    seen(card) {
+      if (card.kind === "review" && card.refs) review.see(card.refs);
+      if (card.kind === "support" && card.refs) {
+        void modulePost("/m/support/read", { ids: card.refs }).catch((error: unknown) => console.warn("[panel] support read", error));
+      }
+    },
+    count: paintInboxBadge,
   });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
@@ -4341,11 +4390,8 @@ async function boot(): Promise<void> {
       reviewCounts = counts;
       paintProjectsSoon();
     },
-    onCount(unseen) {
-      const badge = el("reviewBadge");
-      badge.textContent = unseen > 99 ? "99+" : String(unseen);
-      badge.hidden = unseen === 0;
-    },
+    // New or seen files change the Inbox's Review cards.
+    onCount: () => forYou.refresh(),
   });
 
   strip = mountSessionStrip(el("sessionStrip"), {
@@ -4421,11 +4467,8 @@ async function boot(): Promise<void> {
       else exitChat();
       paintChatNav();
     },
-    unread: (total) => {
-      const badge = el("chatBadge");
-      badge.textContent = total > 99 ? "99+" : String(total);
-      badge.hidden = total === 0;
-    },
+    // Reports reach you as Inbox cards, so the Inbox row carries their count.
+    unread: () => undefined,
     // Unread is one number in one place. It was spread across every project row and Home card,
     // and a badge on ten surfaces is ten things to clear for one thing to read. The Inbox row
     // carries the count; Home still totals it above the activity list, because that list IS the
@@ -4443,6 +4486,11 @@ async function boot(): Promise<void> {
           at: post.at,
         });
       }
+      // The Manager's own posts are not news from the work.
+      reportFeed = posts
+        .filter((post) => post.project !== CPO_ID)
+        .map((post) => ({ id: post.id, project: post.project, title: str(post.payload.title, str(post.payload.outcome, "Report")), at: post.at }));
+      forYou.refresh();
       paintProjectsSoon();
       home.activity(
         posts.map((post) => ({
@@ -4576,26 +4624,16 @@ async function boot(): Promise<void> {
   // The sidebar's three doors into the workspace, each landing on its tab. Strip indexes, so
   // they read straight off the ⌘ ladder: Runs 0, first terminal tab 1. Chat is not on it — it is
   // a screen beside the workspace, not a tab of it, so it answers to ⌘⇧C instead.
-  el("chatButton").addEventListener("click", () => {
-    chat.show("reports");
-  });
   paintChatNav();
-  el("cpoButton").addEventListener("click", () => {
-    chat.showCpo();
-  });
   el("notebookButton").addEventListener("click", () => showNotebook());
   el("sprintButton").addEventListener("click", () => showSprint());
   el("opsMapButton").addEventListener("click", () => showOpsMap());
   el("skillsButton").addEventListener("click", () => showSkills());
   el("boardButton").addEventListener("click", () => showBoard());
-  el("supportButton").addEventListener("click", () => showSupport());
-  el("reviewButton").addEventListener("click", () => showReview());
   el("liveButton").addEventListener("click", () => showLive());
   el("forYouButton").addEventListener("click", () => showForYou());
-  el("historyButton").addEventListener("click", () => showHistory());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.
-  el("supportButton").hidden = true;
   el("boardButton").hidden = true;
   const paintNotebookHint = (): void => {
     el("notebookButton").title = `Notebook (${chordLabel("app.notebook")})`;
@@ -4632,8 +4670,6 @@ async function boot(): Promise<void> {
     }
   };
   paintChordHints();
-  el("chatButton").title = `Agent reports · ${shortcutLabel("Meta+Shift+KeyC", "Ctrl+Alt+KeyC")}`;
-  el("cpoButton").title = `Manager · Plan work with an agent · ${shortcutLabel("Meta+Shift+KeyM")}`;
   window.addEventListener(KEYMAP_EVENT, paintChordHints);
   window.addEventListener("keydown", (event) => {
     if (event.key === (IS_MAC ? "Meta" : "Control")) document.body.classList.add("is-cmd-held");

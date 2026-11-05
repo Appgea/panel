@@ -41,6 +41,10 @@
 .fy-heading { flex: 1; min-width: 0; }
 .fy-heading h1 { margin: 0; color: var(--ink); font-size: var(--text-lg); font-weight: 700; }
 .fy-heading p { margin: 3px 0 0; color: var(--ink-dim); font-size: var(--text-sm); }
+.fy-problem { margin: 4px 0 0; color: var(--risk); font-size: var(--text-sm); }
+.fy-problem[hidden] { display: none; }
+.fy-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
+.fy-link:hover { text-decoration: underline; }
 .fy-btn {
   padding: 5px 12px;
   border: 1px solid var(--line);
@@ -67,8 +71,28 @@
 .fy-main { min-width: 0; }
 .fy-hint { margin: 10px 2px 0; color: var(--ink-faint); font-size: var(--text-xs); }
 
-.fy-next { display: grid; align-content: start; gap: 2px; min-width: 0; }
-.fy-next[hidden] { display: none; }
+.fy-next { display: grid; align-content: start; gap: 10px; min-width: 0; }
+.fy-list { display: grid; align-content: start; gap: 2px; min-width: 0; }
+.fy-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.fy-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-chip:hover { color: var(--ink); background: var(--hover); }
+.fy-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.fy-chip.is-on { border-color: var(--line); background: var(--bg-raised); color: var(--ink); }
+.fy-n { color: var(--ink-faint); font: 500 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+.fy-row.is-later { opacity: 0.55; }
 .fy-head {
   margin: 4px 8px 6px;
   color: var(--ink-dim);

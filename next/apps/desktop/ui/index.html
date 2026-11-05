@@ -311,43 +311,13 @@
              live manager terminal. Esc gives the previous screen straight back. It sits under the
              Workspace: the work area is what you reach for first. -->
         <nav id="chatNav" class="side-nav chat-nav" aria-label="Inbox">
-          <span class="side-label side-nav-label"><span>Inbox</span></span>
-          <!-- The calls that wait for you: your board agenda, sessions that wait, what got done.
-               One card at a time. They sat on the Live map until 2026-11-05. -->
-          <button id="forYouButton" class="nav-row" type="button" title="For you: the calls that wait for you">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 21V4h12l-2 4 2 4H5"/></svg></span>
-            For you
-          </button>
-          <button id="chatButton" class="nav-row" type="button" title="Agent reports · ⌘⇧C" aria-pressed="false">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3z"/></svg></span>
-            Reports <span id="chatBadge" class="nav-badge" hidden>0</span>
-          </button>
-          <!-- The manager gets its own door. It is the one participant you go TO rather than hear
-               FROM, so it is a row and not a filter on the feed. -->
-          <button id="cpoButton" class="nav-row" type="button" title="Manager · Plan work with an agent · ⌘⇧M" aria-pressed="false">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m8 10 2.5 2L8 14"/><path d="M13 14h3"/></svg></span>
-            Manager <span id="cpoState" class="nav-badge nav-state" hidden></span>
-          </button>
-          <!-- The other inbox: what the people using the apps sent in. Eleven apps publish a
-               support form, and until this row existed every one of them landed in a spreadsheet
-               nobody opened. It sits here because reading it is the same act as reading Inbox —
-               one is what the agents said, the other is what the users said. -->
-          <button id="supportButton" class="nav-row" type="button" title="Support">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 6h18v12H3z"/><path d="m3 7 9 6 9-6"/></svg></span>
-            Support <span id="supportBadge" class="nav-badge" hidden>0</span>
-          </button>
-          <!-- Every agent session, reported or not, read from each agent's own store. Reports
-               are what an agent chose to say; this is everything it did, including the session
-               that finished at 3am without a word. -->
-          <button id="historyButton" class="nav-row" type="button" title="History: every agent session">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg></span>
-            History <span id="historyBadge" class="nav-badge" hidden>0</span>
-          </button>
-          <!-- What the agents made: renders, screenshots, sounds. Files an agent saves without
-               sending a report land here too, so reviewing never starts in Finder. -->
-          <button id="reviewButton" class="nav-row" type="button" title="Review what agents made">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="m4 16 5-5 4 4 2-2 5 5"/><circle cx="15.5" cy="9" r="1.5"/></svg></span>
-            Review <span id="reviewBadge" class="nav-badge" hidden>0</span>
+          <span class="side-label side-nav-label"><span>Now</span></span>
+          <!-- Everything that waits for you, on one screen: board calls, agents that wait, reports,
+               files to look at, support mail, finished sessions. Reports, Manager, Support, History
+               and Review had a row each until 2026-11-05. Owner: "One screen." See foryou.ts. -->
+          <button id="forYouButton" class="nav-row" type="button" title="Inbox: everything that waits for you">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 13h4l1.5 3h5L16 13h4"/><path d="M5.5 5h13L20 13v6H4v-6Z"/></svg></span>
+            Inbox <span id="forYouBadge" class="nav-badge" hidden>0</span>
           </button>
           <!-- Every agent on this Mac, live, by project. The first section Bevy draws. -->
           <button id="liveButton" class="nav-row" type="button" title="Live: every agent on this Mac">

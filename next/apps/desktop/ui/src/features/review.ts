@@ -57,6 +57,10 @@ export type ReviewHandle = {
    * list has not heard of yet join it here. False when none of them is on disk.
    */
   openFiles(project: string, paths: string[], start?: string): Promise<boolean>;
+  /** The new batches, for the Inbox's cards. */
+  fresh(): { project: string; items: Pick<Item, "path" | "kind" | "at">[] }[];
+  /** Seen from the Inbox without opening the deck. */
+  see(paths: string[]): void;
   open(): void;
   clear(): void;
 };
@@ -595,6 +599,19 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
         : -1;
       review(batch, Math.max(0, at));
       return true;
+    },
+    fresh() {
+      return batches().fresh.map((batch) => ({
+        project: batch[0].project,
+        items: batch.map((item) => ({ path: item.path, kind: item.kind, at: item.at })),
+      }));
+    },
+    see(paths) {
+      const changed = paths.map((path) => queue.items.get(path)).filter((item) => item && see(item)).length;
+      if (!changed) return;
+      save();
+      announce();
+      if (openState) paint();
     },
     open() {
       openState = true;

@@ -1,12 +1,12 @@
 /**
- * The card in front of For you (foryou.ts): one piece of business at a time, in value per minute
+ * The card in front of the Inbox (foryou.ts): one piece of business at a time, in value per minute
  * (live_cards.ts). One key answers it. Copied from `renderCard` in the concept page, line 1076,
  * and `.qcard` in its CSS, lines 48 to 74. It sat on the Live map until 2026-11-05, when the
  * owner moved it to its own section.
  */
 
 import { errorText } from "../errors";
-import { buildCards, KIND, managerBrief, order, scoreLine, type Act, type BoardFeed, type Card, type CardKind } from "./live_cards";
+import { KIND, order, scoreLine, type Act, type BoardFeed, type Card, type CardKind } from "./live_cards";
 import type { Facts } from "./live_facts";
 import { button, div, span, withoutRoom } from "./live_text";
 import type { LiveWorld } from "./live_types";
@@ -15,8 +15,28 @@ import "./live_queue.css";
 const LATER_MS = 30 * 60_000;
 // The key keeps its old name, so what the owner saw on Live stays seen.
 const SEEN_KEY = "panel.live.seen";
-const SOURCE: Record<CardKind, string> = { decide: "Your agenda", turn: "An agent", done: "Closes and releases", decided: "Decided lines", better: "The improve scout" };
-export const KIND_COLOUR: Record<CardKind, string> = { decide: "var(--l-turn)", turn: "var(--l-turn)", better: "var(--l-think)", decided: "var(--l-ink-2)", done: "var(--l-done)" };
+const SOURCE: Record<CardKind, string> = {
+  decide: "Your agenda",
+  turn: "An agent",
+  done: "Closes and releases",
+  decided: "Decided lines",
+  better: "The improve scout",
+  review: "Files an agent made",
+  support: "A user of the app",
+  report: "Agent reports",
+  ended: "Finished sessions",
+};
+export const KIND_COLOUR: Record<CardKind, string> = {
+  decide: "var(--l-turn)",
+  turn: "var(--l-turn)",
+  better: "var(--l-think)",
+  decided: "var(--l-ink-2)",
+  done: "var(--l-done)",
+  review: "var(--l-think)",
+  support: "var(--l-turn)",
+  report: "var(--l-ink-2)",
+  ended: "var(--l-done)",
+};
 
 /** Everything the queue remembers between reads. Only foryou.ts replaces `world` and `board`. */
 export type QueueState = {
@@ -42,12 +62,19 @@ export type QueueEvents = {
   /** Jump to the Panel terminal hosting an agent. False when that terminal is gone. */
   openTerminal(panel: string): boolean;
   sendToAgent(panel: string, text: string): Promise<boolean>;
-  seedManager(text: string): Promise<void>;
+  openReview(project: string, paths: string[]): Promise<boolean>;
+  openReport(post: string): void;
+  resume(session: string): Promise<void>;
+  openSupport(): void;
+  /** Seen was tapped: clear the card's `refs` at their source too. */
+  seen(card: Card): void;
 };
 
 export type QueueCtx = Facts & {
   s: QueueState;
   events: QueueEvents;
+  /** Every card there is right now, unordered. */
+  build(now: number): Card[];
   toast(text: string, bad?: boolean): void;
   /** After every paint, so the screen can redraw what lists the cards. */
   painted(): void;
@@ -66,8 +93,7 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
   function paint(): void {
     const now = Date.now();
     const w = s.world!;
-    const agents = w.agents.map((a) => ({ id: a.id, name: ctx.nameOf(a), room: ctx.roomOf(a), state: a.state, stateMs: a.stateMs, headless: a.headless, panel: a.panel, lastText: a.lastText }));
-    const built = buildCards(s.board, agents, ctx.weight, ctx.roomName, s.seen, now).filter((c) => !s.answered.has(c.id));
+    const built = ctx.build(now).filter((c) => !s.answered.has(c.id));
     s.cards = order(built, now, s.front, s.later);
     const top = s.cards[0] ?? null;
     // The front card holds its place only once the board has answered. Before that, a session's
@@ -126,7 +152,8 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
     if (card.lines[0]) nodes.push(div("qwhy", card.lines.join(" ")));
     if (card.items?.length) nodes.push(itemList(card.items));
     const pic = card.pictures?.[0];
-    if (pic) nodes.push(picture(pic));
+    if (card.pictureSrc) nodes.push(Object.assign(document.createElement("img"), { className: "qthumb", alt: "", src: card.pictureSrc }));
+    else if (pic) nodes.push(picture(pic));
     if (s.talkCard === card.id) nodes.push(reply(card));
     const opts = div("qopts");
     if (s.talkCard === card.id) {
@@ -174,7 +201,7 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
     input.type = "text";
     input.maxLength = 500;
     input.autocomplete = "off";
-    const to = card.talk?.to === "agent" ? card.talk.name : card.talk?.to === "board" ? `the board, on #${card.talk.number}` : "the Manager";
+    const to = card.talk?.to === "agent" ? card.talk.name : `the board, on #${card.talk?.number}`;
     input.placeholder = `Talk to ${to} about this. Enter sends.`;
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -210,6 +237,25 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
         return;
       case "url":
         ctx.events.openUrl(a.url);
+        return;
+      case "review":
+        // The deck marks each file seen as it is looked at, so the card leaves on its own.
+        if (!(await ctx.events.openReview(a.project, a.paths))) ctx.toast("Those files are gone from disk.", true);
+        return;
+      case "report":
+        ctx.events.openReport(a.post);
+        if (a.last) markSeen(card);
+        return;
+      case "resume":
+        try {
+          await ctx.events.resume(a.session);
+          markSeen(card);
+        } catch (e) {
+          ctx.toast(`Not resumed: ${errorText(e, "the agent refused")}`, true);
+        }
+        return;
+      case "support":
+        ctx.events.openSupport();
     }
   }
 
@@ -217,6 +263,7 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
     const now = Date.now();
     for (const k of card.seenKeys) s.seen[k] = now;
     writeSeen(s.seen);
+    ctx.events.seen(card);
     s.front = null;
     paint();
   }
@@ -248,14 +295,11 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
         await ctx.events.answer({ number: card.talk.number, say: words });
         s.answered.add(card.id);
         ctx.toast(`Your words are on #${card.talk.number}.`);
-      } else if (card.talk.to === "agent") {
+      } else {
         if (!(await ctx.events.sendToAgent(card.talk.panel, words))) throw new Error("its terminal did not take the text");
         for (const k of card.seenKeys) s.seen[k] = Date.now();
         writeSeen(s.seen);
         ctx.toast(`Sent to ${card.talk.name}.`);
-      } else {
-        await ctx.events.seedManager(managerBrief(card, words));
-        ctx.toast("Sent to the Manager.");
       }
       s.talkCard = null;
       s.front = null;

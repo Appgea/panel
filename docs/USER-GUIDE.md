@@ -30,12 +30,11 @@ How to use Appgea Panel day to day. Install and first-run steps are in the
 │ WORKSPACE         │  the selected project's screen                                                                       │
 │   Runs            │                                                                                                      │
 │   Terminals       │                                                                                                      │
-│ INBOX             │                                                                                                      │
-│   Reports         │                                                                                                      │
-│   Manager         │                                                                                                      │
-│   Support         │                                                                                                      │
-│   Review          │                                                                                                      │
+│ NOW               │                                                                                                      │
+│   Inbox           │                                                                                                      │
+│   Live            │                                                                                                      │
 │ DESK              │                                                                                                      │
+│   Board           │                                                                                                      │
 │   Project desk    │                                                                                                      │
 │   Notebook        │                                                                                                      │
 │ PROJECTS (filter) │                                                                                                      │
@@ -43,9 +42,9 @@ How to use Appgea Panel day to day. Install and first-run steps are in the
 └───────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Portfolio-level screens (Home, Runs, Terminals, Reports, Manager, Support, Review, Project desk,
-Notebook, Settings) **swap with** the project screen and hand it back when you leave (Esc on Reports,
-Manager and Settings). Only the tabs the project has enabled appear in its rail (Git, Release,
+Portfolio-level screens (Home, Runs, Terminals, Inbox, Live, Board, Project desk, Notebook,
+Settings) **swap with** the project screen and hand it back when you leave (Esc on Reports and
+Settings). Only the tabs the project has enabled appear in its rail (Git, Release,
 RevenueCat, Analytics, Product Spine are optional — see §12).
 
 | Sidebar row | What it is |
@@ -53,10 +52,9 @@ RevenueCat, Analytics, Product Spine are optional — see §12).
 | **Home** | The portfolio's landing: a verdict and a card per app; where the whole estate stands. |
 | **Runs** | Tab of the Workspace: start/stop apps on devices (§8). |
 | **Terminals** | The **wall**: every live terminal across every project (§4). |
-| **Reports** `⌘⇧C / Ctrl+Alt+C` | Feed of what agents reported (§6). |
-| **Manager** `⌘⇧M` | A planning agent rooted at your ops tree (§6). |
-| **Support** | Every app's support form, merged into one queue (§6). |
-| **Review** | Pictures/sounds/videos agents made (§6). |
+| **Inbox** | Everything that waits for you, one card at a time, most valuable first: board calls, agents that wait, reports, files to look at, support mail, finished sessions. Chips narrow it to one kind. A card opens Reports (`⌘⇧C`), the review deck or Support only to read one thing whole. Support forms are pulled every 30 min and on Refresh. |
+| **Live** | Every agent on this Mac, as a map. |
+| **Board** | Who holds what, and the scouts. Kept apart from the Inbox on purpose. |
 | **Project desk** | Per-project release target, todos and notes (§9). |
 | **Notebook** `⌘⇧N / Ctrl+Shift+N` | Your private Markdown notes; never shared with agents. |
 | **Settings** `⌘, / Ctrl+,` | Preferences, shortcuts, extensions, servers. |

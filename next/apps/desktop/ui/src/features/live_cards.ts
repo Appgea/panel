@@ -9,21 +9,29 @@
  * The order is Smith's rule: value per minute of his time, highest first, and a waiting card
  * slowly rises so nothing starves. The card in front never changes under his hand.
  *
- * Pure: no DOM, no clock of its own. live.ts feeds it the board, the agents and what he has seen.
+ * Pure: no DOM, no clock of its own. foryou.ts feeds it the board, the agents and what he has seen.
+ * The Inbox adds four more kinds from the screens it replaced: see inbox_cards.ts.
  */
 
-export type CardKind = "decide" | "turn" | "done" | "decided" | "better";
+export type CardKind = "decide" | "turn" | "done" | "decided" | "better" | "review" | "support" | "report" | "ended";
 
 export type Act =
   | { do: "answer"; number: number; pick: number }
   | { do: "seen" }
   | { do: "terminal"; panel: string }
-  | { do: "url"; url: string };
+  | { do: "url"; url: string }
+  /** Look at what an agent made, in the review deck over the Inbox. */
+  | { do: "review"; project: string; paths: string[] }
+  /** Read a report whole, with its evidence, in the Reports feed. `last`: no other unseen report
+   *  hides behind this card, so opening it is the read. */
+  | { do: "report"; post: string; last: boolean }
+  /** Pick a finished conversation back up. */
+  | { do: "resume"; session: string }
+  /** The whole support log, with its setup when a form cannot be read. */
+  | { do: "support" };
 
-export type Talk =
-  | { to: "board"; number: number }
-  | { to: "agent"; panel: string; name: string }
-  | { to: "manager" };
+// The Manager was a third place to talk. Owner, 2026-11-05: "its no more needed".
+export type Talk = { to: "board"; number: number } | { to: "agent"; panel: string; name: string };
 
 export type Card = {
   id: string;
@@ -46,6 +54,10 @@ export type Card = {
   agent?: string;
   /** Done and Decided list what they cover, newest first. The card shows four. */
   items?: string[];
+  /** A picture the webview can show as it is, with no trip through the scout module. */
+  pictureSrc?: string;
+  /** What Seen also clears at its source: support message ids, or review file paths. */
+  refs?: string[];
 };
 
 export type BoardIssue = {
@@ -94,6 +106,10 @@ export const KIND: Record<CardKind, { weight: number; minutes: number; label: st
   turn: { weight: 2, minutes: 2, label: "Your Turn" },
   decided: { weight: 1, minutes: 0.5, label: "Decided" },
   done: { weight: 1, minutes: 1, label: "Done" },
+  review: { weight: 2, minutes: 1, label: "Review" },
+  support: { weight: 2, minutes: 2, label: "Support" },
+  report: { weight: 1, minutes: 0.5, label: "Report" },
+  ended: { weight: 1, minutes: 0.5, label: "Ended" },
 };
 
 /** A card older than this rises no further. An ask from last week is not 100 times more urgent. */
@@ -205,7 +221,7 @@ export function buildCards(
       lines: [],
       items: newest.map((i) => `#${i.number} ${clip(i.title, 90)}`),
       options: [{ label: "Seen", act: { do: "seen" } }, { label: "Open First", act: { do: "url", url: list[0].url } }],
-      talk: { to: "manager" },
+      talk: null,
       arrivedMs: first,
       minutes: KIND.done.minutes,
       stake: stake(room, "done"),
@@ -228,7 +244,7 @@ export function buildCards(
       lines: [],
       items: list.map((i) => `#${i.number} ${clip(i.decided!.trim(), 160)}`),
       options: [{ label: list.length === 1 ? "Keep It" : "Keep All", act: { do: "seen" } }],
-      talk: { to: "manager" },
+      talk: null,
       // The board does not say when the call was made, and the issue's age overstates it: an
       // old issue's note would jump ahead of a decision agents wait on. So it never ages.
       arrivedMs: now,
@@ -251,7 +267,7 @@ export function buildCards(
       title: i.title,
       lines: [i.problem ? clip(i.problem, 200) : "", i.direction ? `Proposal: ${clip(i.direction, 200)}` : ""].filter(Boolean),
       options: [{ label: "Seen", act: { do: "seen" } }, { label: "Open Issue", act: { do: "url", url: i.url } }],
-      talk: { to: "manager" },
+      talk: null,
       arrivedMs: ms(i.created_at, now),
       minutes: KIND.better.minutes,
       stake: stake(room, "better"),
@@ -276,10 +292,4 @@ export function queueLine(cards: Card[]): string {
   if (!cards.length) return "Nothing needs you. You can leave.";
   const minutes = Math.max(1, Math.round(cards.reduce((n, c) => n + c.minutes, 0)));
   return `${cards.length} ${cards.length === 1 ? "card" : "cards"} · about ${minutes} min`;
-}
-
-/** What the Manager gets when he talks about a card that has no agent of its own. */
-export function managerBrief(card: Card, words: string): string {
-  const head = `About this ${KIND[card.kind].label} card in Panel Live: ${card.title}`;
-  return [head, ...[...card.lines, ...(card.items ?? [])].map((l) => `- ${l}`), card.url ? `Issue: ${card.url}` : "", "", `Owner: ${words}`].filter((l, i) => l || i > 0).join("\n");
 }
