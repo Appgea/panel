@@ -115,6 +115,11 @@ The right-hand panel that used to sit beside these is gone. Asks float in the as
   ones in the catalog view and the next sighting writes a new one. Silent projects are not drawn.
   Why: owner, 2026-11-04, "Untested is fine, current models don't need testing on everything.
   And if it is bad, I will delete ofc. So we will need a catalog of animations."
+  Each project is a compact plot with one fixed row per agent, and every agent always shows a
+  bubble with its name and what it does now. Agents never walk across the map: a walk in a
+  script is a spark. Helpers ride on their parent as electrons (`ui/src/features/live_world.ts`).
+  Why: owner, 2026-11-05, "not space efficient. Hard for me to track. I like the bubbles that
+  we show what they are doing."
 
 ## Reuse, not rewrite
 
