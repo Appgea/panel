@@ -55,6 +55,10 @@ RevenueCat, Analytics, Product Spine are optional — see §12).
 | **Inbox** | Everything that waits for you, one card at a time, most valuable first: board calls, agents that wait, reports, files to look at, support mail, finished sessions. Chips narrow it to one kind. A card opens Reports (`⌘⇧C`), the review deck or Support only to read one thing whole. Support forms are pulled every 30 min and on Refresh. |
 | **Live** | Every agent on this Mac, as a map. |
 | **Board** | Who holds what, and the scouts. Kept apart from the Inbox on purpose. |
+
+Why one Inbox: owner, 2026-11-05, "I don't think I need this many different stuff to look at. One
+screen. Board must still keep separate." Reports, Review, Support and History lost their rows then,
+and the Manager row went too ("its no more needed"). Do not bring back a row per source.
 | **Project desk** | Per-project release target, todos and notes (§9). |
 | **Notebook** `⌘⇧N / Ctrl+Shift+N` | Your private Markdown notes; never shared with agents. |
 | **Settings** `⌘, / Ctrl+,` | Preferences, shortcuts, extensions, servers. |
