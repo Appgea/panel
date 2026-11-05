@@ -24,6 +24,11 @@ pub fn dir() -> PathBuf {
     crate::paths::user_root().join("state").join("live-catalog")
 }
 
+/// The verb a dotted verb falls back to: `cmd.echo` → `cmd`.
+fn family(verb: &str) -> Option<&str> {
+    verb.rsplit_once('.').map(|(f, _)| f)
+}
+
 /// A verb is also a file name: only the characters verbs.rs makes.
 fn valid(verb: &str) -> bool {
     !verb.is_empty() && verb.len() <= 40 && verb.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-'))
@@ -101,6 +106,11 @@ pub fn write_missing(seen: &[(String, String)]) {
             break;
         }
         if !valid(verb) || !done.insert(verb.clone()) || dir.join(format!("{verb}.json")).exists() {
+            continue;
+        }
+        // `cmd.echo` plays its family's `cmd` script (live.ts `scriptFor`). A Sonnet run per shell
+        // word spent quota on `ls`, `echo` and `for` for a look no one could tell apart.
+        if family(verb).is_some_and(|f| dir.join(format!("{f}.json")).exists()) {
             continue;
         }
         let mark = dir.join(format!("{verb}.pending"));

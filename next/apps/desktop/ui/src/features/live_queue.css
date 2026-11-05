@@ -1,55 +1,81 @@
-/* The card in front of For you. Copied from `.qcard` in the concept page CSS, lines 48 to 74. */
+/* The card in front of the Inbox. It reads Live's --l-* tokens, which foryou.css maps onto
+   Panel's theme. Every `font` shorthand names a real family: `inherit` inside a shorthand
+   drops the whole rule, which once left the title at body size. */
 
 .qcard {
-  padding: 18px 20px 14px;
+  padding: 20px 22px 18px;
   border: 1px solid var(--l-line-2);
   border-radius: 14px;
   background: var(--l-raise);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 12px 32px rgba(0, 0, 0, 0.14);
   transition: opacity 0.15s ease, transform 0.15s ease;
 }
 .qcard.is-swap { opacity: 0; transform: translateY(6px); }
 .is-reduced .qcard { transition: none; }
-.qhead {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font: 500 11.5px/1.3 var(--l-mono);
-  color: var(--l-ink-3);
+
+.qhead { display: flex; align-items: center; gap: 10px; min-width: 0; font: 500 12.5px/1.3 var(--l-sans); color: var(--l-ink-2); }
+.qkind {
+  flex: none;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--c) 16%, transparent);
+  color: var(--c);
+  font: 650 11.5px/1.2 var(--l-sans);
 }
-.qkind { color: var(--c); }
-.qpos { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.qdots { display: inline-flex; gap: 3px; }
-.qwho { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 9px; min-width: 0; font-size: 12.5px; color: var(--l-ink-2); }
-.qwho i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); box-shadow: 0 0 8px var(--c); flex: none; display: inline-block; }
-.qtitle { margin-top: 4px; font: 600 20px/1.3 var(--l-sans); color: var(--l-ink); text-wrap: balance; overflow-wrap: anywhere; }
-.qwhy { margin-top: 6px; font-size: 14px; line-height: 1.5; color: var(--l-ink-2); overflow-wrap: anywhere; }
-.qopts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.qwho { display: flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; }
+.qwho i { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.qroom { color: var(--l-ink); font-weight: 600; }
+.qsrc { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--l-ink-3); }
+.qsrc::before { content: "·"; margin-right: 6px; }
+.qage { flex: none; margin-left: auto; color: var(--l-ink-3); font-variant-numeric: tabular-nums; cursor: help; }
+
+.qtitle { margin-top: 14px; font: 650 21px/1.3 var(--l-sans); letter-spacing: -0.01em; color: var(--l-ink); text-wrap: balance; overflow-wrap: anywhere; }
+.qcard.is-clear .qtitle { margin-top: 12px; }
+.qwhy { margin-top: 8px; font: 400 14px/1.55 var(--l-sans); color: var(--l-ink-2); text-wrap: pretty; overflow-wrap: anywhere; }
+
+.qlist { list-style: none; margin: 14px 0 0; padding: 4px 0; display: grid; border-top: 1px solid var(--l-line); border-bottom: 1px solid var(--l-line); font: 400 13.5px/1.45 var(--l-sans); color: var(--l-ink-2); }
+.qlist li { position: relative; padding: 5px 0 5px 16px; min-width: 0; overflow-wrap: anywhere; }
+.qlist li::before { content: ""; position: absolute; left: 3px; top: calc(5px + 0.6em); width: 5px; height: 5px; border-radius: 50%; background: var(--l-ink-3); }
+.qlist .more { color: var(--l-ink-3); }
+.qlist .more::before { display: none; }
+.qthumb { display: block; width: 100%; max-height: 260px; object-fit: contain; margin-top: 14px; border: 1px solid var(--l-line); border-radius: 10px; background: var(--l-deck); }
+
+.qopts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 18px; }
 .qcard .opt {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 10px;
+  min-height: 34px;
+  padding: 0 12px;
   border: 1px solid var(--l-line-2);
   border-radius: 8px;
-  background: transparent;
+  background: var(--l-raise);
   color: var(--l-ink);
-  font: 500 13.5px/1.2 var(--l-sans);
+  font: 550 13.5px/1.2 var(--l-sans);
   text-align: left;
   cursor: pointer;
 }
-.qcard .opt:hover { border-color: var(--l-ink-3); }
+.qcard .opt:hover { border-color: var(--l-ink-3); background: var(--l-deck); }
 .qcard .opt.primary { background: var(--l-ink); border-color: var(--l-ink); color: var(--l-bg); }
-.qcard kbd { font: 500 10.5px/1 var(--l-mono); border: 1px solid currentColor; border-radius: 4px; padding: 2px 5px; opacity: 0.65; }
-.qfoot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 12px; font: 400 11px/1.4 var(--l-mono); color: var(--l-ink-3); }
-.qscore { min-width: 0; overflow-wrap: anywhere; }
-.later { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px; border: 0; background: none; color: var(--l-ink-2); font: 500 12px/1 var(--l-sans); cursor: pointer; }
-.qcard .reply { display: block; width: 100%; box-sizing: border-box; margin-top: 12px; padding: 9px 11px; border: 1px solid var(--l-line-2); border-radius: 8px; background: var(--l-deck); color: var(--l-ink); font: 400 14px/1.3 var(--l-sans); }
+.qcard .opt.primary:hover { opacity: 0.9; }
+.qcard kbd { font: 500 10.5px/1 var(--l-mono); border: 1px solid currentColor; border-radius: 4px; padding: 2px 5px; opacity: 0.55; }
+.later {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin-left: auto;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--l-ink-2);
+  font: 500 13px/1 var(--l-sans);
+  cursor: pointer;
+}
+.later:hover { color: var(--l-ink); background: var(--l-deck); }
+
+.qcard .reply { display: block; width: 100%; box-sizing: border-box; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--l-line-2); border-radius: 8px; background: var(--l-deck); color: var(--l-ink); font: 400 14px/1.3 var(--l-sans); }
 .qcard .reply::placeholder { color: var(--l-ink-3); }
-.qthumb { display: block; width: 100%; max-height: 240px; object-fit: contain; margin-top: 12px; border: 1px solid var(--l-line); border-radius: 8px; background: var(--l-deck); }
-.qlist { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 5px; font-size: 13px; line-height: 1.4; color: var(--l-ink-2); }
-.qlist li { position: relative; padding-left: 14px; min-width: 0; overflow-wrap: anywhere; }
-.qlist li::before { content: ""; position: absolute; left: 2px; top: 0.55em; width: 5px; height: 5px; border-radius: 50%; background: var(--l-ink-3); }
-.qlist .more { color: var(--l-ink-3); }
-.qlist .more::before { display: none; }
 .qcard button:focus-visible, .reply:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 2px; }

@@ -49,6 +49,15 @@ const SLOW_MS = 60_000;
 const NEXT = 40;
 const TOAST_MS = 3000;
 
+/** A list row's age, short enough for a column: "5m", "3h", "2d". */
+function short(at: number, now: number): string {
+  const min = Math.max(0, Math.round((now - at) / 60_000));
+  if (min < 1) return "now";
+  if (min < 60) return `${min}m`;
+  const h = Math.round(min / 60);
+  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
+}
+
 /** The filter chips. Calls is everything the board and the live agents raise. */
 const FILTERS: { key: string; label: string; kinds: CardKind[] }[] = [
   { key: "all", label: "All", kinds: [] },
@@ -62,28 +71,34 @@ const FILTERS: { key: string; label: string; kinds: CardKind[] }[] = [
 export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHandle {
   root.innerHTML = `
     <header class="fy-top">
-      <div class="fy-heading">
-        <h1>Inbox</h1>
-        <p data-sum>Reading the board</p>
-        <p class="fy-problem" data-problem hidden><span></span> <button type="button" class="fy-link">Open Support</button></p>
+      <div class="fy-wrap fy-bar">
+        <div class="fy-heading">
+          <h1>Inbox</h1>
+          <p data-sum>Reading the board</p>
+        </div>
+        <button class="fy-btn" type="button" data-refresh>Refresh</button>
       </div>
-      <button class="fy-btn" type="button" data-refresh>Refresh</button>
+      <div class="fy-wrap fy-chips" role="group" aria-label="Show" data-chips></div>
+      <p class="fy-wrap fy-problem" data-problem hidden><span></span> <button type="button" class="fy-link">Open Support</button></p>
     </header>
     <div class="fy-body">
-      <div class="fy-main">
-        <div class="qcard" data-card aria-live="polite"></div>
-        <p class="fy-hint">Enter, 2 or 3 answers the card. T talks about it. ↓ puts it off for 30 min.</p>
+      <div class="fy-wrap fy-cols">
+        <div class="fy-main">
+          <div class="qcard" data-card aria-live="polite"></div>
+        </div>
+        <aside class="fy-next" aria-label="Up next" data-next-box>
+          <div class="fy-head"><span>Up next</span><span class="fy-n" data-next-n></span></div>
+          <div class="fy-list" data-next></div>
+        </aside>
       </div>
-      <aside class="fy-next" aria-label="Every card">
-        <div class="fy-chips" role="group" aria-label="Show" data-chips></div>
-        <div class="fy-list" data-next></div>
-      </aside>
     </div>
     <div class="fy-toast" data-toast role="status" hidden></div>`;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const sum = q("[data-sum]");
   const chipsEl = q("[data-chips]");
   const nextEl = q("[data-next]");
+  const nextBox = q("[data-next-box]");
+  const nextCount = q("[data-next-n]");
   const toastEl = q("[data-toast]");
   // With no Support row, this line is the way into its setup when mail cannot be read.
   const problemEl = q("[data-problem]");
@@ -194,6 +209,8 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
     sum.textContent = !s.boardRead ? "Reading the board" : all.length ? `${all.length} ${all.length === 1 ? "card" : "cards"} · about ${minutes} min of your time` : "Nothing waits for you.";
     paintChips();
     const rest = cards.slice(1);
+    nextBox.hidden = !rest.length;
+    nextCount.textContent = String(rest.length);
     if (!rest.length) return nextEl.replaceChildren();
     const now = Date.now();
     const later = (c: Card) => (s.later[c.id] ?? 0) > now;
@@ -205,14 +222,15 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
         s.talkCard = null;
         queue.paint();
       });
-      const kind = span("fy-kind", KIND[c.kind].label);
-      kind.style.setProperty("--c", KIND_COLOUR[c.kind]);
-      r.append(kind, span("fy-room", room), span("fy-title", withoutRoom(c.title, room)));
+      r.style.setProperty("--c", KIND_COLOUR[c.kind]);
+      const meta = span("fy-meta");
+      meta.append(span("fy-kind", KIND[c.kind].label), span("fy-room", room));
+      r.append(span("fy-title", withoutRoom(c.title, room)), meta, span("fy-age", later(c) ? "Later" : short(c.arrivedMs, now)));
       r.title = "Bring this card to the front";
       return r;
     });
     const more = rest.length > NEXT ? [div("fy-more", `+${rest.length - NEXT} more`)] : [];
-    nextEl.replaceChildren(div("fy-head", `Next · ${rest.length}`), ...rows, ...more);
+    nextEl.replaceChildren(...rows, ...more);
   }
 
   /** A chip shows only when it has cards, or is the one picked: an empty chip is noise. */
@@ -231,6 +249,8 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
       return b;
     }).filter((b): b is HTMLButtonElement => b !== null);
     chipsEl.replaceChildren(...chips);
+    // "All" alone filters nothing.
+    chipsEl.hidden = chips.length < 2;
   }
 
   function onKey(e: KeyboardEvent): void {

@@ -196,7 +196,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   // ---------------------------------------------------------------- scripts
 
-  const scriptFor = (verb: string): Script | undefined => s.world?.catalog?.find((x) => x.verb === verb && !x.pending);
+  /** The verb's own script, else its family's: `cmd.echo` plays `cmd` (src-tauri/src/live/catalog.rs). */
+  const scriptFor = (verb: string): Script | undefined => {
+    const find = (v: string) => s.world?.catalog?.find((x) => x.verb === v && !x.pending);
+    const dot = verb.lastIndexOf(".");
+    return find(verb) ?? (dot > 0 ? find(verb.slice(0, dot)) : undefined);
+  };
 
   const hand: Stagehand = {
     where(id, place) {

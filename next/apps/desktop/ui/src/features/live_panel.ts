@@ -135,7 +135,8 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     const kids = s.world!.agents.filter((k) => k.parent === a.id);
     const jobs = s.world!.jobs.filter((j) => j.agent === a.id);
     const fam = div("pfam");
-    for (const k of kids) fam.append(link(ctx.nameOf(k), () => ctx.select({ kind: "agent", id: k.id })));
+    // A subagent reads as its job and what it does now, so the parent's panel shows its whole crew.
+    for (const k of kids) fam.append(link(k.helperKind ? `${k.task ?? ctx.nameOf(k)} · ${doing(k)}` : ctx.nameOf(k), () => ctx.select({ kind: "agent", id: k.id })));
     if (a.helpers) fam.append(span("", `${a.helpers} ${plural(a.helpers, "helper")}`));
     for (const j of jobs) fam.append(span("", `${j.label}${j.bay ? " in a test bay" : ""}`));
     if (!fam.childElementCount) fam.textContent = "None";

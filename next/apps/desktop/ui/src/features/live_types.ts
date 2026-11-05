@@ -39,6 +39,8 @@ export type LiveAgent = {
   files: string[];
   panel: string | null;
   issue: number | null;
+  /** Set on a subagent: its type, like `Explore`. `parent` is the agent that started it. */
+  helperKind?: string | null;
 };
 
 export type LiveJob = {

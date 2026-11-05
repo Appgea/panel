@@ -35,7 +35,12 @@ const PROMPT_ROLES: [RegExp, string][] = [
 ];
 
 /** What `who` reads. Agents and embers both have these. */
-export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null };
+export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null; helperKind?: string | null };
+
+/** A subagent's type as a role: `Explore` → "Explore helper", `general-purpose` → "Helper". */
+export function helperRole(kind: string): string {
+  return /^(general-purpose|helper|fork)$/i.test(kind) ? "Helper" : `${cap(kind.replace(/[-_]/g, " "))} helper`;
+}
 
 /**
  * Who an agent is, for a person who did not start it. `title` is the name to show: the folk name
@@ -44,6 +49,11 @@ export type WhoInput = { name: string | null; harness: Harness; headless: boolea
  */
 export function who(a: WhoInput, parent: string | null = null): { title: string; sub: string; role: string } {
   const task = (a.task ?? "").trim();
+  if (a.helperKind) {
+    const role = helperRole(a.helperKind);
+    const model = [HARNESS[a.harness], short(a.model)].filter(Boolean).join(" ");
+    return { title: parent ? `${role} of ${parent}` : role, sub: model, role };
+  }
   let role = "";
   for (const [re, r] of PROMPT_ROLES) {
     const m = task.match(re);
@@ -81,21 +91,27 @@ export function withoutRoom(title: string, room: string): string {
 /** What an agent is doing, in one line. */
 export function doing(a: LiveAgent): string {
   switch (a.state) {
+    // A bare "Working" says nothing. The last step or the last words say what it is on.
     case "work":
-      return a.now?.label ?? "Working";
+      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `After ${lower(a.steps[0].label)}` : "Working");
     case "think":
-      return a.steps[0] ? `Planning after ${a.steps[0].label}` : "Planning";
+      return a.steps[0] ? `Planning after ${lower(a.steps[0].label)}` : (a.lastText ?? "Planning");
     case "turn":
       return a.lastText ?? "Wants to talk";
     case "stuck":
       return `Stuck on ${a.now?.label ?? "a step"}`;
     default:
-      return "Idle";
+      return a.lastText ?? (a.steps[0] ? `Last: ${lower(a.steps[0].label)}` : "Idle");
   }
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {
   return n === 1 ? one : many;
+}
+
+/** "Edited main.dart" → "edited main.dart", for a label inside a sentence. Leaves "CI" alone. */
+function lower(s: string): string {
+  return /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
 }
 
 export function cap(s: string): string {

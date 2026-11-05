@@ -19,7 +19,9 @@
 .prows { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 10px; margin: 12px 0 0; }
 .prows dt { padding-top: 1px; color: var(--l-ink-3); font-size: 12px; }
 .prows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.pfam { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.pfam { display: flex; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+/* A helper's line is its job and its step, which can run long: one line, cut with an ellipsis. */
+.pfam > * { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .psec { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--l-line); font-size: 12px; color: var(--l-ink-3); }
 .pdone { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; max-height: 156px; overflow: auto; font: 400 12px/1.4 var(--l-mono); color: var(--l-ink-2); }
 .pdone li { display: grid; grid-template-columns: 42px minmax(0, 1fr); gap: 8px; }

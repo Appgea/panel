@@ -198,6 +198,7 @@ mod tests {
             last_text: said.map(Into::into),
             helpers: 0,
             files: Vec::new(),
+            helper_kind: None,
             panel: None,
             issue: None,
         }

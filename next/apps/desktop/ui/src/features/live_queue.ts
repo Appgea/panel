@@ -8,7 +8,7 @@
 import { errorText } from "../errors";
 import { KIND, order, scoreLine, type Act, type BoardFeed, type Card, type CardKind } from "./live_cards";
 import type { Facts } from "./live_facts";
-import { button, div, span, withoutRoom } from "./live_text";
+import { ago, button, div, span, withoutRoom } from "./live_text";
 import type { LiveWorld } from "./live_types";
 import "./live_queue.css";
 
@@ -122,32 +122,32 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
 
   function render(card: Card | null): void {
     const now = Date.now();
+    el.classList.toggle("is-clear", !card);
     if (!card) {
       const working = s.world!.agents.filter((a) => a.state === "work" || a.state === "think").length;
       const head = div("qhead");
-      const kind = span("qkind", "Clear");
+      const kind = span("qkind", "All clear");
       kind.style.setProperty("--c", "var(--l-done)");
-      head.append(kind, span("qpos", "0 cards"));
+      head.append(kind);
       el.replaceChildren(head, div("qtitle", "Nothing needs you"), div("qwhy", s.boardNote || `${working} ${working === 1 ? "agent" : "agents"} working. You can leave. New calls wait here.`));
       return;
     }
     const room = ctx.roomName(card.room);
+    // One line says what it is, where it is from, who sent it and how long it has waited.
     const head = div("qhead");
     const kind = span("qkind", KIND[card.kind].label);
     kind.style.setProperty("--c", KIND_COLOUR[card.kind]);
-    const minutes = Math.max(1, Math.round(s.cards.reduce((n, c) => n + c.minutes, 0)));
-    head.append(kind, span("qpos", `1 of ${s.cards.length} · about ${minutes} min`));
-    const nodes: HTMLElement[] = [head];
-    // Who sent it: the owner's agenda, the agent that waits, or where the card's lines come from.
-    const who = div("qwho");
-    const dots = span("qdots");
     const agent = ctx.agentById(card.agent ?? null);
-    const dot = document.createElement("i");
-    dot.style.setProperty("--c", agent ? `var(--l-${agent.state})` : KIND_COLOUR[card.kind]);
-    dots.append(dot);
-    const source = card.number ? `Your agenda · #${card.number}` : agent ? ctx.nameOf(agent) : SOURCE[card.kind];
-    who.append(dots, span("", `${source} · ${room}`));
-    nodes.push(who);
+    const source = card.number ? `#${card.number}` : agent ? ctx.nameOf(agent) : SOURCE[card.kind];
+    const who = span("qwho");
+    if (agent) {
+      const dot = document.createElement("i");
+      dot.style.setProperty("--c", `var(--l-${agent.state})`);
+      who.append(dot);
+    }
+    who.append(span("qroom", room), span("qsrc", source));
+    head.append(kind, who, span("qage"));
+    const nodes: HTMLElement[] = [head];
     nodes.push(div("qtitle", withoutRoom(card.title, room)));
     if (card.lines[0]) nodes.push(div("qwhy", card.lines.join(" ")));
     if (card.items?.length) nodes.push(itemList(card.items));
@@ -162,20 +162,22 @@ export function mountQueue(ctx: QueueCtx, el: HTMLElement): Queue {
       card.options.forEach((o, i) => opts.append(opt(o.label, i === 0 ? "Enter" : String(i + 1), i === 0, () => void act(card, o.act))));
       if (card.talk) opts.append(opt("Talk", "T", false, () => startTalk(card)));
     }
-    nodes.push(opts);
-    const foot = div("qfoot");
     const laterBtn = button("later", "", () => putOff(card));
+    laterBtn.title = "Put it off for 30 min";
     laterBtn.append("Later ", kbd("↓"));
-    foot.append(span("qscore"), laterBtn);
-    nodes.push(foot);
+    opts.append(laterBtn);
+    nodes.push(opts);
     el.replaceChildren(...nodes);
     paintScore(card, now);
     el.querySelector<HTMLInputElement>(".reply")?.focus();
   }
 
+  /** The wait, in words. Why the card is in front stays one hover away: a formula is not news. */
   function paintScore(card: Card, now: number): void {
-    const score = el.querySelector(".qscore");
-    if (score) score.textContent = scoreLine(card, now, ctx.roomName(card.room));
+    const age = el.querySelector<HTMLElement>(".qage");
+    if (!age) return;
+    age.textContent = ago(card.arrivedMs, now);
+    age.title = `Why it is first: ${scoreLine(card, now, ctx.roomName(card.room))}`;
   }
 
   function picture(path: string): HTMLElement {
