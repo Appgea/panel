@@ -33,7 +33,7 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     }),
   );
 
-  const at = (id: string) => s.walks.get(id) ?? w.dots.get(id);
+  const at = (id: string) => w.dots.get(id);
   const focus = s.hover ?? (sel?.kind === "agent" ? sel.id : null);
   const links: object[] = [];
   const f = focus ? world.agents.find((a) => a.id === focus) : undefined;
@@ -49,8 +49,7 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
   const dots = world.agents.flatMap((a) => {
     const spot = w.dots.get(a.id);
     if (!spot || spot.swarm < 0) return [];
-    const p = at(a.id)!;
-    return [{ id: a.id, x: p.x, y: p.y, r: spot.r, state: a.state, helpers: a.helpers + spot.swarm, selected: sel?.kind === "agent" && sel.id === a.id, hovered: s.hover === a.id, carry: s.carries.get(a.id) ?? null }];
+    return [{ id: a.id, x: spot.x, y: spot.y, r: spot.r, state: a.state, helpers: a.helpers + spot.swarm, selected: sel?.kind === "agent" && sel.id === a.id, hovered: s.hover === a.id, carry: s.carries.get(a.id) ?? null }];
   });
 
   return {
@@ -59,7 +58,7 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     reduced: s.reduced,
     camera: s.camera,
     // The amber `card` edge: an agent in this district waits for the owner.
-    districts: w.districts.map((d) => ({ x: d.x, y: d.y, r: d.r, edge: d.stuck ? "stuck" : d.waiting ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
+    districts: w.districts.map((d) => ({ x: d.x, y: d.y, w: d.w, h: d.h, edge: d.stuck ? "stuck" : d.waiting ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
     tiles,
     hub: { ...w.hub, hot: world.mac.hot, bays: w.hub.bays.map((b, i) => ({ ...b, held: !!world.mac.bays[i]?.holder })) },
     landmarks: [

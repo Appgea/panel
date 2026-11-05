@@ -1,43 +1,51 @@
 /**
- * The words on the map: district signs, This Mac and its bays, the landmarks, and each agent's
- * name tag and speech bubble. Bevy draws every shape. Words sit in stage pixels over the world
- * point they belong to, so they stay sharp at any zoom.
+ * The words on the map: plot signs, This Mac and its bays, the landmarks, and each agent's
+ * bubble. Bevy draws every shape. Words sit in stage pixels over the world point they belong
+ * to, so they stay sharp at any zoom.
  *
- * Words keep their size while the map zooms, so zooming out packs them together. Two rules keep
- * them apart. Small words go first as the map shrinks (the zoom levels below). Then every word
- * that is left gets a priority, and one that would touch a more important word hides until there
- * is room. Owner, 2026-11-05: "Zooming out and in, things look weird. Sometimes text overlap."
+ * Every agent always has its bubble: its name and what it does now, beside its dot in its row.
+ * A script may put its own words there for a moment. Owner, 2026-11-05: "I like the bubbles
+ * that we show what they are doing."
+ *
+ * Words keep their size while the map zooms, so zooming out packs them together. Three rules
+ * keep them apart. A bubble is never wider than its row, and drops to one line below TIGHT_ZOOM.
+ * Small words go first as the map shrinks (the zoom levels below). Then every word that is left
+ * gets a priority, and one that would touch a more important word hides until there is room.
+ * Owner, 2026-11-05: "Zooming out and in, things look weird. Sometimes text overlap."
  *
  * Every element is kept by key and only its text changes, so its size is measured once per text,
- * not on every frame of a drag. An agent's tag and bubble slide with a CSS transition that
- * matches Bevy's glide. While the owner drags, `.is-panning` turns the transition off.
+ * not on every frame of a drag.
  */
 
-import { button, div, span, STATE_WORD } from "./live_text";
+import { button, div, doing, span, STATE_WORD, taskLine } from "./live_text";
 import type { LiveAgent, LiveCtx } from "./live_types";
+import { BUBBLE_DX, BUBBLE_W } from "./live_world";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
 
-/** Below this zoom only agents that need the owner, or the one in focus, keep their name tags. */
-const TAG_ZOOM = 0.7;
 /** Below these zooms This Mac shows only its name, then no bay words. */
 const HUB_LINE_ZOOM = 0.6;
 const BAY_ZOOM = 0.75;
-/** Below this zoom signs and landmarks show their name without the second line. */
+/** Below this zoom signs and landmarks show their name without the second part. */
 const META_ZOOM = 0.55;
+/** Below this zoom a bubble keeps to one line, so it fits its row. Below the small one it shrinks. */
+const TIGHT_ZOOM = 0.9;
+const SMALL_ZOOM = 0.62;
 /** Clear space kept around every word, in CSS pixels. */
 const GAP = 3;
+/** How long a bubble's edge stays lit after the agent starts a new step. */
+const NEW_MS = 1200;
 
 /**
  * Which word wins a spot, lowest first. What an agent says is the point of Live, so its bubble
- * beats a district's sign. The words that are always the same lose first.
+ * beats a plot's sign. The words that are always the same lose first.
  */
-const RANK = { focusBubble: 0, urgentTag: 1, bubble: 2, sign: 3, hub: 4, tag: 5, mark: 6, bay: 7 } as const;
+const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark: 6, bay: 7 } as const;
 
-/** Where a word's box sits against its point. */
-type Anchor = "above" | "below" | "corner";
-type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dy: number };
+/** Where a word's box sits against its point. `right` starts just right of an agent's dot. */
+type Anchor = "below" | "corner" | "right";
+type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dx: number };
 
 export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   const fixed = div("live-fixed");
@@ -45,8 +53,16 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   layer.append(fixed, agents);
 
   const pool = new Map<string, HTMLElement>();
-  const nodes = new Map<string, { el: HTMLElement; tag: HTMLElement; bubble: HTMLElement }>();
-  const sizes = new WeakMap<HTMLElement, { sig: string; w: number; h: number }>();
+  const nodes = new Map<string, { el: HTMLElement; bubble: HTMLElement; who: HTMLElement; kids: HTMLElement; say: HTMLElement; lit: number }>();
+  let sizes = new WeakMap<HTMLElement, { sig: string; w: number; h: number }>();
+  // Words measured in the fallback font wrap wider and taller. Once Live's fonts arrive every
+  // size is measured again, or a bubble would hide the sign above it for good.
+  document.fonts?.addEventListener?.("loadingdone", () => {
+    sizes = new WeakMap();
+    paint();
+  });
+  /** The bubble width for this zoom, part of every measure's signature. */
+  let bw = "";
 
   function keep(key: string, used: Set<string>, make: () => HTMLElement): HTMLElement {
     let el = pool.get(key);
@@ -64,14 +80,24 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     if (!n) {
       const el = button("live-agent", "", () => ctx.select({ kind: "agent", id: a.id }));
       el.dataset.agent = a.id;
-      const tag = span("live-tag", "");
-      const bubble = span("live-bubble", "");
-      el.append(tag, bubble);
-      agents.append(el);
-      n = { el, tag, bubble };
+      const bubble = span("live-bubble");
+      const who = span("live-who");
+      const kids = span("live-kids");
+      const say = span("live-say");
+      bubble.append(who, kids, say);
+      el.append(bubble);
+      // Joins the page in paint, after its first place is set, so it never slides in from 0, 0.
+      n = { el, bubble, who, kids, say, lit: 0 };
       nodes.set(a.id, n);
     }
     return n;
+  }
+
+  /** What an agent's bubble says when no script speaks: its step, or for an idle one its work. */
+  function line(a: LiveAgent): string {
+    if (a.state !== "idle") return doing(a);
+    const iss = ctx.issueOf(a);
+    return iss ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? STATE_WORD.idle);
   }
 
   function paint(): void {
@@ -88,6 +114,15 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       return p;
     };
 
+    // The gap between dot and bubble keeps its size, so it comes out of the bubble's width.
+    const nextBw = `${Math.max(60, Math.round((BUBBLE_W + BUBBLE_DX) * z - BUBBLE_DX))}px`;
+    if (nextBw !== bw) {
+      bw = nextBw;
+      layer.style.setProperty("--bw", bw);
+    }
+    layer.classList.toggle("is-tight", z < TIGHT_ZOOM);
+    layer.classList.toggle("is-small", z < SMALL_ZOOM);
+
     for (const d of w.districts) {
       const sign = keep(`sign:${d.key}`, used, () => {
         const b = button("live-sign", "", () => ctx.select({ kind: "room", id: d.key }));
@@ -97,12 +132,14 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const working = d.agents.filter((id) => ctx.agentById(id)?.state !== "idle").length;
       const meta = [working ? `${working} working` : `${d.agents.length} idle`, d.waiting ? `${d.waiting} ${d.waiting === 1 ? "waits" : "wait"} for you` : "", d.stuck ? "stuck" : ""].filter(Boolean).join(" · ");
       text(sign.children[0] as HTMLElement, d.name);
-      const line = sign.children[1] as HTMLElement;
-      text(line, meta);
-      line.className = `live-sign-meta${d.stuck ? " is-stuck" : d.waiting ? " is-card" : ""}`;
+      const metaEl = sign.children[1] as HTMLElement;
+      text(metaEl, meta);
+      metaEl.className =`live-sign-meta${d.stuck ? " is-stuck" : d.waiting ? " is-card" : ""}`;
       sign.classList.toggle("is-small", z < META_ZOOM);
-      const p = place(sign, d.x, d.y - d.r);
-      words.push({ el: sign, rank: RANK.sign, x: p.x, y: p.y, anchor: "above", dy: 8 });
+      // The sign stays inside its plot's head at every zoom.
+      sign.style.maxWidth = `${Math.max(40, Math.round((d.w - 20) * z))}px`;
+      const p = place(sign, d.x - d.w / 2 + 10, d.y - d.h / 2 + 6);
+      words.push({ el: sign, rank: RANK.sign, x: p.x, y: p.y, anchor: "corner", dx: 0 });
     }
 
     const m = world.mac;
@@ -119,7 +156,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     hub.style.width = `${Math.max(60, w.hub.w * z - 28)}px`;
     hub.classList.toggle("is-small", z < HUB_LINE_ZOOM);
     const hp = place(hub, w.hub.x - w.hub.w / 2 + 14, w.hub.y - w.hub.h / 2 + 10);
-    words.push({ el: hub, rank: RANK.hub, x: hp.x, y: hp.y, anchor: "corner", dy: 0 });
+    words.push({ el: hub, rank: RANK.hub, x: hp.x, y: hp.y, anchor: "corner", dx: 0 });
     if (z >= BAY_ZOOM)
       w.hub.bays.forEach((b, i) => {
         const hold = m.bays[i];
@@ -133,7 +170,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         bay.style.width = `${Math.max(40, b.w * z - 16)}px`;
         text(bay.children[1] as HTMLElement, hold?.holder ? [owner ? ctx.nameOf(owner) : "", hold.holder].filter(Boolean).join(" · ") : "Free");
         const p = place(bay, b.x - b.w / 2 + 8, b.y - b.h / 2 + 5);
-        words.push({ el: bay, rank: RANK.bay, x: p.x, y: p.y, anchor: "corner", dy: 0 });
+        words.push({ el: bay, rank: RANK.bay, x: p.x, y: p.y, anchor: "corner", dx: 0 });
       });
 
     const L = w.landmarks;
@@ -145,7 +182,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       });
       el.classList.toggle("is-small", z < META_ZOOM);
       const p = place(el, x, y);
-      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "below", dy: 0 });
+      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "below", dx: 0 });
     };
     mark("tower", "GitHub", "pushes and releases", L.tower.x, L.tower.y + 14);
     mark("web", "Web", "searches and pages", L.web.x, L.web.y + 50);
@@ -155,27 +192,32 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         pool.delete(key);
       }
 
-    // Agents: kept, so their move animates.
+    // Agents: kept by id, so a bubble keeps its element while its words change.
     const seen = new Set<string>();
+    const now = Date.now();
     for (const a of world.agents) {
       const spot = w.dots.get(a.id);
       if (!spot || spot.swarm < 0) continue;
       seen.add(a.id);
+      const fresh = !nodes.has(a.id);
       const n = agentNode(a);
-      const p = place(n.el, ...xy(s.walks.get(a.id) ?? spot));
-      n.el.className = `live-agent is-${a.state}`;
-      const name = ctx.nameOf(a);
-      n.el.setAttribute("aria-label", `${name}, ${STATE_WORD[a.state]}${a.now ? `: ${a.now.label}` : ""}`);
+      const p = place(n.el, spot.x, spot.y);
+      if (fresh) agents.append(n.el);
       const focus = s.hover === a.id || (s.selection?.kind === "agent" && s.selection.id === a.id);
       const urgent = a.state === "turn" || a.state === "stuck";
-      n.el.classList.toggle("is-focus", focus);
-      text(n.tag, spot.swarm > 0 ? `${name} ×${spot.swarm + a.helpers}` : name);
-      n.tag.hidden = !(focus || urgent || z >= TAG_ZOOM);
-      if (!n.tag.hidden) words.push({ el: n.tag, rank: focus || urgent ? RANK.urgentTag : RANK.tag, x: p.x, y: p.y, anchor: "below", dy: 9 });
-      const said = s.bubbles.get(a.id) ?? (focus ? (a.now?.label ?? a.lastText ?? STATE_WORD[a.state]) : null);
-      text(n.bubble, said ?? "");
-      n.bubble.hidden = !said;
-      if (said) words.push({ el: n.bubble, rank: focus ? RANK.focusBubble : RANK.bubble, x: p.x, y: p.y, anchor: "above", dy: 9 });
+      const name = ctx.nameOf(a);
+      const said = s.bubbles.get(a.id) ?? line(a);
+      const kids = spot.swarm + a.helpers;
+      // A new step lights the bubble's edge for a moment, so the eye goes to the agent that moved.
+      if (!fresh && !s.reduced && n.say.textContent !== said) n.lit = now + NEW_MS;
+      text(n.who, name);
+      text(n.kids, kids ? `+${kids}` : "");
+      n.kids.title = kids ? `${kids} ${kids === 1 ? "helper" : "helpers"}` : "";
+      text(n.say, said);
+      n.el.className = `live-agent is-${a.state}${focus ? " is-focus" : ""}${n.lit > now ? " is-new" : ""}`;
+      n.el.setAttribute("aria-label", `${name}, ${STATE_WORD[a.state]}: ${said}`);
+      n.bubble.title = `${name}: ${said}`;
+      words.push({ el: n.bubble, rank: focus ? RANK.focusBubble : urgent ? RANK.urgentBubble : RANK.bubble, x: p.x, y: p.y, anchor: "right", dx: BUBBLE_DX });
     }
     for (const [id, n] of nodes)
       if (!seen.has(id)) {
@@ -188,16 +230,17 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
 
   /** Measures what changed, then hides each word that would touch one placed before it. */
   function cull(words: Word[]): void {
+    const look = layer.className;
     const boxes = words.map((wd) => {
-      const sig = `${wd.el.className}|${wd.el.style.width}|${wd.el.textContent}`;
+      const sig = `${wd.el.className}|${wd.el.style.width}|${wd.el.style.maxWidth}|${bw}|${look}|${wd.el.textContent}`;
       let size = sizes.get(wd.el);
       if (!size || size.sig !== sig) {
         size = { sig, w: wd.el.offsetWidth, h: wd.el.offsetHeight };
         sizes.set(wd.el, size);
       }
       const { w, h } = size;
-      const x0 = wd.anchor === "corner" ? wd.x : wd.x - w / 2;
-      const y0 = wd.anchor === "above" ? wd.y - wd.dy - h : wd.y + wd.dy;
+      const x0 = wd.anchor === "below" ? wd.x - w / 2 : wd.x + wd.dx;
+      const y0 = wd.anchor === "right" ? wd.y - h / 2 : wd.y;
       return { wd, x0: x0 - GAP, y0: y0 - GAP, x1: x0 + w + GAP, y1: y0 + h + GAP };
     });
     boxes.sort((a, b) => a.wd.rank - b.wd.rank);
@@ -210,10 +253,6 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   }
 
   return { paint };
-}
-
-function xy(p: { x: number; y: number }): [number, number] {
-  return [p.x, p.y];
 }
 
 /** Writes text only when it changed, so a repaint never costs a layout for the same words. */

@@ -81,19 +81,19 @@
   border-radius: 14px;
   background: var(--l-deck);
 }
-.live-list { padding: 6px 6px 10px; }
+.live-list { padding: 4px 6px 8px; }
 .live-list[hidden] { display: none; }
-.side-head { padding: 10px 8px 4px; font: 500 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.side-head { padding: 8px 8px 3px; font: 500 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
 .side-head[hidden], .side-list[hidden] { display: none; }
 .side-row {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto;
-  grid-template-areas: "dot who where" ". what what" ". meta meta";
+  grid-template-areas: "dot who where" ". what what";
   align-items: center;
   column-gap: 8px;
-  row-gap: 1px;
+  row-gap: 0;
   width: 100%;
-  padding: 7px 8px;
+  padding: 5px 8px;
   border: 0;
   border-radius: 8px;
   background: none;
@@ -108,14 +108,13 @@
 .side-who { grid-area: who; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--l-ink); font-weight: 600; }
 .side-where { grid-area: where; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
 .side-what { grid-area: what; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.side-what[hidden], .side-meta[hidden] { display: none; }
-.side-meta { grid-area: meta; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.35 var(--l-mono); color: var(--l-ink-3); }
+.side-what[hidden] { display: none; }
 .side-row.is-turn .side-what { color: var(--l-turn); }
 .side-row.is-stuck .side-what { color: var(--l-stuck); }
 .side-row.is-ended .side-who { color: var(--l-ink-2); font-weight: 500; }
 /* A helper, under the agent that started it. The line on the left ties it to its parent. */
 .side-row.is-child { width: calc(100% - 18px); margin-left: 18px; box-shadow: inset 1px 0 0 var(--l-line-2); border-radius: 0 8px 8px 0; }
-.side-row.is-more { padding-top: 4px; padding-bottom: 4px; }
+.side-row.is-more { padding-top: 2px; padding-bottom: 3px; }
 .side-row.is-more .side-who { color: var(--l-ink-3); font-weight: 500; }
 .side-row.is-more i { box-shadow: none; }
 .side-empty { display: block; width: 100%; padding: 8px; border: 0; background: none; color: var(--l-ink-3); font: 400 12.5px/1.4 var(--l-sans); text-align: left; }
@@ -188,6 +187,5 @@
   font-size: 12px;
   color: var(--l-ink-3);
 }
-.live-hint { flex: none; margin: 10px 0 0; font-size: 12.5px; color: var(--l-ink-3); }
 
 .live .opt.is-danger { color: var(--l-stuck); border-color: #4a2a31; }

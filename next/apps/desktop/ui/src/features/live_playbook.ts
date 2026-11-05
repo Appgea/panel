@@ -16,7 +16,7 @@ import type { EmberOutcome } from "./live_types";
 export type Entry = { id: string; trigger: string; moves: string; tells: string; everyMs: number };
 
 export const PLAYBOOK: Entry[] = [
-  { id: "arrive", trigger: "a new agent appears with a parent", moves: "a beam from the parent to the new dot", tells: "who started whom", everyMs: 0 },
+  { id: "arrive", trigger: "a new agent appears with a parent", moves: "a beam from the parent to the new dot, or a small ring on the parent when the helper rides on it", tells: "who started whom", everyMs: 0 },
   { id: "appear", trigger: "a new agent appears on its own", moves: "a ring opens around the new dot", tells: "someone started an agent here", everyMs: 0 },
   { id: "done", trigger: "an agent ends done", moves: "green sparks and a green ring where it stood", tells: "it finished; its report is under Ended", everyMs: 0 },
   { id: "failed", trigger: "an agent ends failed, crashed or stuck", moves: "red sparks where it stood", tells: "it did not finish; read its report", everyMs: 0 },
@@ -56,7 +56,8 @@ export function direct(before: Seen | null, after: Seen, endings: EmberEnd[], pl
   for (const [id, d] of after.dots) {
     if (before.dots.has(id)) continue;
     const parent = d.parent ? after.dots.get(d.parent) : undefined;
-    if (parent) out.push({ kind: "beam", x: parent.x, y: parent.y, x2: d.x, y2: d.y, color: COLOR.ink, ms: 1400 });
+    if (parent && parent.x === d.x && parent.y === d.y) out.push({ kind: "ring", x: d.x, y: d.y, color: COLOR.ink, size: 30, ms: 900 });
+    else if (parent) out.push({ kind: "beam", x: parent.x, y: parent.y, x2: d.x, y2: d.y, color: COLOR.ink, ms: 1400 });
     else out.push({ kind: "ring", x: d.x, y: d.y, color: COLOR.work, size: 40, ms: 1100 });
   }
   for (const end of endings) {

@@ -7,8 +7,9 @@
  * (foryou.ts), the issues on the Board, what agents made in Review. Owner, 2026-11-05: "no
  * review, no boards, tasks. They must be a separate section."
  *
- * The map (live_world.ts): This Mac in the middle with its testlock bays, the GitHub tower above
- * and the web gate right. Each project with a running agent is a round district around them.
+ * The map (live_world.ts): This Mac with its testlock bays, the GitHub tower left and the web
+ * gate right, in a band on top. Under it each project with a running agent is a plot with one row
+ * per agent, and each agent's bubble always says what it does now.
  *
  * Each step an agent takes has a verb, and each verb has an animation script in the catalog
  * (live_script.ts). A git push carries a crate up the tower. A search sweeps a radar. A verb
@@ -32,7 +33,7 @@ import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
 import { direct, type EmberEnd, type Seen } from "./live_playbook";
 import { scene } from "./live_scene";
-import { PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
+import { COLOR, PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
 import { mountSide } from "./live_side";
 import { button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
@@ -72,8 +73,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
         <div class="apanel" data-panel hidden></div>
         <div class="live-catalog" data-catalog></div>
       </aside>
-    </div>
-    <p class="live-hint">Drag to move. Scroll or pinch to zoom, 0 fits the map. Click an agent or its row to follow it.</p>`;
+    </div>`;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel)!;
   const stage = q("[data-stage]");
   const tools = q("[data-tools]");
@@ -87,10 +87,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     world: null,
     board: null,
     layout: null,
-    slots: new Map(),
+    slots: { cols: 0, col: new Map(), size: "" },
     camera: { x: 0, y: 0, zoom: 0.6 },
     cameraHeld: false,
-    walks: new Map(),
     carries: new Map(),
     bubbles: new Map(),
     lights: new Map(),
@@ -204,7 +203,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       const w = s.layout;
       const spot = w?.dots.get(id);
       if (!w || !spot) return [];
-      const self = s.walks.get(id) ?? spot;
+      const self = spot;
       const a = ctx.agentById(id);
       const district = w.districts.find((d) => d.key === spot.room);
       const mine = district?.tiles.filter((t) => t.agents.includes(id)) ?? [];
@@ -223,12 +222,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
           return mine;
         case "parent": {
           const p = a?.parent ? w.dots.get(a.parent) : undefined;
-          return [p ? (s.walks.get(a!.parent!) ?? p) : self];
+          return [p ?? self];
         }
         case "helpers": {
           const kids = (s.world?.agents ?? []).filter((k) => k.parent === id).flatMap((k) => {
             const d = w.dots.get(k.id);
-            return d && d.swarm >= 0 ? [s.walks.get(k.id) ?? d] : [];
+            return d && d.swarm >= 0 ? [d] : [];
           });
           if (kids.length) return kids;
           // Helpers that are not on the map, or a swarm: points around the agent.
@@ -257,9 +256,15 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     fx(f) {
       if (!s.reduced) s.pendingFx.push(f);
     },
+    // An agent never leaves its row, so the owner finds it where it was on every look. A walk
+    // sends a spark to the place instead, in the colour of what the agent carries. The way home,
+    // to the agent's own dot or the middle of its plot, sends nothing.
     walk(id, to) {
-      if (to && !s.reduced) s.walks.set(id, to);
-      else s.walks.delete(id);
+      const w = s.layout;
+      const from = w?.dots.get(id);
+      const d = w?.districts.find((x) => x.key === from?.room);
+      if (!to || !from || !d || s.reduced || Math.hypot(to.x - from.x, to.y - from.y) < 12 || (to.x === d.x && to.y === d.y)) return;
+      s.pendingFx.push({ kind: "orb", x: from.x, y: from.y, x2: to.x, y2: to.y, color: s.carries.get(id) ?? COLOR.work, size: 5, ms: 900 });
     },
     carry(id, color) {
       if (color) s.carries.set(id, color);
@@ -355,9 +360,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const width = stage.clientWidth;
     if (!w || !width) return;
     const now = Date.now();
-    s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots });
+    s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots, stage: { w: width, h: stage.clientHeight } });
     for (const [path, l] of s.lights) if (l.until < now) s.lights.delete(path);
-    if (!s.cameraHeld) fit();
+    if (!s.cameraHeld) {
+      const { x, y, zoom } = s.camera;
+      fit();
+      if (x !== s.camera.x || y !== s.camera.y || zoom !== s.camera.zoom) still();
+    }
     labels.paint();
 
     const snapshot = snap();
@@ -390,7 +399,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   zoomIn.setAttribute("aria-label", "Zoom in");
   zoomIn.title = "Zoom in (+)";
   const fitBtn = button("live-tool", "Fit", () => refit());
-  fitBtn.title = "Fit the map (0)";
+  // The hint used to take a line under the map. It lives here now, where a hand already is.
+  fitBtn.title = "Fit the map (0). Drag to move, scroll or pinch to zoom. Click an agent to follow it.";
   const anim = button("live-tool", "Animations", () => {
     if (!catalog.isOpen() && s.selection) select(null);
     catalog.toggle();
@@ -439,8 +449,17 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   // ---------------------------------------------------------------- camera, pointer and keys
 
+  /** Words jump with a camera move instead of sliding, for this paint and a moment after. */
+  let stillEnd = 0;
+  function still(): void {
+    root.classList.add("is-moving");
+    window.clearTimeout(stillEnd);
+    stillEnd = window.setTimeout(() => root.classList.remove("is-moving"), 150);
+  }
+
   /** Moves the camera without a new scene, so a drag stays smooth. */
   function moveCamera(): void {
+    still();
     view?.set_camera(s.camera.x, s.camera.y, s.camera.zoom);
     labels.paint();
     s.cameraHeld = true;

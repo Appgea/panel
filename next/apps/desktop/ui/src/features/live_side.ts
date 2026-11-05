@@ -3,6 +3,10 @@
  * now, then the agents that ended. The map shows where things happen. This list is what you
  * read. Owner, 2026-11-05: "I should be able to understand which agent is what."
  *
+ * A row is two lines, who and where, then what it does. The model and age are in its tooltip
+ * and its panel, so twenty agents fit without a scroll. Owner, 2026-11-05: "not space
+ * efficient. Hard for me to track."
+ *
  * A row is kept by id and only its words change, so a hand on a row never loses it to a repaint.
  * Hovering a row marks its dot on the map. A click opens the agent's panel, which takes the
  * column until it closes.
@@ -13,8 +17,11 @@ import type { LiveAgent, LiveCtx, LiveEmber } from "./live_types";
 
 /** Ended agents in the list. Older ones are in History. */
 const ENDED = 8;
-/** Helpers listed under their parent. The rest are one "+N more" line. */
-const KIDS = 2;
+/**
+ * Helpers listed under their parent. They ride on their parent on the map too, so only a helper
+ * that needs the owner gets its own row. The rest are one "+N helpers" line.
+ */
+const KIDS = 0;
 
 export type Side = { paint(): void };
 
@@ -31,7 +38,7 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     if (!r) {
       r = button("side-row", "", onClick);
       const dot = document.createElement("i");
-      r.append(dot, span("side-who"), span("side-where"), span("side-what"), span("side-meta"));
+      r.append(dot, span("side-who"), span("side-where"), span("side-what"));
       if (hoverId) {
         r.addEventListener("pointerenter", () => ctx.hover(hoverId));
         r.addEventListener("pointerleave", () => ctx.hover(null));
@@ -41,15 +48,13 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     return r;
   }
 
-  function fill(r: HTMLElement, colour: string, whoText: string, where: string, what: string, meta: string, title: string): void {
-    const [dot, w, at, wh, me] = [...r.children] as HTMLElement[];
+  function fill(r: HTMLElement, colour: string, whoText: string, where: string, what: string, title: string): void {
+    const [dot, w, at, wh] = [...r.children] as HTMLElement[];
     dot.style.setProperty("--c", colour);
     set(w, whoText);
     set(at, where);
     set(wh, what);
-    set(me, meta);
     wh.hidden = !what;
-    me.hidden = !meta;
     r.title = title;
   }
 
@@ -103,7 +108,7 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const iss = ctx.issueOf(a);
     const what = a.state === "idle" ? (iss ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? "Idle")) : doing(a);
     const meta = [me.sub, a.startedMs ? since(a.startedMs, now) : ""].filter(Boolean).join(" · ");
-    fill(r, `var(--l-${a.state})`, title, depth ? "" : room, what, meta, [me.title, me.sub, taskLine(a.task)].filter(Boolean).join("\n"));
+    fill(r, `var(--l-${a.state})`, title, depth ? "" : room, what, [me.title, meta, taskLine(a.task)].filter(Boolean).join("\n"));
     r.className = `side-row is-${a.state}${depth ? " is-child" : ""}`;
     return r;
   }
@@ -113,7 +118,7 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const key = `m:${parent.id}`;
     const r = row(key, () => ctx.select({ kind: "agent", id: parent.id }), parent.id);
     r.dataset.key = key;
-    fill(r, "var(--l-ink-3)", `+${n} more ${n === 1 ? "helper" : "helpers"}`, "", "", "", `Open ${ctx.nameOf(parent)} to see them all`);
+    fill(r, "var(--l-ink-3)", `+${n} ${n === 1 ? "helper" : "helpers"}`, "", "", `Open ${ctx.nameOf(parent)} to see them all`);
     r.className = `side-row is-more${depth ? " is-child" : ""}`;
     return r;
   }
@@ -124,7 +129,7 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     r.dataset.key = key;
     const me = who(e, e.parentName);
     const what = e.result ?? taskLine(e.task) ?? "";
-    fill(r, OUTCOME_COLOUR[e.outcome], `${me.title} · ${OUTCOME_WORD[e.outcome].toLowerCase()}`, e.roomName, what, [me.sub, ago(e.endedMs, now)].filter(Boolean).join(" · "), [me.title, me.sub, taskLine(e.task)].filter(Boolean).join("\n"));
+    fill(r, OUTCOME_COLOUR[e.outcome], `${me.title} · ${OUTCOME_WORD[e.outcome].toLowerCase()}`, e.roomName, what, [me.title, [me.sub, ago(e.endedMs, now)].filter(Boolean).join(" · "), taskLine(e.task)].filter(Boolean).join("\n"));
     r.className = "side-row is-ended";
     return r;
   }

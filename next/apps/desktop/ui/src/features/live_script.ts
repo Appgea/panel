@@ -8,10 +8,10 @@
  * reads this comment as its spec (src-tauri/src/live/catalog.rs). The owner deletes bad ones in
  * the catalog view, and the next sighting writes a new one.
  *
- * THE MAP. A dark field. This Mac, the hub, sits in the middle with two testlock bays. The
- * GitHub tower stands above it and the web gate to its right. Each project with a running agent
- * is a round district around the hub, with the files agents touched as small tiles on its rim.
- * Agents are small glowing electrons.
+ * THE MAP. A dark field. This Mac, the hub, sits in a band on top with two testlock bays, the
+ * GitHub tower to its left and the web gate to its right. Under it each project with a running
+ * agent is a plot, a rounded box with one row per agent and the files agents touched as small
+ * tiles along its bottom. Agents are small glowing electrons that never leave their row.
  *
  * A SCRIPT is a JSON object:
  *   {
@@ -41,7 +41,7 @@
  *
  * MOVES. Each move is an object with "do". Moves start one after another with no pause, except
  * "walk" and "wait", which hold the script until they end. Sizes are pixels, times are ms.
- *   {"do": "walk", "to": PLACE, "ms": 1200}         the agent glides there
+ *   {"do": "walk", "to": PLACE, "ms": 1200}         a spark flies from the agent to the place
  *   {"do": "wait", "ms": 600}
  *   {"do": "say", "text": "Pushing"}                 a bubble over the agent. "{label}" is the step's own words
  *   {"do": "orb", "from": P, "to": P, "color": C, "size": 6, "ms": 900}       a ball of light travels, with a trail
@@ -55,8 +55,8 @@
  *   {"do": "carry", "color": C}                      the agent holds a glowing crate. With no colour it drops it
  *   {"do": "light", "at": "files" or "file", "color": C, "ms": 1500}          file tiles glow
  * At most 24 moves and 8 seconds. Unknown moves and places are skipped. When the script ends,
- * the agent drops what it carries and glides home. A script without "say" shows the step's
- * words anyway, so an agent always tells what it does.
+ * the agent drops what it carries and its bubble goes back to the step's own words. A script
+ * without "say" shows the step's words anyway, so an agent always tells what it does.
  */
 
 export type Pt = { x: number; y: number };
@@ -125,7 +125,7 @@ function pairs(from: Pt[], to: Pt[]): [Pt, Pt][] {
 
 /**
  * Plays `script` for one agent. Returns a stop function. A stopped or finished script leaves the
- * agent with nothing carried, no bubble, and on its way home.
+ * agent with nothing carried and no script words in its bubble.
  */
 export function play(script: Script, agentId: string, hand: Stagehand, done: () => void): () => void {
   let stopped = false;

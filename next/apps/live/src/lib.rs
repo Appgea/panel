@@ -12,7 +12,8 @@
 //!   Nothing blinks or glides then, and no effect plays.
 //! - `camera`: the world point at the stage's centre and the `zoom`, 1 for one world pixel per
 //!   CSS pixel. The owner drags and zooms it.
-//! - `districts`: one circle per project with a running agent, with its `edge` (`quiet`, `card`
+//! - `districts`: one rounded box per project with a running agent, `x`, `y` its centre and `w`,
+//!   `h` its size, with its `edge` (`quiet`, `card`
 //!   when an agent there waits for the owner, `stuck`) and `selected`. Other projects are not on
 //!   the map.
 //! - `tiles`: the files agents touched, as small squares in their district. `lit` from 0 to 1
@@ -170,7 +171,8 @@ impl Default for Camera {
 pub(crate) struct District {
     pub x: f32,
     pub y: f32,
-    pub r: f32,
+    pub w: f32,
+    pub h: f32,
     pub edge: Edge,
     #[serde(default)]
     pub selected: bool,

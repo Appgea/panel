@@ -1,13 +1,16 @@
-//! The districts: one circle per project with something going on, drawn like a large atom. A
-//! faint floor, an edge that turns amber for a card and red for a stuck agent, and two thin
-//! orbit rings inside. The files agents touched are small tiles that glow while fresh.
+//! The districts: one rounded box per project with something going on, holding a row per agent.
+//! A faint floor and an edge that turns amber for a card and red for a stuck agent. The files
+//! agents touched are small tiles along the bottom that glow while fresh.
 
-use crate::draw::{tenth, Frame, Kit, Shape, DONE, FAIL, LINE, LINE_2, RAISE, WAIT, WALL, WORK};
+use crate::draw::{edge_shape, rect_shape, Frame, Kit, Shape, DONE, FAIL, LINE, LINE_2, RAISE, WAIT, WALL, WORK};
 use crate::{Current, Edge, Step};
 use bevy::prelude::*;
 
 #[derive(Component)]
 struct Drawn;
+
+/// A plot's corner radius.
+const CORNER: f32 = 12.0;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_systems(Update, redraw.in_set(Step::Draw).run_if(resource_changed::<Current>));
@@ -29,26 +32,20 @@ fn redraw(
     let mut put = |mesh: Handle<Mesh>, mat: Handle<ColorMaterial>, t: Transform| {
         commands.spawn((Drawn, Mesh2d(mesh), MeshMaterial2d(mat), t));
     };
-    let circle = kit.shape(&mut meshes, Shape::Circle);
     let glow = kit.shape(&mut meshes, Shape::Glow);
     let square = kit.shape(&mut meshes, Shape::Square);
     for d in &current.0.districts {
-        let at = |z: f32, s: f32| Transform::from_translation(frame.at(d.x, d.y, z)).with_scale(Vec3::splat(s));
-        put(circle.clone(), kit.paint(&mut mats, if d.selected { RAISE } else { WALL }, 0.72), at(0.0, d.r));
+        let at = |z: f32| Transform::from_translation(frame.at(d.x, d.y, z));
+        let floor = kit.shape(&mut meshes, rect_shape(d.w, d.h, CORNER));
+        put(floor, kit.paint(&mut mats, if d.selected { RAISE } else { WALL }, 0.72), at(0.0));
         let (hex, alpha) = match d.edge {
             Edge::Stuck => (FAIL, 0.55),
             Edge::Card => (WAIT, 0.45),
             Edge::Quiet if d.selected => (LINE_2, 1.0),
             Edge::Quiet => (LINE, 1.0),
         };
-        let edge = kit.shape(&mut meshes, Shape::Ring((1.0 / d.r * 1000.0).round().max(1.0) as i32));
-        put(edge, kit.paint(&mut mats, hex, alpha), at(0.02, d.r));
-        // Two orbits, tilted, like the shells of an atom. Only decoration, so very faint.
-        for (i, tilt) in [0.35f32, -0.35].iter().enumerate() {
-            let (rx, ry) = (d.r * 0.78, d.r * (0.30 + 0.06 * i as f32));
-            let shell = kit.shape(&mut meshes, Shape::Ellipse(tenth(rx), tenth(ry), 8));
-            put(shell, kit.paint(&mut mats, LINE_2, 0.55), Transform::from_translation(frame.at(d.x, d.y, 0.01)).with_rotation(Quat::from_rotation_z(*tilt)));
-        }
+        let edge = kit.shape(&mut meshes, edge_shape(d.w, d.h, CORNER, 1.0));
+        put(edge, kit.paint(&mut mats, hex, alpha), at(0.02));
     }
     for t in &current.0.tiles {
         let at = |z: f32| Transform::from_translation(frame.at(t.x, t.y, z));

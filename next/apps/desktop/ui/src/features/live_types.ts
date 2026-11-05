@@ -3,7 +3,7 @@
 import type { BoardFeed } from "./live_cards";
 import type { Facts } from "./live_facts";
 import type { FxOut, Pt, Script } from "./live_script";
-import type { World } from "./live_world";
+import type { Slots, World } from "./live_world";
 
 export type Harness = "claude" | "codex" | "grok" | "opencode" | "gemini" | "kimi";
 export type State = "work" | "think" | "turn" | "idle" | "stuck";
@@ -132,13 +132,11 @@ export type LiveState = {
   world: LiveWorld | null;
   board: BoardFeed | null;
   layout: World | null;
-  /** District slots by key, kept across polls so a district never jumps. */
-  slots: Map<string, number>;
+  slots: Slots;
   camera: Camera;
   /** The owner moved the camera. Until then it fits the map on its own. */
   cameraHeld: boolean;
-  /** What running scripts change: where an agent walked, what it carries, what it says. */
-  walks: Map<string, Pt>;
+  /** What running scripts change: what an agent carries, what it says. */
   carries: Map<string, string>;
   bubbles: Map<string, string>;
   /** File tiles a script lit, by path, until a time. */
