@@ -153,7 +153,7 @@ export type LiveState = {
   hover: string | null;
   pendingFx: FxOut[];
   /** Glyphs and tags that scripts put on the map, each until `born + ms`. */
-  marks: (Mark & { id: number; born: number })[];
+  marks: (Mark & { id: number; born: number; room?: { key: string; x: number; y: number } })[];
   /** How each agent's last test, build or push went, shown in its bubble until `until`. */
   results: Map<string, { text: string; ok: boolean; until: number }>;
   reduced: boolean;

@@ -30,6 +30,8 @@ export type World = {
   dots: Map<string, DotSpot>;
   /** The map's extent, for fitting the camera. */
   bounds: { x0: number; y0: number; x1: number; y1: number };
+  /** How wide every plot is. Wider than PLOT.w when the stage has width to spare. */
+  plotW: number;
 };
 /**
  * Which column each plot sits in, kept by live.ts across polls so a plot never jumps, and the
@@ -52,8 +54,13 @@ const BAND = { x0: -350, x1: 350, y0: -140 };
 export const PLOT = { w: 300, head: 34, row: 46, foot: 20, pad: 8, gap: 20, top: 116, dotX: 20 };
 /** A bubble starts this far right of its dot, past the orbits of the helpers riding on it. */
 export const BUBBLE_DX = 18;
-/** The width a bubble may take in its row, in world pixels. */
-export const BUBBLE_W = PLOT.w - PLOT.dotX - BUBBLE_DX - 10;
+/** The width a bubble may take in its row, in world pixels, for a plot this wide. */
+export const bubbleW = (plotW: number) => plotW - PLOT.dotX - BUBBLE_DX - 10;
+/**
+ * The widest a plot grows into width the stage would leave empty. Past this a bubble's line is
+ * too long to read at a glance. Owner, 2026-11-06: bubbles cut to "Edited…" with half the map empty.
+ */
+const PLOT_MAX_W = 440;
 const TILES_PER_DISTRICT = 22;
 export const TILE_STEP = 11;
 /** More columns than this make plots too small to read at the zoom it takes. */
@@ -109,13 +116,18 @@ export function lay(input: WorldInput): World {
   }
   const { col, tops } = pack(order, heights, slots.cols, slots.col);
   for (const k of order) slots.col.set(k, col.get(k)!);
+  // The zoom is set by height or by the cap at 1. Plots then widen into the width it leaves,
+  // in steps of 20 so a small change in height does not shift every plot.
+  const z = zoomOf(slots.cols, slots.col);
+  const roomy = ((stage.w - 40) / z - 24 - (slots.cols - 1) * PLOT.gap) / slots.cols;
+  const plotW = Math.max(PLOT.w, Math.min(PLOT_MAX_W, Math.floor(roomy / 20) * 20));
 
   const hub = { x: 0, y: 0, ...HUB, bays: [0, 1].map((i) => ({ x: -72 + i * 144, y: 26, w: 128, h: 38 })) };
   const dots = new Map<string, DotSpot>();
-  const left = -gridWidth(slots.cols) / 2;
+  const left = -gridWidth(slots.cols, plotW) / 2;
   const districts: District[] = order.map((key) => {
     const p = plots.get(key)!;
-    const x0 = left + col.get(key)! * (PLOT.w + PLOT.gap);
+    const x0 = left + col.get(key)! * (plotW + PLOT.gap);
     const y0 = PLOT.top + tops.get(key)!;
     p.rows.forEach((a, i) => {
       const spot = { x: x0 + PLOT.dotX, y: y0 + PLOT.head + PLOT.row * i + PLOT.row / 2, r: radius(a), room: key, swarm: p.riders.get(a.id)?.length ?? 0 };
@@ -124,12 +136,12 @@ export function lay(input: WorldInput): World {
     });
     const tiles: Tile[] = p.files.map((f, i) => ({ x: x0 + PLOT.dotX + i * TILE_STEP, y: y0 + p.h - PLOT.foot / 2 - 1, ...f }));
     const waiting = p.agents.filter((a) => a.state === "turn").length;
-    return { key, name: input.roomName(key), x: x0 + PLOT.w / 2, y: y0 + p.h / 2, w: PLOT.w, h: p.h, r: Math.max(PLOT.w, p.h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck"), tiles };
+    return { key, name: input.roomName(key), x: x0 + plotW / 2, y: y0 + p.h / 2, w: plotW, h: p.h, r: Math.max(plotW, p.h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck"), tiles };
   });
 
-  const half = Math.max(BAND.x1, gridWidth(slots.cols) / 2 + 10);
+  const half = Math.max(BAND.x1, gridWidth(slots.cols, plotW) / 2 + 10);
   const tall = Math.max(0, ...districts.map((d) => d.y + d.h / 2));
-  return { hub, landmarks: LANDMARKS, districts, dots, bounds: { x0: -half, y0: BAND.y0, x1: half, y1: Math.max(PLOT.top, tall + 10) } };
+  return { hub, landmarks: LANDMARKS, districts, dots, bounds: { x0: -half, y0: BAND.y0, x1: half, y1: Math.max(PLOT.top, tall + 10) }, plotW };
 }
 
 /**
@@ -189,7 +201,10 @@ export function route(w: World, a: Pt, b: Pt): Pt[] {
   const free = (x: typeof A) => x.gutter === null && !x.band;
   // The same column, or a loose point beside it: along that gutter, never over the plots.
   const column = A.gutter !== null && (A.gutter === B.gutter || free(B)) ? A.gutter : B.gutter !== null && free(A) ? B.gutter : null;
-  if (column !== null) {
+  if (A.dots && B.dots && A.room === B.room) {
+    // In one plot, between its dots and the helpers beside them: straight, since the column the
+    // dots stand in holds no words. Out to the gutter and back drew a tangle beside the bubble.
+  } else if (column !== null) {
     path.push({ x: column, y: A.at.y }, { x: column, y: B.at.y });
   } else if (A.band && B.band && Math.abs(A.at.x - B.at.x) < 1) {
     // Straight up or down one landmark, like a crate climbing the tower.
@@ -208,16 +223,22 @@ export function route(w: World, a: Pt, b: Pt): Pt[] {
  * Where a trip leaves or enters a place: the point itself, clipped to the edge of a landmark.
  * `inner` is a test bay behind This Mac's bottom edge: the trip goes on into it, past no words.
  */
-function leg(w: World, p: Pt): { at: Pt; inner?: Pt; gutter: number | null; band: boolean } {
+function leg(w: World, p: Pt): { at: Pt; inner?: Pt; gutter: number | null; band: boolean; dots?: boolean; room?: string } {
   const d = w.districts.find((x) => Math.abs(p.x - x.x) <= x.w / 2 + 2 && Math.abs(p.y - x.y) <= x.h / 2 + 2);
   // The dots stand in the plot's left column. A point past them, like the plot's centre, is
   // reached at the plot's left edge, so the trip never crosses its rows.
-  const left = d && d.x - d.w / 2;
-  if (d) return { at: p.x > left! + PLOT.dotX + 12 ? { x: left! + 2, y: p.y } : p, gutter: left! - PLOT.gap / 2, band: false };
+  if (d) {
+    const left = d.x - d.w / 2;
+    const dots = p.x <= left + PLOT.dotX + 12;
+    // A gutter is shared by every plot in its column, so the plot's key tells "the same plot".
+    return { at: dots ? p : { x: left + 2, y: p.y }, gutter: left - PLOT.gap / 2, band: false, dots, room: d.key };
+  }
   const h = w.hub;
   if (Math.abs(p.x - h.x) <= h.w / 2 && Math.abs(p.y - h.y) <= h.h / 2) {
+    // A bay's words sit on its left, so a trip into it ends on its right side.
     const bay = h.bays.find((b) => Math.abs(p.x - b.x) <= b.w / 2 && Math.abs(p.y - b.y) <= b.h / 2);
-    return { at: { x: p.x, y: h.y + h.h / 2 }, inner: bay ? p : undefined, gutter: null, band: true };
+    const x = bay ? bay.x + bay.w / 2 - 16 : p.x;
+    return { at: { x, y: h.y + h.h / 2 }, inner: bay ? { x, y: bay.y } : undefined, gutter: null, band: true };
   }
   const L = w.landmarks;
   if (Math.abs(p.x - L.web.x) <= 50 && Math.abs(p.y - L.web.y) <= 50) return { at: { x: L.web.x, y: L.web.y + 42 }, gutter: null, band: true };
@@ -267,8 +288,8 @@ function pack(order: string[], heights: Map<string, number>, cols: number, kept:
   return { col, tops, tall: Math.max(0, ...ends.map((e) => e - PLOT.gap)) };
 }
 
-function gridWidth(cols: number): number {
-  return cols * PLOT.w + (cols - 1) * PLOT.gap;
+function gridWidth(cols: number, plotW = PLOT.w): number {
+  return cols * plotW + (cols - 1) * PLOT.gap;
 }
 
 function push<K, V>(m: Map<K, V[]>, k: K, v: V): void {

@@ -52,6 +52,8 @@ const MAX_SCRIPTS = 6;
 const MAX_MARKS = 12;
 /** A trip's faint way stays this long after the trip ends, so the eye can follow it back. */
 const LINE_LINGER_MS = 500;
+/** Trips shorter than this, in world pixels, draw no way. */
+const LINE_MIN = 48;
 /**
  * Below 0.3 a district is a speck and every word is hidden to keep the rest apart. Above 1.6 the
  * map's lines turn thick and soft.
@@ -311,7 +313,10 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     mark(_id, m) {
       if (s.marks.filter((x) => !x.line).length >= MAX_MARKS) return;
       const path = m.to && s.layout ? route(s.layout, m.at, m.to) : undefined;
-      s.marks.push({ ...m, path, id: ++markId, born: Date.now() });
+      // A mark that stays put inside a plot belongs to it (live_labels.ts `follow`).
+      const d = !m.to ? s.layout?.districts.find((x) => Math.abs(m.at.x - x.x) <= x.w / 2 + 12 && Math.abs(m.at.y - x.y) <= x.h / 2 + 12) : undefined;
+      const room = d && { key: d.key, x: d.x - d.w / 2, y: d.y - d.h / 2 };
+      s.marks.push({ ...m, path, room, id: ++markId, born: Date.now() });
       // Reduced motion: the glyph shows where it ends, so there is no trip to draw.
       if (path && !s.reduced) addLine(path, m.color, m.ms + LINE_LINGER_MS);
     },
@@ -466,6 +471,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   /** The faint line under a trip. Packets share one way, so the same way is drawn once. */
   function addLine(path: Pt[], color: string, ms: number): void {
+    // A hop to a helper beside the dot is plain to see. A line under it is only clutter.
+    if (path.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - path[i].x, p.y - path[i].y), 0) < LINE_MIN) return;
     const key = path.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(" ");
     const now = Date.now();
     const same = s.marks.find((m) => m.line && m.text === key);

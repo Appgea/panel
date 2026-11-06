@@ -19,8 +19,8 @@
 
 import { landmarkNews, type News } from "./live_playbook";
 import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine } from "./live_text";
-import type { LiveAgent, LiveCtx } from "./live_types";
-import { along, BUBBLE_DX, BUBBLE_W, TILE_STEP } from "./live_world";
+import type { LiveAgent, LiveCtx, LiveState } from "./live_types";
+import { along, BUBBLE_DX, bubbleW, TILE_STEP } from "./live_world";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
@@ -49,6 +49,13 @@ const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark
 /** Where a word's box sits against its point. `right` starts just right of an agent's dot. */
 type Anchor = "below" | "above" | "corner" | "right";
 type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dx: number };
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+
+/**
+ * Where a mark at rest may go if its own spot is taken, in screen pixels, nearest first. Tags
+ * are wide, so the side steps are longer than the up and down ones.
+ */
+const NUDGES: [number, number][] = [[0, 0], ...[10, 20, 30, 44].flatMap((r): [number, number][] => [[0, -r], [0, r], [-r * 1.8, 0], [r * 1.8, 0], [-r, -r], [r, -r], [-r, r], [r, r]])];
 
 export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   const fixed = div("live-fixed");
@@ -58,6 +65,10 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   layer.append(fixed, marksEl, agents);
   const markEls = new Map<number, HTMLElement>();
   let frame = 0;
+  /** The screen boxes of the words shown at the last paint, and of the marks at rest. */
+  let taken: Rect[] = [];
+  const markBoxes = new Map<number, Rect>();
+  let lastCam = "";
 
   /**
    * Glyphs and tags from scripts. They move every frame while one travels, so they repaint on
@@ -67,12 +78,14 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     frame = 0;
     const s = ctx.s;
     const now = Date.now();
+    for (const m of s.marks) follow(m);
     s.marks = s.marks.filter((m) => now < m.born + m.ms);
     const live = new Set(s.marks.map((m) => m.id));
     for (const [id, el] of markEls)
       if (!live.has(id)) {
         el.remove();
         markEls.delete(id);
+        markBoxes.delete(id);
       }
     for (const m of s.marks) {
       let el = markEls.get(m.id);
@@ -80,10 +93,15 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         el = m.line ? lineEl() : m.glyph ? glyphEl(m.glyph) : span("live-tag", m.text ?? "");
         if (!m.line) el.classList.add("live-fx");
         el.style.setProperty("--c", m.color);
-        markEls.set(m.id, el);
         // Ways go first, so every glyph and tag draws over them.
         if (m.line) marksEl.prepend(el);
         else marksEl.append(el);
+        if (!m.line && !settle(m, el)) {
+          m.ms = 0;
+          el.remove();
+          continue;
+        }
+        markEls.set(m.id, el);
       }
       const t = Math.min(1, (now - m.born) / m.ms);
       if (m.line && m.path) {
@@ -103,6 +121,60 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       el.style.opacity = String(t < 0.1 ? t / 0.1 : t > 0.75 ? Math.max(0, (1 - t) / 0.25) : 1);
     }
     if (s.marks.length) frame = requestAnimationFrame(paintMarks);
+  }
+
+  /**
+   * A mark at rest in a plot moves with the plot when the map reflows, and goes when its spot
+   * is no longer in the plot. A file's tag left below a plot that shrank said nothing.
+   */
+  function follow(m: LiveState["marks"][number]): void {
+    const r = m.room;
+    if (!r) return;
+    const d = ctx.s.layout?.districts.find((x) => x.key === r.key);
+    if (!d) {
+      m.ms = 0;
+      return;
+    }
+    const x0 = d.x - d.w / 2;
+    const y0 = d.y - d.h / 2;
+    if (x0 !== r.x || y0 !== r.y) {
+      m.at = { x: m.at.x + x0 - r.x, y: m.at.y + y0 - r.y };
+      r.x = x0;
+      r.y = y0;
+      markBoxes.delete(m.id);
+    }
+    if (Math.abs(m.at.x - d.x) > d.w / 2 + 12 || Math.abs(m.at.y - d.y) > d.h / 2 + 12) m.ms = 0;
+  }
+
+  /**
+   * Moves a new mark's resting spot to the nearest one clear of words and other marks. A mark
+   * at rest with no clear spot near is not shown. One that travels still makes its trip.
+   * Owner, 2026-11-06: things on the map "must not be over things".
+   */
+  function settle(m: LiveState["marks"][number], el: HTMLElement): boolean {
+    const end = m.path?.[m.path.length - 1] ?? m.to ?? m.at;
+    const p = ctx.toScreen(end);
+    const unit = ctx.toScreen({ x: end.x + 1, y: end.y }).x - p.x || 1;
+    const hw = el.offsetWidth / 2 + GAP;
+    const hh = el.offsetHeight / 2 + GAP;
+    const blocks = [...taken, ...markBoxes.values()];
+    // A mark that belongs to a plot stays in it, or `follow` would drop it on the next frame.
+    const d = m.room && ctx.s.layout?.districts.find((x) => x.key === m.room!.key);
+    for (const [dx, dy] of NUDGES) {
+      const b = { x0: p.x + dx - hw, y0: p.y + dy - hh, x1: p.x + dx + hw, y1: p.y + dy + hh };
+      if (d && (Math.abs(end.x + dx / unit - d.x) > d.w / 2 + 12 || Math.abs(end.y + dy / unit - d.y) > d.h / 2 + 12)) continue;
+      if (blocks.some((t) => b.x0 < t.x1 && b.x1 > t.x0 && b.y0 < t.y1 && b.y1 > t.y0)) continue;
+      markBoxes.set(m.id, b);
+      if (dx || dy) {
+        const spot = { x: end.x + dx / unit, y: end.y + dy / unit };
+        // The way a trip takes ends with a short hop to the clear spot, line and all.
+        if (m.path) m.path.push(spot);
+        else if (m.to) m.to = spot;
+        else m.at = spot;
+      }
+      return true;
+    }
+    return !!m.to;
   }
 
   const pool = new Map<string, HTMLElement>();
@@ -170,7 +242,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     };
 
     // The gap between dot and bubble keeps its size, so it comes out of the bubble's width.
-    const nextBw = `${Math.max(60, Math.round((BUBBLE_W + BUBBLE_DX) * z - BUBBLE_DX))}px`;
+    const nextBw = `${Math.max(60, Math.round((bubbleW(w.plotW) + BUBBLE_DX) * z - BUBBLE_DX))}px`;
     if (nextBw !== bw) {
       bw = nextBw;
       layer.style.setProperty("--bw", bw);
@@ -345,6 +417,11 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       b.wd.el.classList.toggle("is-culled", hit);
       if (!hit) placed.push(b);
     }
+    taken = placed.map(({ x0, y0, x1, y1 }) => ({ x0, y0, x1, y1 }));
+    // The marks' boxes are screen pixels too. After a pan or zoom they no longer match.
+    const cam = JSON.stringify(ctx.s.camera);
+    if (cam !== lastCam) markBoxes.clear();
+    lastCam = cam;
   }
 
   return { paint };

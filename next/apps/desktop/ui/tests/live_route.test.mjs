@@ -9,9 +9,9 @@ const world = {
   hub: { x: 0, y: 0, w: 320, h: 118, bays: [{ x: -72, y: 26, w: 128, h: 38 }] },
   landmarks: { tower: { x: -280, y: 46 }, sky: { x: -280, y: -320 }, web: { x: 280, y: 0 } },
   districts: [
-    { x: -160, y: 200, w: 280, h: 140 },
-    { x: 160, y: 200, w: 280, h: 140 },
-    { x: 160, y: 380, w: 280, h: 140 },
+    { key: "a", x: -160, y: 200, w: 280, h: 140 },
+    { key: "b", x: 160, y: 200, w: 280, h: 140 },
+    { key: "c", x: 160, y: 380, w: 280, h: 140 },
   ],
 };
 
@@ -36,14 +36,21 @@ test("a trip between plots, to the tower or into a bay never runs over a plot", 
     [{ x: 30, y: 390 }, { x: -72, y: 26 }],
     [{ x: 30, y: 210 }, { x: 280, y: 0 }],
     [agent, { x: 160, y: 380 }],
+    // Dot to dot between two plots stacked in one column.
+    [{ x: 40, y: 220 }, { x: 40, y: 400 }],
   ];
   for (const [a, b] of trips) {
     const path = route(world, a, b);
     // The web gate stops a trip at its bottom edge, and a plot's centre at the plot's left edge.
-    const end = b.x === 280 ? { x: 280, y: 42 } : b.x === 160 ? { x: 22, y: 380 } : b;
+    const end = b.x === 280 ? { x: 280, y: 42 } : b.x === 160 ? { x: 22, y: 380 } : b.x === -72 ? { x: -24, y: 26 } : b;
     assert.deepEqual(path[path.length - 1], end);
     for (let i = 1; i < path.length; i++) assert.ok(!crossesPlot(path[i - 1], path[i]), `${JSON.stringify(path)} piece ${i}`);
   }
+  // To a helper beside the dot in the same plot: one straight hop, not out to the gutter and back.
+  assert.equal(route(world, agent, { x: -286, y: 230 }).length, 2);
+  // Dot to dot in two plots stacked in one column: they share a gutter, but not a plot, so the
+  // trip goes by the gutter instead of down the dot column across the lower plot's head.
+  assert.ok(route(world, { x: 40, y: 220 }, { x: 40, y: 400 }).length > 2);
   // Between columns, the trip uses the lane under This Mac.
   assert.ok(route(world, agent, { x: 30, y: 390 }).some((p) => p.y === LANE_Y));
 });
