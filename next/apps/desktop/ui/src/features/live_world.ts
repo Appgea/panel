@@ -39,8 +39,11 @@ export type Slots = { cols: number; col: Map<string, number>; size: string };
 
 export const HUB = { w: 320, h: 118 };
 const LANDMARKS: Landmarks = { tower: { x: -HUB.w / 2 - 120, y: 46 }, sky: { x: -HUB.w / 2 - 120, y: -320 }, web: { x: HUB.w / 2 + 120, y: 0 } };
-/** The band's extent, with room for the tower's glow and the landmarks' words. */
-const BAND = { x0: -350, x1: 350, y0: -100 };
+/**
+ * The band's extent, with room for the tower's glow and the landmarks' words, which sit above
+ * them so trips can come up from the lane below.
+ */
+const BAND = { x0: -350, x1: 350, y0: -140 };
 /**
  * A plot's parts. `head` holds the project's name, `row` one agent and its bubble, `foot` the
  * file tiles. A two-line bubble is 39 px and the labels keep 3 px clear around each word, so a
@@ -165,6 +168,88 @@ function plot(key: string, list: LiveAgent[]): Plot {
     }
   const h = PLOT.head + rows.length * PLOT.row + (files.length ? PLOT.foot : PLOT.pad);
   return { key, agents, rows, riders, files, h };
+}
+
+/**
+ * The street under the band: the open strip between This Mac and the plots. Every trip between
+ * places that are not in one plot's column runs along it.
+ */
+export const LANE_Y = PLOT.top - 12;
+
+/**
+ * The way something travels from `a` to `b` without crossing words: out of its plot sideways into
+ * the gutter left of it, along the gutters and the lane under the band, and into the target from
+ * below. A trip into This Mac, the tower or the web gate stops at its edge.
+ * Owner, 2026-11-06: "sendings and etc must not be over things, they must pick a clear path".
+ */
+export function route(w: World, a: Pt, b: Pt): Pt[] {
+  const A = leg(w, a);
+  const B = leg(w, b);
+  const path: Pt[] = A.inner ? [A.inner, A.at] : [A.at];
+  const free = (x: typeof A) => x.gutter === null && !x.band;
+  // The same column, or a loose point beside it: along that gutter, never over the plots.
+  const column = A.gutter !== null && (A.gutter === B.gutter || free(B)) ? A.gutter : B.gutter !== null && free(A) ? B.gutter : null;
+  if (column !== null) {
+    path.push({ x: column, y: A.at.y }, { x: column, y: B.at.y });
+  } else if (A.band && B.band && Math.abs(A.at.x - B.at.x) < 1) {
+    // Straight up or down one landmark, like a crate climbing the tower.
+  } else if (!free(A) || !free(B)) {
+    if (A.gutter !== null) path.push({ x: A.gutter, y: A.at.y }, { x: A.gutter, y: LANE_Y });
+    else if (A.band) path.push({ x: A.at.x, y: LANE_Y });
+    if (B.gutter !== null) path.push({ x: B.gutter, y: LANE_Y }, { x: B.gutter, y: B.at.y });
+    else if (B.band) path.push({ x: B.at.x, y: LANE_Y });
+  }
+  path.push(B.at);
+  if (B.inner) path.push(B.inner);
+  return tidy(path);
+}
+
+/**
+ * Where a trip leaves or enters a place: the point itself, clipped to the edge of a landmark.
+ * `inner` is a test bay behind This Mac's bottom edge: the trip goes on into it, past no words.
+ */
+function leg(w: World, p: Pt): { at: Pt; inner?: Pt; gutter: number | null; band: boolean } {
+  const d = w.districts.find((x) => Math.abs(p.x - x.x) <= x.w / 2 + 2 && Math.abs(p.y - x.y) <= x.h / 2 + 2);
+  // The dots stand in the plot's left column. A point past them, like the plot's centre, is
+  // reached at the plot's left edge, so the trip never crosses its rows.
+  const left = d && d.x - d.w / 2;
+  if (d) return { at: p.x > left! + PLOT.dotX + 12 ? { x: left! + 2, y: p.y } : p, gutter: left! - PLOT.gap / 2, band: false };
+  const h = w.hub;
+  if (Math.abs(p.x - h.x) <= h.w / 2 && Math.abs(p.y - h.y) <= h.h / 2) {
+    const bay = h.bays.find((b) => Math.abs(p.x - b.x) <= b.w / 2 && Math.abs(p.y - b.y) <= b.h / 2);
+    return { at: { x: p.x, y: h.y + h.h / 2 }, inner: bay ? p : undefined, gutter: null, band: true };
+  }
+  const L = w.landmarks;
+  if (Math.abs(p.x - L.web.x) <= 50 && Math.abs(p.y - L.web.y) <= 50) return { at: { x: L.web.x, y: L.web.y + 42 }, gutter: null, band: true };
+  if (Math.abs(p.x - L.tower.x) <= 40 && p.y <= LANE_Y) return { at: p.y > L.tower.y - 10 ? { x: L.tower.x, y: L.tower.y + 8 } : p, gutter: null, band: true };
+  return { at: p, gutter: null, band: p.y < LANE_Y };
+}
+
+/** Drops repeated points and the middle of straight runs. */
+function tidy(path: Pt[]): Pt[] {
+  const out: Pt[] = [];
+  for (const p of path) {
+    const last = out[out.length - 1];
+    if (last && Math.abs(last.x - p.x) < 0.5 && Math.abs(last.y - p.y) < 0.5) continue;
+    const prev = out[out.length - 2];
+    if (prev && last && ((Math.abs(prev.x - last.x) < 0.5 && Math.abs(last.x - p.x) < 0.5) || (Math.abs(prev.y - last.y) < 0.5 && Math.abs(last.y - p.y) < 0.5))) out.pop();
+    out.push(p);
+  }
+  return out;
+}
+
+/** The point `k` of the way along a path, 0 to 1, by length. */
+export function along(path: Pt[], k: number): Pt {
+  const lens = path.slice(1).map((p, i) => Math.hypot(p.x - path[i].x, p.y - path[i].y));
+  let left = Math.max(0, Math.min(1, k)) * lens.reduce((s, l) => s + l, 0);
+  for (let i = 0; i < lens.length; i++) {
+    if (left <= lens[i] || i === lens.length - 1) {
+      const t = lens[i] ? Math.min(1, left / lens[i]) : 1;
+      return { x: path[i].x + (path[i + 1].x - path[i].x) * t, y: path[i].y + (path[i + 1].y - path[i].y) * t };
+    }
+    left -= lens[i];
+  }
+  return path[path.length - 1];
 }
 
 /** Puts each plot in its kept column, else the shortest one, and stacks every column downward. */

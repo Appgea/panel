@@ -20,7 +20,7 @@
 import { landmarkNews, type News } from "./live_playbook";
 import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine } from "./live_text";
 import type { LiveAgent, LiveCtx } from "./live_types";
-import { BUBBLE_DX, BUBBLE_W, TILE_STEP } from "./live_world";
+import { along, BUBBLE_DX, BUBBLE_W, TILE_STEP } from "./live_world";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
@@ -37,6 +37,8 @@ const SMALL_ZOOM = 0.62;
 const GAP = 3;
 /** How long a bubble's edge stays lit after the agent starts a new step. */
 const NEW_MS = 1200;
+/** A trip's way is a hint under the trip, never louder than the words. */
+const LINE_OPACITY = 0.28;
 
 /**
  * Which word wins a spot, lowest first. What an agent says is the point of Live, so its bubble
@@ -45,7 +47,7 @@ const NEW_MS = 1200;
 const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark: 6, bay: 7, foot: 8 } as const;
 
 /** Where a word's box sits against its point. `right` starts just right of an agent's dot. */
-type Anchor = "below" | "corner" | "right";
+type Anchor = "below" | "above" | "corner" | "right";
 type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dx: number };
 
 export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
@@ -75,16 +77,27 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     for (const m of s.marks) {
       let el = markEls.get(m.id);
       if (!el) {
-        el = m.glyph ? glyphEl(m.glyph) : span("live-tag", m.text ?? "");
-        el.classList.add("live-fx");
+        el = m.line ? lineEl() : m.glyph ? glyphEl(m.glyph) : span("live-tag", m.text ?? "");
+        if (!m.line) el.classList.add("live-fx");
         el.style.setProperty("--c", m.color);
         markEls.set(m.id, el);
-        marksEl.append(el);
+        // Ways go first, so every glyph and tag draws over them.
+        if (m.line) marksEl.prepend(el);
+        else marksEl.append(el);
       }
       const t = Math.min(1, (now - m.born) / m.ms);
+      if (m.line && m.path) {
+        const pts = m.path.map((q) => ctx.toScreen(q));
+        el.firstElementChild!.setAttribute("points", pts.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" "));
+        // Fades by the clock, not by share of life: a later trip on the same way stretches the
+        // life, and a share would jump the line back from its fade.
+        const age = now - m.born;
+        el.style.opacity = String(LINE_OPACITY * Math.max(0, Math.min(1, age / 150, (m.ms - age) / 400)));
+        continue;
+      }
       // Reduced motion: no travel, the glyph shows where it ends.
       const k = s.reduced ? 1 : m.to ? ease(Math.min(1, t / 0.8)) : 0;
-      const at = m.to ? { x: m.at.x + (m.to.x - m.at.x) * k, y: m.at.y + (m.to.y - m.at.y) * k } : m.at;
+      const at = m.path ? along(m.path, k) : m.to ? { x: m.at.x + (m.to.x - m.at.x) * k, y: m.at.y + (m.to.y - m.at.y) * k } : m.at;
       const p = ctx.toScreen(at);
       el.style.transform = `translate(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px) translate(-50%, -50%)`;
       el.style.opacity = String(t < 0.1 ? t / 0.1 : t > 0.75 ? Math.max(0, (1 - t) / 0.25) : 1);
@@ -249,7 +262,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       el.title = line;
       el.classList.toggle("is-small", z < META_ZOOM);
       const p = place(el, x, y);
-      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "below", dx: 0 });
+      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "above", dx: 0 });
     };
     // A landmark says its last real news, not what it is for.
     const news = landmarkNews(world);
@@ -258,8 +271,9 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const by = n.agent ? ctx.nameOf(n.agent) : n.ember ? ctx.emberWho(n.ember).title : "";
       return `${ago(n.at, now)} · ${by ? `${by}: ` : ""}${n.label}`;
     };
-    mark("tower", "GitHub", told(news.tower, "No push lately"), L.tower.x, L.tower.y + 14);
-    mark("web", "Web", told(news.web, "No web visit lately"), L.web.x, L.web.y + 50);
+    // Above their landmark: trips come in from the lane below, so the words are never crossed.
+    mark("tower", "GitHub", told(news.tower, "No push lately"), L.tower.x, L.tower.y - 142);
+    mark("web", "Web", told(news.web, "No web visit lately"), L.web.x, L.web.y - 50);
     for (const [key, el] of pool)
       if (!used.has(key)) {
         el.remove();
@@ -320,8 +334,8 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         sizes.set(wd.el, size);
       }
       const { w, h } = size;
-      const x0 = wd.anchor === "below" ? wd.x - w / 2 : wd.x + wd.dx;
-      const y0 = wd.anchor === "right" ? wd.y - h / 2 : wd.y;
+      const x0 = wd.anchor === "below" || wd.anchor === "above" ? wd.x - w / 2 : wd.x + wd.dx;
+      const y0 = wd.anchor === "right" ? wd.y - h / 2 : wd.anchor === "above" ? wd.y - h : wd.y;
       return { wd, x0: x0 - GAP, y0: y0 - GAP, x1: x0 + w + GAP, y1: y0 + h + GAP };
     });
     boxes.sort((a, b) => a.wd.rank - b.wd.rank);
@@ -349,6 +363,15 @@ function glyphEl(d: string): HTMLElement {
   svg.append(path);
   wrap.append(svg);
   return wrap;
+}
+
+/** A trip's way: one faint line across the stage, set point by point every frame. */
+function lineEl(): HTMLElement {
+  const svg = document.createElementNS(SVG, "svg");
+  svg.setAttribute("class", "live-path");
+  svg.setAttribute("aria-hidden", "true");
+  svg.append(document.createElementNS(SVG, "polyline"));
+  return svg as unknown as HTMLElement;
 }
 
 function ease(t: number): number {

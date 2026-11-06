@@ -3,13 +3,13 @@
     "title": "Push to GitHub",
     "about": "A crate of commits travels from the agent to the GitHub tower and rises up it.",
     "by": "opus",
-    "rev": 2,
+    "rev": 3,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "crate", "at": "self", "to": { "place": "tower", "dy": -10 }, "color": "work", "ms": 1400 },
       { "do": "wait", "ms": 1300 },
       { "do": "orb", "from": "tower", "to": { "place": "tower", "dy": -124 }, "color": "work", "size": 6, "ms": 900 },
-      { "do": "tag", "at": { "place": "tower", "dy": -150 }, "text": "commits", "ms": 2000 },
+      { "do": "tag", "at": { "place": "tower", "dx": 46, "dy": -60 }, "text": "commits", "ms": 2000 },
       { "do": "wait", "ms": 900 },
       { "do": "ring", "at": { "place": "tower", "dy": -124 }, "color": "work", "size": 40, "ms": 1000 },
       { "do": "wait", "ms": 900 }
@@ -19,15 +19,15 @@
     "title": "Release to a store",
     "about": "A rocket leaves the agent, climbs the GitHub tower and goes out to the store.",
     "by": "opus",
-    "rev": 2,
+    "rev": 3,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "rocket", "at": "self", "to": { "place": "tower", "dx": 34 }, "color": "ink", "ms": 1400 },
       { "do": "wait", "ms": 1300 },
-      { "do": "orb", "from": "tower", "to": { "place": "sky", "dy": -40 }, "color": "ink", "size": 7, "ms": 1100 },
-      { "do": "tag", "at": { "place": "sky", "dy": -64 }, "text": "to the store", "ms": 2200 },
+      { "do": "orb", "from": "tower", "to": { "place": "tower", "dy": -124 }, "color": "ink", "size": 7, "ms": 1100 },
+      { "do": "tag", "at": { "place": "tower", "dx": 56, "dy": -60 }, "text": "to the store", "ms": 2200 },
       { "do": "wait", "ms": 1100 },
-      { "do": "ring", "at": { "place": "sky", "dy": -40 }, "color": "ink", "size": 70, "ms": 1300 },
+      { "do": "ring", "at": { "place": "tower", "dy": -124 }, "color": "ink", "size": 70, "ms": 1300 },
       { "do": "wait", "ms": 900 }
     ]
   },

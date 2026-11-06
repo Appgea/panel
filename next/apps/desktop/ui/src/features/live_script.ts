@@ -23,6 +23,9 @@
  *   - Green and red belong to results. Live itself shows ✓ or ✗ when a test, build or push
  *     ends. A script plays while the step runs, before anyone knows how it went.
  *   - Two or three effects at once at most, and done in 2 to 5 seconds.
+ *   - Anything that travels takes a clear way on its own: out of its plot, along the gaps between
+ *     plots and the lane under This Mac, never over words, with its way drawn faint. So a script
+ *     only names where a thing starts and where it goes.
  *
  * A SCRIPT is a JSON object:
  *   {
@@ -87,8 +90,12 @@ export type Move = { do: string; [field: string]: unknown };
 export type Script = { verb: string; title?: string; about?: string; by?: string; madeMs?: number; pending?: boolean; improving?: boolean; improved?: string; glyphs?: Record<string, unknown>; steps?: Move[] };
 /** An effect for Bevy, in world pixels (apps/live/src/fx.rs). */
 export type FxOut = { kind: string; x: number; y: number; x2?: number; y2?: number; color: string; size?: number; ms?: number; count?: number; delay?: number };
-/** A glyph or a tag over the map, in world pixels. Words and icons are HTML, so they stay sharp. */
-export type Mark = { glyph?: string; text?: string; at: Pt; to?: Pt; color: string; ms: number };
+/**
+ * A glyph or a tag over the map, in world pixels. Words and icons are HTML, so they stay sharp.
+ * `path` is the clear way a travelling glyph takes (live_world.ts `route`). A `line` mark is that
+ * way drawn faint, so the eye can follow what went where.
+ */
+export type Mark = { glyph?: string; text?: string; at: Pt; to?: Pt; path?: Pt[]; line?: boolean; color: string; ms: number };
 
 /** Line icons in a 24 by 24 box. `check` and `cross` are Live's own, for results. */
 export const GLYPHS: Record<string, string> = {

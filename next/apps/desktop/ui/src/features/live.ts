@@ -33,12 +33,12 @@ import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
 import { direct, RESULT_MS, RESULTS, type EmberEnd, type Seen } from "./live_playbook";
 import { scene } from "./live_scene";
-import { COLOR, PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
+import { COLOR, PLAIN, play, type FxOut, type Pt, type Script, type Stagehand } from "./live_script";
 import { mountSide } from "./live_side";
 import { button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
 import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
-import { lay } from "./live_world";
+import { lay, route } from "./live_world";
 import "./live.css";
 
 export type { LiveAgent, LiveEmber, LiveEvents, LiveJob, LiveWorld } from "./live_types";
@@ -50,6 +50,8 @@ const BOARD_MS = 60_000;
 const MAX_SCRIPTS = 6;
 /** Glyphs and tags on the map at once. Past this a new one is dropped: a crowd says nothing. */
 const MAX_MARKS = 12;
+/** A trip's faint way stays this long after the trip ends, so the eye can follow it back. */
+const LINE_LINGER_MS = 500;
 /**
  * Below 0.3 a district is a speck and every word is hidden to keep the rest apart. Above 1.6 the
  * map's lines turn thick and soft.
@@ -244,9 +246,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
             return d && d.swarm >= 0 ? [d] : [];
           });
           if (kids.length) return kids;
-          // Helpers that are not on the map, or a swarm: points around the agent.
+          // Helpers that are not on the map, or a swarm: points on an arc left of the agent,
+          // where nothing is written. Its bubble is on the right.
           const n = Math.max(3, Math.min(8, (a?.helpers ?? 0) + spot.swarm));
-          return Array.from({ length: n }, (_, i) => ({ x: self.x + Math.cos((i / n) * Math.PI * 2) * 34, y: self.y + Math.sin((i / n) * Math.PI * 2) * 26 }));
+          return Array.from({ length: n }, (_, i) => {
+            const t = Math.PI / 2 + (Math.PI * (i + 0.5)) / n;
+            return { x: self.x + Math.cos(t) * 16, y: self.y + Math.sin(t) * 20 };
+          });
         }
         case "hub":
         // The desk and the board left the map. Scripts written before still name them: the
@@ -303,7 +309,11 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       for (const t of pick) s.lights.set(t.path, { color, until });
     },
     mark(_id, m) {
-      if (s.marks.length < MAX_MARKS) s.marks.push({ ...m, id: ++markId, born: Date.now() });
+      if (s.marks.filter((x) => !x.line).length >= MAX_MARKS) return;
+      const path = m.to && s.layout ? route(s.layout, m.at, m.to) : undefined;
+      s.marks.push({ ...m, path, id: ++markId, born: Date.now() });
+      // Reduced motion: the glyph shows where it ends, so there is no trip to draw.
+      if (path && !s.reduced) addLine(path, m.color, m.ms + LINE_LINGER_MS);
     },
     label(id) {
       const a = ctx.agentById(id);
@@ -417,16 +427,53 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       fit();
       if (x !== s.camera.x || y !== s.camera.y || zoom !== s.camera.zoom) still();
     }
-    labels.paint();
 
     const snapshot = snap();
     const endings: EmberEnd[] = knownEmbers ? w.embers.filter((e) => !knownEmbers!.has(e.id)).map((e) => ({ id: e.id, agentId: e.id.split("@")[0], outcome: e.outcome })) : [];
     knownEmbers = new Set(w.embers.map((e) => e.id));
     s.pendingFx.push(...direct(lastSeen, snapshot, endings, freshResults, played, now));
     lastSeen = snapshot;
+    s.pendingFx = s.pendingFx.flatMap(routeFx);
+    // After the routing, so the faint ways it adds are painted with this frame.
+    labels.paint();
     // Effects are for this moment only. Without a view they are dropped, not saved up.
     if (view) view.set_scene(JSON.stringify(scene(ctx, width, stage.clientHeight)));
     s.pendingFx = [];
+  }
+
+  /**
+   * An orb or a beam from one place to another, along the clear way between them: one piece per
+   * straight run, each starting when the one before ends, and the way drawn faint underneath.
+   */
+  function routeFx(f: FxOut): FxOut[] {
+    if ((f.kind !== "orb" && f.kind !== "beam") || f.x2 === undefined || f.y2 === undefined || !s.layout) return [f];
+    const path = route(s.layout, { x: f.x, y: f.y }, { x: f.x2, y: f.y2 });
+    const lens = path.slice(1).map((p, i) => Math.hypot(p.x - path[i].x, p.y - path[i].y));
+    const total = lens.reduce((a, l) => a + l, 0);
+    if (total < 1) return [f];
+    const ms = f.ms ?? (f.kind === "orb" ? 900 : 1200);
+    addLine(path, f.color, (f.delay ?? 0) + ms + LINE_LINGER_MS);
+    let at = f.delay ?? 0;
+    return lens.flatMap((len, i) => {
+      if (len < 1) return [];
+      // A beam flashes its whole way at once. An orb runs it, the same speed on every piece.
+      const piece = f.kind === "orb" ? Math.max(60, (ms * len) / total) : ms;
+      const out = { ...f, x: path[i].x, y: path[i].y, x2: path[i + 1].x, y2: path[i + 1].y, ms: Math.round(piece), delay: Math.round(at) };
+      if (f.kind === "orb") at += piece;
+      return [out];
+    });
+  }
+
+  /** The faint line under a trip. Packets share one way, so the same way is drawn once. */
+  function addLine(path: Pt[], color: string, ms: number): void {
+    const key = path.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(" ");
+    const now = Date.now();
+    const same = s.marks.find((m) => m.line && m.text === key);
+    if (same) {
+      same.ms = Math.max(same.ms, now - same.born + ms);
+      return;
+    }
+    s.marks.push({ line: true, text: key, path, at: path[0], color, ms, id: ++markId, born: now });
   }
 
   function snap(): Seen {
