@@ -4308,6 +4308,7 @@ async function boot(): Promise<void> {
     openHistory: (session) => showHistory({ session }),
     stop: (pid) => invoke("live_stop", { pid }),
     deleteAnimation: (verb) => invoke("live_catalog_delete", { verb }),
+    improveAnimation: (verb, note) => invoke("live_catalog_improve", { verb, note }),
   });
   forYou = mountForYou(el("forYouScreen"), {
     world: liveWorld,

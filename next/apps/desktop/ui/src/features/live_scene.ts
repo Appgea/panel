@@ -4,6 +4,7 @@
  * Change both together.
  */
 
+import { LANDMARK_QUIET_MS, landmarkNews, type News } from "./live_playbook";
 import type { LiveCtx } from "./live_types";
 
 /** A file tile glows for this long after an agent last touched it. */
@@ -33,6 +34,8 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     }),
   );
 
+  const news = landmarkNews(world);
+  const quiet = (n: News | null) => !n || now - n.at > LANDMARK_QUIET_MS;
   const at = (id: string) => w.dots.get(id);
   const focus = s.hover ?? (sel?.kind === "agent" ? sel.id : null);
   const links: object[] = [];
@@ -61,9 +64,10 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     districts: w.districts.map((d) => ({ x: d.x, y: d.y, w: d.w, h: d.h, edge: d.stuck ? "stuck" : d.waiting ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
     tiles,
     hub: { ...w.hub, hot: world.mac.hot, bays: w.hub.bays.map((b, i) => ({ ...b, held: !!world.mac.bays[i]?.holder })) },
+    // A landmark with no recent news dims, so the light on the map is where work happens.
     landmarks: [
-      { kind: "tower", ...w.landmarks.tower },
-      { kind: "web", ...w.landmarks.web },
+      { kind: "tower", ...w.landmarks.tower, quiet: quiet(news.tower) },
+      { kind: "web", ...w.landmarks.web, quiet: quiet(news.web) },
     ],
     links,
     dots,

@@ -174,7 +174,7 @@ fn step(name: &str, input: &Value, command: Option<&str>, at_ms: u64) -> Option<
         other => other,
     };
     let verb = super::verbs::of_tool(like, command);
-    Some(Step { at_ms, label: label.chars().take(90).collect(), station, file, helper, asks: false, verb })
+    Some(Step { at_ms, label: label.chars().take(90).collect(), station, file, helper, asks: false, verb, ok: None })
 }
 
 /// Tools whose first word after the program says what they do: `git show`, `flutter test`.

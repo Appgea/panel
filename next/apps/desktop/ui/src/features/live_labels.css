@@ -46,7 +46,7 @@
 
 .live-mark { display: grid; justify-items: center; gap: 1px; pointer-events: none; white-space: nowrap; translate: -50% 0; }
 .live-mark-name { font: 600 12.5px/1.3 var(--l-sans); color: var(--l-ink-2); }
-.live-mark-line { font: 400 10.5px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.live-mark-line { max-width: 210px; overflow: hidden; text-overflow: ellipsis; font: 400 10.5px/1.3 var(--l-mono); color: var(--l-ink-3); }
 
 /* An agent: an invisible hit circle on its dot, and its bubble to the right in its row. The
    bubble is part of the button, so a click on the words follows the agent too. A plot moves
@@ -104,6 +104,43 @@
 .live-agent.is-idle .live-bubble { background: none; }
 .live-agent.is-idle .live-who { color: var(--l-ink-2); }
 .live-agent.is-idle .live-say { color: var(--l-ink-3); }
+/* How the last test, build or push went, before the step words. Green and red mean only this. */
+.live-res { margin-left: 6px; font-weight: 600; white-space: nowrap; }
+.live-res:empty { display: none; }
+.live-res.is-ok { color: var(--l-done); }
+.live-res.is-bad { color: var(--l-stuck); }
+/* How long it has waited, or how long one step runs. Shown only when that is news. */
+.live-age { margin-left: 6px; font: 400 10.5px/1 var(--l-mono); color: var(--l-ink-3); white-space: nowrap; }
+.live-age:empty { display: none; }
+.live-agent.is-turn .live-age { color: var(--l-turn); }
+
+/* What the squares along a plot's foot are. */
+.live-foot { pointer-events: auto; white-space: nowrap; font: 400 10px/1.2 var(--l-mono); color: var(--l-ink-3); cursor: default; }
+
+/* Glyphs and tags from animation scripts. They centre on their point and never take a click. */
+.live-fxmarks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.live-fx { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
+.live-glyph svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--c);
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--c) 60%, transparent));
+}
+.live-tag {
+  padding: 1px 6px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--l-bg) 85%, transparent);
+  font: 500 10.5px/1.4 var(--l-mono);
+  color: var(--c);
+  white-space: nowrap;
+}
+
 /* A new step: the edge lights in the state's colour and fades back. */
 .live-agent.is-new .live-bubble { animation: live-bubble-new 1.2s ease-out; }
 @keyframes live-bubble-new { from { border-color: color-mix(in srgb, var(--l-work) 70%, transparent); } }

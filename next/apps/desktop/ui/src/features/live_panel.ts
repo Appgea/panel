@@ -6,7 +6,8 @@
  */
 
 import { errorText } from "../errors";
-import { ago, button, clock, div, doing, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, STATE_WORD, taskLine, who } from "./live_text";
+import { RESULTS } from "./live_playbook";
+import { ageOf, ago, button, div, doing, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, startedBy, STATE_RANK, STATE_WORD, taskLine } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber, Step } from "./live_types";
 import "./live_panel.css";
 
@@ -115,7 +116,11 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       const li = document.createElement("li");
       const t = document.createElement("time");
       t.textContent = hhmm(st.atMs);
+      // Only steps whose ending is news get a mark, as on the map. A failed `grep` is not news.
+      const mark = st.ok !== undefined && st.verb && RESULTS[st.verb] ? span(`pres ${st.ok ? "is-ok" : "is-bad"}`, st.ok ? "✓" : "✗") : null;
+      if (mark) mark.title = RESULTS[st.verb!][st.ok ? 0 : 1];
       li.append(t, st.file ? link(st.label, () => ctx.events.openFile(st.file!)) : span("", st.label));
+      if (mark) li.append(mark);
       ol.append(li);
     }
     return [div("psec", title), ol];
@@ -129,9 +134,9 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     out.push(chipRow(STATE_WORD[a.state], `var(--l-${a.state})`, a.startedMs ? `running ${since(a.startedMs, now)}` : ""));
     const iss = ctx.issueOf(a);
     const task: string | HTMLElement = iss ? link(`#${iss.number} ${iss.title}`, () => ctx.events.openUrl(iss.url)) : (taskLine(a.task) ?? (a.task ? me.role : "Not known"));
-    const timer = a.stateMs && now - a.stateMs > 20_000 && (a.state === "work" || a.state === "stuck") ? ` · ${clock(now - a.stateMs)}` : "";
+    const age = ageOf(a, now);
     const parent = ctx.agentById(a.parent);
-    const by: string | HTMLElement = parent ? link(ctx.nameOf(parent), () => ctx.select({ kind: "agent", id: parent.id })) : a.via ? (a.via === "Terminal" ? "You, in Terminal" : a.via) : "Not known";
+    const by: string | HTMLElement = parent ? link(ctx.nameOf(parent), () => ctx.select({ kind: "agent", id: parent.id })) : startedBy(a.via);
     const kids = s.world!.agents.filter((k) => k.parent === a.id);
     const jobs = s.world!.jobs.filter((j) => j.agent === a.id);
     const fam = div("pfam");
@@ -139,9 +144,15 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     for (const k of kids) fam.append(link(k.helperKind ? `${k.task ?? ctx.nameOf(k)} · ${doing(k)}` : ctx.nameOf(k), () => ctx.select({ kind: "agent", id: k.id })));
     if (a.helpers) fam.append(span("", `${a.helpers} ${plural(a.helpers, "helper")}`));
     for (const j of jobs) fam.append(span("", `${j.label}${j.bay ? " in a test bay" : ""}`));
-    if (!fam.childElementCount) fam.textContent = "None";
-    out.push(rows([["Task", task], ["Now", `${doing(a)}${timer}`], ["Started by", by], ["Family", fam]]));
-    out.push(...doneList("Done so far", a.steps));
+    const list: [string, string | HTMLElement][] = [["Task", task], ["Now", `${doing(a)}${age ? ` · ${a.state === "turn" ? `waiting ${age}` : age}` : ""}`]];
+    // Stuck or waiting, its own last words are the best clue to why.
+    if ((a.state === "stuck" || a.state === "turn") && a.lastText && a.lastText !== doing(a)) list.push(["Last said", a.lastText]);
+    const res = s.results.get(a.id);
+    if (res && res.until > now) list.push(["Result", `${res.ok ? "✓" : "✗"} ${res.text}`]);
+    list.push(["Started by", by]);
+    if (fam.childElementCount) list.push(["Helpers", fam]);
+    out.push(rows(list));
+    out.push(...doneList("Steps", a.steps));
     if (talking && a.panel) {
       const input = document.createElement("input");
       input.className = "reply";
@@ -166,32 +177,46 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     }
     const acts = div("pact");
     if (a.panel) {
-      acts.append(button("opt", "Talk", () => {
+      // Waiting for you, talking is the one thing to do, so it says so.
+      acts.append(button(a.state === "turn" ? "opt is-primary" : "opt", a.state === "turn" ? "Answer" : "Talk", () => {
         talking = !talking;
         paint();
       }));
       acts.append(button("opt", "Terminal", () => void (ctx.events.openTerminal(a.panel!) || ctx.toast("That terminal is gone.", true))));
     }
+    if (!a.panel && iss) acts.append(button("opt", `Open #${iss.number}`, () => ctx.events.openUrl(iss.url)));
     if (a.session && a.harness === "claude") acts.append(button("opt", "History", () => ctx.events.openHistory(a.session!)));
     if (a.pid) acts.append(holdButton("Hold to Stop", () => void stopPid(a.pid!, ctx.nameOf(a))));
     out.push(acts);
-    if (!a.panel) out.push(div("pnote", a.headless ? "It runs with nobody at it. Talk reaches it through the board." : "It runs outside Panel, so Panel cannot type into it."));
+    if (!a.panel)
+      out.push(
+        div(
+          "pnote",
+          a.headless
+            ? iss
+              ? `No terminal to type into. A comment on #${iss.number} reaches it.`
+              : "No terminal to type into. Stop it, or let it finish."
+            : "It runs in a terminal outside Panel. Answer it there.",
+        ),
+      );
     return out;
   }
 
   function reportPanel(e: LiveEmber): HTMLElement[] {
     const now = Date.now();
     const o = e.outcome;
-    const me = who(e, e.parentName);
+    const me = ctx.emberWho(e);
     const out: HTMLElement[] = [head(me.title, `${me.sub} · ${ctx.roomName(e.room)}`, OUTCOME_COLOUR[o])];
     out.push(chipRow(OUTCOME_WORD[o], OUTCOME_COLOUR[o], `ended ${ago(e.endedMs, now)}`));
+    // With no result written, the step it was on is the clue to what went wrong.
     if (e.result) out.push(div("presult", e.result));
+    else if (o !== "done" && e.steps[0]) out.push(div("presult", `Its last step: ${e.steps[0].label}`));
     out.push(...doneList(`What it did · ${e.stepCount} ${plural(e.stepCount, "step")}`, e.steps));
     const list: [string, string | HTMLElement][] = [];
     const task = taskLine(e.task);
     if (task) list.push(["Task", task]);
     if (e.startedMs) list.push(["Ran", since(e.startedMs, e.endedMs)]);
-    list.push(["Started by", e.parentName ?? (e.via === "Terminal" ? "You, in Terminal" : (e.via ?? "Not known"))]);
+    list.push(["Started by", e.parentName ?? startedBy(e.via)]);
     if (e.files.length) {
       const files = div("pfam");
       for (const f of e.files.slice(0, 8)) files.append(link(f.split("/").slice(-2).join("/"), () => ctx.events.openFile(f)));
@@ -232,7 +257,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       return r;
     };
     out.push(div("psec", "Now"), list(here.map((a) => rowBtn(`var(--l-${a.state})`, ctx.nameOf(a), doing(a), () => ctx.select({ kind: "agent", id: a.id }))), "Nobody here now"));
-    out.push(div("psec", "Recently"), list(embers.slice(0, 5).map((e) => rowBtn(OUTCOME_COLOUR[e.outcome], who(e, e.parentName).title, e.result ?? OUTCOME_WORD[e.outcome], () => ctx.select({ kind: "ember", id: e.id }))), "Nothing yet today"));
+    out.push(div("psec", "Recently"), list(embers.slice(0, 5).map((e) => rowBtn(OUTCOME_COLOUR[e.outcome], ctx.emberWho(e).title, e.result ?? OUTCOME_WORD[e.outcome], () => ctx.select({ kind: "ember", id: e.id }))), "Nothing yet today"));
     return out;
   }
 

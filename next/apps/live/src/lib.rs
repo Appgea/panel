@@ -223,6 +223,9 @@ pub(crate) struct Landmark {
     pub kind: LandmarkKind,
     pub x: f32,
     pub y: f32,
+    /// No news here lately: drawn dim, so the map's light is where work happens.
+    #[serde(default)]
+    pub quiet: bool,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]

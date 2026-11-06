@@ -31,7 +31,7 @@ import { mountCatalog } from "./live_catalog";
 import { facts } from "./live_facts";
 import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
-import { direct, type EmberEnd, type Seen } from "./live_playbook";
+import { direct, RESULT_MS, RESULTS, type EmberEnd, type Seen } from "./live_playbook";
 import { scene } from "./live_scene";
 import { COLOR, PLAIN, play, type Pt, type Script, type Stagehand } from "./live_script";
 import { mountSide } from "./live_side";
@@ -48,6 +48,8 @@ const POLL_MS = 2000;
 const BOARD_MS = 60_000;
 /** More scripts at once than this is noise. A step that finds no room just shows its words. */
 const MAX_SCRIPTS = 6;
+/** Glyphs and tags on the map at once. Past this a new one is dropped: a crowd says nothing. */
+const MAX_MARKS = 12;
 /**
  * Below 0.3 a district is a speck and every word is hidden to keep the rest apart. Above 1.6 the
  * map's lines turn thick and soft.
@@ -96,6 +98,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     selection: null,
     hover: null,
     pendingFx: [],
+    marks: [],
+    results: new Map(),
     reduced: !!reducedQuery?.matches,
   };
   root.classList.toggle("is-reduced", s.reduced);
@@ -118,6 +122,11 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   const running = new Map<string, () => void>();
   /** The last step each agent acted out, as verb@time, so a step plays once. */
   const acted = new Map<string, string>();
+  /** The last finished step with a result each agent had, as verb@time, so a result shows once. */
+  const judged = new Map<string, string>();
+  /** Results found by this poll, for the playbook's ✓ and ✗. */
+  let freshResults: { agentId: string; ok: boolean }[] = [];
+  let markId = 0;
 
   const toScreen = (p: Pt): Pt => ({ x: (p.x - s.camera.x) * s.camera.zoom + stage.clientWidth / 2, y: (p.y - s.camera.y) * s.camera.zoom + stage.clientHeight / 2 });
   const toWorld = (p: Pt): Pt => ({ x: (p.x - stage.clientWidth / 2) / s.camera.zoom + s.camera.x, y: (p.y - stage.clientHeight / 2) / s.camera.zoom + s.camera.y });
@@ -244,9 +253,13 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
         // owner sits at This Mac, and the board is GitHub's.
         case "desk":
           return [w.hub];
+        // Its own bay, else a free one, else none, and the moves aimed there are skipped. A glyph
+        // flying into a bay another agent holds would say that agent's job is this one's.
         case "bay": {
-          const i = s.world?.mac.bays.findIndex((b) => b.agent === id) ?? -1;
-          return [w.hub.bays[Math.max(0, i)]];
+          const bays = s.world?.mac.bays ?? [];
+          const own = bays.findIndex((b) => b.agent === id);
+          const i = own >= 0 ? own : bays.findIndex((b) => !b.holder);
+          return i >= 0 && w.hub.bays[i] ? [w.hub.bays[i]] : [];
         }
         case "board":
           return [L.tower];
@@ -289,9 +302,16 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       const until = Date.now() + ms;
       for (const t of pick) s.lights.set(t.path, { color, until });
     },
+    mark(_id, m) {
+      if (s.marks.length < MAX_MARKS) s.marks.push({ ...m, id: ++markId, born: Date.now() });
+    },
     label(id) {
       const a = ctx.agentById(id);
       return a ? doing(a) : "";
+    },
+    file(id) {
+      const f = ctx.agentById(id)?.now?.file;
+      return f ? (f.split("/").pop() ?? "") : "";
     },
     flush: () => draw(),
   };
@@ -320,6 +340,29 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
+  /**
+   * Each agent's newest finished step with a result: a test, build or push shows ✓ or ✗ in its
+   * bubble. The first look at an agent only remembers, so opening Live replays nothing old.
+   */
+  function judge(): void {
+    const w = s.world!;
+    const now = Date.now();
+    freshResults = [];
+    for (const id of judged.keys()) if (!w.agents.some((a) => a.id === id)) judged.delete(id);
+    for (const [id, r] of s.results) if (r.until < now) s.results.delete(id);
+    for (const a of w.agents) {
+      const st = a.steps.find((x) => x.ok !== undefined);
+      const key = st ? `${st.verb ?? ""}@${st.atMs}` : "";
+      const seen = judged.get(a.id);
+      judged.set(a.id, key);
+      const words = st?.verb ? RESULTS[st.verb] : undefined;
+      if (!st || seen === undefined || seen === key || !words) continue;
+      const ok = st.ok!;
+      s.results.set(a.id, { text: ok ? words[0] : words[1], ok, until: now + (ok ? RESULT_MS.ok : RESULT_MS.failed) });
+      freshResults.push({ agentId: a.id, ok });
+    }
+  }
+
   /** The catalog's Play: on the open agent, or on the busiest one. */
   function playOn(verb: string): boolean {
     const x = scriptFor(verb);
@@ -337,7 +380,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   function paint(): void {
     if (!s.world) return;
     top.paint();
+    judge();
     draw();
+    freshResults = [];
     act();
     panel.paint();
     catalog.paint();
@@ -377,7 +422,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const snapshot = snap();
     const endings: EmberEnd[] = knownEmbers ? w.embers.filter((e) => !knownEmbers!.has(e.id)).map((e) => ({ id: e.id, agentId: e.id.split("@")[0], outcome: e.outcome })) : [];
     knownEmbers = new Set(w.embers.map((e) => e.id));
-    s.pendingFx.push(...direct(lastSeen, snapshot, endings, played, now));
+    s.pendingFx.push(...direct(lastSeen, snapshot, endings, freshResults, played, now));
     lastSeen = snapshot;
     // Effects are for this moment only. Without a view they are dropped, not saved up.
     if (view) view.set_scene(JSON.stringify(scene(ctx, width, stage.clientHeight)));
@@ -413,13 +458,11 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   tools.append(zoomOut, zoomIn, fitBtn, anim);
 
   function paintTools(): void {
-    const n = catalog.count();
-    const writing = (s.world?.catalog ?? []).filter((x) => x.pending).length;
     zoomOut.disabled = s.camera.zoom <= ZOOM_MIN + 0.001;
     zoomIn.disabled = s.camera.zoom >= ZOOM_MAX - 0.001;
     fitBtn.disabled = !s.cameraHeld;
-    const label = `Animations ${n}${writing ? ` · ${writing} writing` : ""}`;
-    if (anim.textContent !== label) anim.textContent = label;
+    // The count and "1 writing" meant nothing beside a zoom button. The catalog says both.
+    anim.title = `${catalog.count()} animations. Open the catalog to play, improve or delete one.`;
     anim.classList.toggle("is-on", catalog.isOpen());
   }
 

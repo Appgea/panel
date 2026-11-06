@@ -10,6 +10,8 @@
 .cat-row.is-pending .cat-name { color: var(--l-turn); }
 .cat-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .cat-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 13px/1.35 var(--l-sans); }
+.cat-glyphs { display: inline-flex; gap: 4px; align-self: center; }
+.cat-glyphs svg { width: 14px; height: 14px; fill: none; stroke: var(--l-ink-2); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .cat-verb { margin-left: auto; flex: none; font: 500 11px/1.3 var(--l-mono); color: var(--l-work); }
 .cat-about { margin-top: 2px; font: 400 12.5px/1.4 var(--l-sans); color: var(--l-ink-2); }
 .cat-meta { margin-top: 3px; font: 400 11px/1.4 var(--l-mono); color: var(--l-ink-3); }

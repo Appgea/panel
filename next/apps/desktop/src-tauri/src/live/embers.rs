@@ -192,7 +192,7 @@ mod tests {
             state_ms: None,
             model: None,
             task: None,
-            now: mid_step.then(|| Step { at_ms: 0, label: "Run the tests".into(), station: Station::Check, file: None, helper: false, asks: false, verb: "test".into() }),
+            now: mid_step.then(|| Step { at_ms: 0, label: "Run the tests".into(), station: Station::Check, file: None, helper: false, asks: false, verb: "test".into(), ok: None }),
             steps: Vec::new(),
             step_count: 3,
             last_text: said.map(Into::into),

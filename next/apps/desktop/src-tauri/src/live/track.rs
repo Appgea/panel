@@ -23,6 +23,11 @@ const STEPS: usize = 40;
 /// session's title, which Claude rewrites as it goes.
 const TAIL_BYTES: u64 = 8 << 20;
 const HEAD_BYTES: usize = 400;
+/// Claude writes a failed tool result's flag right before its id, in every transcript checked.
+const ERROR_ID: &[u8] = b"\"is_error\":true,\"tool_use_id\":\"";
+/// How a failed command's result starts. Checked over 80 transcripts on 2026-11-06: the other
+/// error results were hook blocks, tool refusals and the owner's denials.
+const RAN_AND_FAILED: &[u8] = b"\"content\":\"Exit code ";
 const CODEX_COMMAND: &str = "Running a command";
 /// A Codex line longer than this is a tool's output or a context blob, never a step.
 const CODEX_LINE_MAX: usize = 256 << 10;
@@ -56,6 +61,10 @@ pub struct Step {
     /// The kind of work, like `git.push`, which picks its animation (verbs.rs).
     #[serde(default)]
     pub verb: String,
+    /// How a finished step went: false when its tool result was an error. None while it runs,
+    /// and for harnesses that do not say (Codex, opencode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
 }
 
 /// One transcript folded so far.
@@ -238,7 +247,7 @@ impl Track {
                     if let Some(label) = self.last_text.clone() {
                         self.steps += 1;
                         let station = station_of(&label);
-                        self.finish(Step { at_ms: at, label: clip(&label, 90), station, file: None, helper: false, asks: false, verb: "think".into() });
+                        self.finish(Step { at_ms: at, label: clip(&label, 90), station, file: None, helper: false, asks: false, verb: "think".into(), ok: None });
                     }
                 }
             }
@@ -250,7 +259,7 @@ impl Track {
                     self.saw_path(hint);
                 }
                 let verb = super::verbs::of_tool(p["name"].as_str().unwrap_or("shell"), command.as_deref());
-                let step = Step { at_ms: at, label: CODEX_COMMAND.into(), station, file: None, helper: false, asks: false, verb };
+                let step = Step { at_ms: at, label: CODEX_COMMAND.into(), station, file: None, helper: false, asks: false, verb, ok: None };
                 if !id.is_empty() && !self.open.iter().any(|(o, _)| *o == id) {
                     self.open.push((id, step));
                 }
@@ -259,9 +268,10 @@ impl Track {
         }
     }
 
-    fn close(&mut self, tool_id: &str) {
+    fn close(&mut self, tool_id: &str, ok: Option<bool>) {
         if let Some(i) = self.open.iter().position(|(id, _)| id == tool_id) {
-            let (_, step) = self.open.remove(i);
+            let (_, mut step) = self.open.remove(i);
+            step.ok = ok;
             // A Codex command says nothing on its own. Its narration is the step.
             if step.label != CODEX_COMMAND {
                 self.finish(step);
@@ -319,7 +329,7 @@ fn step(name: &str, input: &Value, at_ms: u64) -> Option<Step> {
         other => (other.to_string(), Station::Build),
     };
     let verb = super::verbs::of_tool(name, s("command"));
-    Some(Step { at_ms, label: clip(&label, 90), station, file, helper, asks, verb })
+    Some(Step { at_ms, label: clip(&label, 90), station, file, helper, asks, verb, ok: None })
 }
 
 /// The absolute paths a shell command names, like `cd ~/x/tavla && …`. Only the paths are kept,
@@ -575,7 +585,7 @@ pub(crate) fn refresh(track: &mut Track, path: &Path, kind: Kind) {
         if kind == Kind::Codex {
             if contains(head, b"_call_output\"") {
                 if let Some(id) = quoted_after(head, b"\"call_id\":\"") {
-                    track.close(&id);
+                    track.close(&id, None);
                 }
                 continue;
             }
@@ -586,8 +596,16 @@ pub(crate) fn refresh(track: &mut Track, path: &Path, kind: Kind) {
             }
             continue;
         }
-        if let Some(id) = quoted_after(head, b"\"tool_use_id\":\"") {
-            track.close(&id);
+        // A failed result writes its id after the error text, which can run past the head:
+        // `"content":"Exit code 1…","is_error":true,"tool_use_id":"…"`. Missing it left the
+        // step open for good, so the agent read as busy on it.
+        let result = contains(head, b"\"tool_result\"");
+        if let Some((id, ok)) = result.then(|| quoted_after(&line, ERROR_ID)).flatten().map(|id| (id, Some(false))).or_else(|| quoted_after(head, b"\"tool_use_id\":\"").map(|id| (id, Some(true)))) {
+            // A command that ran and failed starts its result with "Exit code N". A call denied by
+            // the owner, blocked by a hook or refused by the tool is flagged as an error too, but
+            // it never ran, so it gets no result and no red ✗.
+            let unrun = ok == Some(false) && !contains(head, RAN_AND_FAILED);
+            track.close(&id, if unrun { None } else { ok });
             continue;
         }
         if line.starts_with(b"{\"type\":") && !line.starts_with(b"{\"type\":\"ai-title\"") {
@@ -646,6 +664,21 @@ mod tests {
         assert!(t.now().is_none(), "the result closes the step");
         assert_eq!(t.recent(5)[0].label, "Run the dice tests");
         assert!(!format!("{:?}", t.recent(5)).contains("TOKEN"));
+        assert_eq!(t.recent(5)[0].ok, Some(true));
+
+        // A failed result puts its id after the error text, past the head.
+        f.write_all(line(serde_json::json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t2", "name": "Bash", "input": {"command": "flutter build ios", "description": "Build the app"}}]}})).as_bytes()).unwrap();
+        let error = format!("Exit code 1\\n{}", "x".repeat(600));
+        f.write_all(format!("{{\"parentUuid\":\"p\",\"type\":\"user\",\"message\":{{\"role\":\"user\",\"content\":[{{\"type\":\"tool_result\",\"content\":\"{error}\",\"is_error\":true,\"tool_use_id\":\"t2\"}}]}}}}\n").as_bytes()).unwrap();
+        refresh(&mut t, &path, Kind::Claude);
+        assert!(t.now().is_none(), "a failed result closes its step too");
+        assert_eq!((t.recent(5)[0].label.as_str(), t.recent(5)[0].ok), ("Build the app", Some(false)));
+
+        // A call a hook blocked never ran: it closes, with no result.
+        f.write_all(line(serde_json::json!({"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "t3", "name": "Bash", "input": {"command": "git push", "description": "Push develop"}}]}})).as_bytes()).unwrap();
+        f.write_all(b"{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"tool_result\",\"content\":\"PreToolUse:Bash hook error: blocked\",\"is_error\":true,\"tool_use_id\":\"t3\"}]}}\n").unwrap();
+        refresh(&mut t, &path, Kind::Claude);
+        assert_eq!((t.recent(5)[0].label.as_str(), t.recent(5)[0].ok), ("Push develop", None));
         std::fs::remove_dir_all(dir).ok();
     }
 

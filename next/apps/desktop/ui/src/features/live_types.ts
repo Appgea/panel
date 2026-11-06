@@ -2,7 +2,7 @@
 
 import type { BoardFeed } from "./live_cards";
 import type { Facts } from "./live_facts";
-import type { FxOut, Pt, Script } from "./live_script";
+import type { FxOut, Mark, Pt, Script } from "./live_script";
 import type { Slots, World } from "./live_world";
 
 export type Harness = "claude" | "codex" | "grok" | "opencode" | "gemini" | "kimi";
@@ -10,8 +10,11 @@ export type State = "work" | "think" | "turn" | "idle" | "stuck";
 export type Station = "plan" | "build" | "check" | "ship";
 /** How an agent ended (src-tauri/src/live/embers.rs). */
 export type EmberOutcome = "done" | "failed" | "stopped" | "crashed" | "stuck";
-/** `verb` names the kind of work and picks its animation (src-tauri/src/live/verbs.rs). */
-export type Step = { atMs: number; label: string; station: Station; file?: string; helper?: boolean; asks?: boolean; verb?: string };
+/**
+ * `verb` names the kind of work and picks its animation (src-tauri/src/live/verbs.rs). `ok` is how
+ * a finished step went, from its tool result: unset while it runs, and for harnesses that do not say.
+ */
+export type Step = { atMs: number; label: string; station: Station; file?: string; helper?: boolean; asks?: boolean; verb?: string; ok?: boolean };
 
 export type LiveAgent = {
   id: string;
@@ -113,6 +116,8 @@ export type LiveEvents = {
   stop(pid: number): Promise<void>;
   /** Removes one animation from the catalog. The next agent doing that verb gets a new one. */
   deleteAnimation(verb: string): Promise<void>;
+  /** Has a writer rewrite one animation with the owner's note. The old one plays until then. */
+  improveAnimation(verb: string, note: string): Promise<void>;
 };
 
 /** What `apps/live` exports after wasm-bindgen. */
@@ -147,6 +152,10 @@ export type LiveState = {
   /** The dot under the pointer, or the agent row under it in the side list, by agent id. */
   hover: string | null;
   pendingFx: FxOut[];
+  /** Glyphs and tags that scripts put on the map, each until `born + ms`. */
+  marks: (Mark & { id: number; born: number })[];
+  /** How each agent's last test, build or push went, shown in its bubble until `until`. */
+  results: Map<string, { text: string; ok: boolean; until: number }>;
   reduced: boolean;
 };
 

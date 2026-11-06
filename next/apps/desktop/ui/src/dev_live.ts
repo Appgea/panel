@@ -190,7 +190,10 @@ function move(): void {
     const s = { atMs: now, label, station: "build" as St, verb, file };
     const files = file && !a.files.includes(file) ? [file, ...a.files] : a.files;
     const helpers = a.id === "pid:101" ? 2 : a.helpers;
-    return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...a.steps].slice(0, 20), files, helpers };
+    // The step before ends with a result, as a tool result says it: the first dice test run fails.
+    const ended = a.now ? [{ ...a.now, ok: a.now.label !== "Run the dice tests" }] : [];
+    const rest = a.steps.filter((x) => x !== a.now);
+    return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...ended, ...rest].slice(0, 20), files, helpers };
   });
   const bayHolder = list.find((a) => a.now && (a.now.verb === "test" || a.now.verb === "build") && a.state === "work");
   world = {
@@ -266,6 +269,9 @@ if (params.has("foryou")) {
     stop: async (pid) => console.log("[live harness] stop", pid),
     deleteAnimation: async (verb) => {
       world = { ...world, catalog: (world.catalog ?? []).filter((x) => x.verb !== verb) };
+    },
+    improveAnimation: async (verb, note) => {
+      world = { ...world, catalog: (world.catalog ?? []).map((x) => (x.verb === verb ? { ...x, improving: true, improved: note } : x)) };
     },
   });
   document.getElementById("liveScreen")!.hidden = false;

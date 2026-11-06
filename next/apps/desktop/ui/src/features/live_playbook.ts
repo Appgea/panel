@@ -11,7 +11,7 @@
  */
 
 import { COLOR, type FxOut } from "./live_script";
-import type { EmberOutcome } from "./live_types";
+import type { EmberOutcome, LiveAgent, LiveEmber, LiveWorld, Step } from "./live_types";
 
 export type Entry = { id: string; trigger: string; moves: string; tells: string; everyMs: number };
 
@@ -23,7 +23,51 @@ export const PLAYBOOK: Entry[] = [
   { id: "shipped", trigger: "an issue of this district closes on the board", moves: "a wide green ring opens around the district", tells: "work for this project went out", everyMs: 60_000 },
   { id: "clash", trigger: "two running agents have written the same file", moves: "a red beam between their dots", tells: "they may overwrite each other's work", everyMs: 60_000 },
   { id: "hot", trigger: "macOS slows the CPU for heat", moves: "This Mac warms to amber until it cools", tells: "the Mac is too busy; fewer builds at once", everyMs: 0 },
+  { id: "result", trigger: "a test, build, push or other checked step ends", moves: "✓ and a green ring, or ✗ and red sparks, with the result in the agent's bubble", tells: "whether it worked, which no script can know while the step runs", everyMs: 0 },
 ];
+
+/**
+ * The steps whose ending is news, and how to say it: [passed, failed]. A failed `grep` or `ls`
+ * is how agents look around, so only these get a ✓ or ✗.
+ */
+export const RESULTS: Record<string, [string, string]> = {
+  test: ["Tests passed", "Tests failed"],
+  typecheck: ["Typecheck passed", "Typecheck failed"],
+  build: ["Built", "Build failed"],
+  "git.commit": ["Committed", "Commit failed"],
+  "git.push": ["Pushed", "Push failed"],
+  "git.pull": ["Pulled", "Pull failed"],
+  release: ["Released", "Release failed"],
+  review: ["Review passed", "Review found problems"],
+  render: ["Rendered", "Render failed"],
+  shot: ["Screenshots taken", "Screenshots failed"],
+};
+/** A pass is news for a short while. A failure stays until the owner has had time to see it. */
+export const RESULT_MS = { ok: 12_000, failed: 60_000 };
+
+/** The verbs each landmark stands for: what makes GitHub or the web light up and name its news. */
+export const LANDMARK_VERBS = {
+  tower: new Set(["git.push", "git.pull", "release", "board"]),
+  web: new Set(["web", "mcp.claude-in-chrome", "mcp.playwright", "mcp.slack"]),
+};
+/** A landmark with no news for this long dims, so the map's light goes where work is. */
+export const LANDMARK_QUIET_MS = 10 * 60_000;
+
+export type News = { at: number; label: string; agent?: LiveAgent; ember?: LiveEmber };
+
+/** The newest step at each landmark, from running and ended agents. Null when there is none. */
+export function landmarkNews(world: LiveWorld): { tower: News | null; web: News | null } {
+  const newest = (verbs: Set<string>): News | null => {
+    let best: News | null = null;
+    const look = (steps: Step[], who: Pick<News, "agent" | "ember">) => {
+      for (const st of steps) if (st.verb && verbs.has(st.verb) && (!best || st.atMs > best.at)) best = { at: st.atMs, label: st.label, ...who };
+    };
+    for (const a of world.agents) look(a.steps, { agent: a });
+    for (const e of world.embers) look(e.steps, { ember: e });
+    return best;
+  };
+  return { tower: newest(LANDMARK_VERBS.tower), web: newest(LANDMARK_VERBS.web) };
+}
 
 const BY_ID = new Map(PLAYBOOK.map((e) => [e.id, e]));
 /** More than this at once is noise: the rest waits for the next scan. */
@@ -43,7 +87,7 @@ export type EmberEnd = { id: string; agentId: string; outcome: EmberOutcome };
  * entry last played per agent, district or pair, for the caps. A first scan plays nothing: a
  * world that was already running did not just begin.
  */
-export function direct(before: Seen | null, after: Seen, endings: EmberEnd[], played: Map<string, number>, now: number): FxOut[] {
+export function direct(before: Seen | null, after: Seen, endings: EmberEnd[], results: { agentId: string; ok: boolean }[], played: Map<string, number>, now: number): FxOut[] {
   if (!before) return [];
   const out: FxOut[] = [];
   const may = (entry: string, who: string): boolean => {
@@ -72,6 +116,12 @@ export function direct(before: Seen | null, after: Seen, endings: EmberEnd[], pl
     if (before.closed.has(number)) continue;
     const d = after.districts.get(key);
     if (d && may("shipped", key)) out.push({ kind: "ring", x: d.x, y: d.y, color: COLOR.done, size: d.r * 2.6, ms: 1700 });
+  }
+  for (const r of results) {
+    const d = after.dots.get(r.agentId);
+    if (!d) continue;
+    if (r.ok) out.push({ kind: "ring", x: d.x, y: d.y, color: COLOR.done, size: 34, ms: 1000 });
+    else out.push({ kind: "burst", x: d.x, y: d.y, color: COLOR.stuck, count: 12, size: 24 });
   }
   // Clash: any file two running agents both wrote. One beam per pair, at most once a minute.
   const ids = [...after.dots.keys()].sort();

@@ -30,7 +30,7 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
   const leftText = span("live-left-text");
   left.append(
     leftText,
-    holdButton("Hold to Stop", () => {
+    holdButton("Hold to clean up", () => {
       for (const j of (ctx.s.world?.jobs ?? []).filter((x) => x.kind === "left")) void stop(j.pid, j.label);
     }),
   );
@@ -46,30 +46,10 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
     }
   }
 
-  /** One plain sentence about what runs, from rules. */
   function paint(): void {
-    const w = ctx.s.world;
-    if (!w) return;
+    if (!ctx.s.world) return;
     paintLeft();
-    const agents = w.agents;
-    if (!agents.length) {
-      narr.textContent = `No agent is running on this Mac.${w.mac.hot ? " This Mac is hot." : ""}`;
-      return;
-    }
-    const working = agents.filter((a) => a.state === "work" || a.state === "think");
-    const rooms = new Map<string, number>();
-    for (const a of working) rooms.set(ctx.roomOf(a), (rooms.get(ctx.roomOf(a)) ?? 0) + 1);
-    const busiest = [...rooms.entries()].sort((a, b) => b[1] - a[1])[0];
-    const parts: string[] = [];
-    if (!working.length) parts.push(`${agents.length} ${plural(agents.length, "agent")}, none working.`);
-    else if (rooms.size === 1 && busiest) parts.push(`${busiest[1]} ${plural(busiest[1], "agent")} working in ${ctx.roomName(busiest[0])}.`);
-    else parts.push(`${working.length} agents working in ${rooms.size} projects.`);
-    const waiting = agents.filter((a) => a.state === "turn").length;
-    if (waiting) parts.push(`${waiting} ${waiting === 1 ? "waits" : "wait"} for you.`);
-    const stuck = agents.filter((a) => a.state === "stuck").length;
-    if (stuck) parts.push(`${stuck} stuck.`);
-    if (w.mac.hot) parts.push("This Mac is hot.");
-    narr.textContent = parts.join(" ");
+    narr.textContent = line(ctx);
   }
 
   function paintLeft(): void {
@@ -78,8 +58,8 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
     if (!jobs.length || left.querySelector(".is-holding")) return;
     const procs = jobs.reduce((n, j) => n + j.procs, 0);
     const names = [...new Set(jobs.map((j) => j.label))];
-    leftText.textContent = `Left behind: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` and ${names.length - 2} more` : ""} · ${procs} ${plural(procs, "process", "processes")}`;
-    leftText.title = names.join(", ");
+    leftText.textContent = `${procs} ${plural(procs, "process", "processes")} left by ended agents: ${names.slice(0, 2).join(", ")}${names.length > 2 ? ` and ${names.length - 2} more` : ""}`;
+    leftText.title = `Nothing uses these any more. Cleaning up stops them: ${names.join(", ")}`;
   }
 
   function toast(text: string, bad = false): void {
@@ -95,4 +75,29 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
   }
 
   return { paint, toast, say };
+}
+
+/**
+ * One plain sentence about what runs. An agent is a session someone or the board started. A
+ * helper rides on the agent that started it and is counted apart, so this line, the list's head
+ * and each plot's sign add up to the same numbers. What needs the owner comes first.
+ */
+export function line(ctx: LiveCtx): string {
+  const w = ctx.s.world!;
+  const ids = new Set(w.agents.map((a) => a.id));
+  const agents = w.agents.filter((a) => !a.parent || !ids.has(a.parent));
+  const helpers = w.agents.length - agents.length;
+  if (!agents.length) return `No agent is running on this Mac.${w.mac.hot ? " This Mac is hot." : ""}`;
+  const n = (state: string[]) => agents.filter((a) => state.includes(a.state)).length;
+  const projects = new Set(agents.map((a) => ctx.roomOf(a))).size;
+  const states = [
+    [n(["turn"]), "waits for you", "wait for you"],
+    [n(["stuck"]), "stuck", "stuck"],
+    [n(["work", "think"]), "working", "working"],
+    [n(["idle"]), "idle", "idle"],
+  ] as const;
+  const parts = states.filter(([k]) => k).map(([k, one, many]) => `${k} ${k === 1 ? one : many}`);
+  const head = `${agents.length} ${plural(agents.length, "agent")} in ${projects} ${plural(projects, "project")}`;
+  const kids = helpers ? `, with ${helpers} ${plural(helpers, "helper")}` : "";
+  return `${head}${kids}: ${parts.join(", ")}.${w.mac.hot ? " This Mac is hot." : ""}`;
 }

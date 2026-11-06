@@ -12,7 +12,7 @@
  * column until it closes.
  */
 
-import { ago, button, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, since, span, STATE_RANK, taskLine, who } from "./live_text";
+import { ageOf, ago, button, cap, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, taskLine } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber } from "./live_types";
 
 /** Ended agents in the list. Older ones are in History. */
@@ -69,7 +69,9 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const ids = new Set(w.agents.map((a) => a.id));
     const kidsOf = new Map<string, LiveAgent[]>();
     for (const a of w.agents) if (a.parent && ids.has(a.parent)) kidsOf.set(a.parent, [...(kidsOf.get(a.parent) ?? []), a]);
-    set(nowHead, w.agents.length ? `Running · ${w.agents.length}` : "Running");
+    const mains = w.agents.filter((a) => !a.parent || !ids.has(a.parent)).length;
+    const helpers = w.agents.length - mains;
+    set(nowHead, mains ? `Running · ${mains} ${plural(mains, "agent")}${helpers ? `, ${helpers} ${plural(helpers, "helper")}` : ""}` : "Running");
     // Helpers sit under the agent that started them. A swarm of eight would bury the list, so a
     // parent shows KIDS of them, the ones that need you first, and counts the rest.
     const nowRows: HTMLElement[] = [];
@@ -107,9 +109,12 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const title = !depth ? me.title : a.helperKind ? (a.task ?? me.role) : me.title.startsWith("Helper of ") ? "Helper" : me.title;
     const room = ctx.roomName(ctx.roomOf(a));
     const iss = ctx.issueOf(a);
-    const what = a.state === "idle" ? (iss ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? "Idle")) : doing(a);
-    const meta = [me.sub, a.startedMs ? since(a.startedMs, now) : ""].filter(Boolean).join(" · ");
-    fill(r, `var(--l-${a.state})`, title, depth ? "" : room, what, [me.title, meta, taskLine(a.task)].filter(Boolean).join("\n"));
+    const named = /^#\d/.test(me.title);
+    const what = a.state === "idle" ? (iss && !named ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? "Idle")) : doing(a);
+    const age = ageOf(a, now);
+    const meta = [me.sub, a.startedMs ? `running ${since(a.startedMs, now)}` : ""].filter(Boolean).join(" · ");
+    const where = [depth ? "" : room, age ? (a.state === "turn" ? `waiting ${age}` : age) : ""].filter(Boolean).join(" · ");
+    fill(r, `var(--l-${a.state})`, title, where, what, [me.title, meta, taskLine(a.task)].filter(Boolean).join("\n"));
     r.className = `side-row is-${a.state}${depth ? " is-child" : ""}`;
     return r;
   }
@@ -128,9 +133,14 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const key = `e:${e.id}`;
     const r = row(key, () => ctx.select({ kind: "ember", id: e.id }), null);
     r.dataset.key = key;
-    const me = who(e, e.parentName);
-    const what = e.result ?? taskLine(e.task) ?? "";
-    fill(r, OUTCOME_COLOUR[e.outcome], `${me.title} · ${OUTCOME_WORD[e.outcome].toLowerCase()}`, e.roomName, what, [me.title, [me.sub, ago(e.endedMs, now)].filter(Boolean).join(" · "), taskLine(e.task)].filter(Boolean).join("\n"));
+    const me = ctx.emberWho(e);
+    // An agent that did not finish says where it was, since it wrote no result.
+    const last = e.steps[0]?.label;
+    const detail = e.result ?? (e.outcome !== "done" && last ? `Its last step: ${last}` : (taskLine(e.task) ?? ""));
+    const when = ago(e.endedMs, now);
+    // How and when it ended lead the line, so the name keeps its room in the row's head.
+    const what = `${OUTCOME_WORD[e.outcome]} ${when}${detail ? `. ${cap(detail)}` : ""}`;
+    fill(r, OUTCOME_COLOUR[e.outcome], me.title, ctx.roomName(e.room), what, [me.title, [me.sub, when].filter(Boolean).join(" · "), taskLine(e.task)].filter(Boolean).join("\n"));
     r.className = "side-row is-ended";
     return r;
   }

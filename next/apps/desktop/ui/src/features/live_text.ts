@@ -4,7 +4,7 @@ import type { EmberOutcome, Harness, LiveAgent, State } from "./live_types";
 
 export const HARNESS: Record<Harness, string> = { claude: "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode", gemini: "Gemini", kimi: "Kimi" };
 export const LETTER: Record<Harness, string> = { claude: "C", codex: "X", grok: "G", opencode: "O", gemini: "M", kimi: "K" };
-export const STATE_WORD: Record<State, string> = { work: "Working", think: "Planning", turn: "Wants to talk", idle: "Idle", stuck: "Stuck" };
+export const STATE_WORD: Record<State, string> = { work: "Working", think: "Planning", turn: "Waits for you", idle: "Idle", stuck: "Stuck" };
 export const STATE_RANK: Record<State, number> = { turn: 0, stuck: 1, work: 2, think: 3, idle: 4 };
 
 export function short(model: string | null): string {
@@ -93,16 +93,39 @@ export function doing(a: LiveAgent): string {
   switch (a.state) {
     // A bare "Working" says nothing. The last step or the last words say what it is on.
     case "work":
-      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `After ${lower(a.steps[0].label)}` : "Working");
+      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `After ${lower(a.steps[0].label)}` : a.startedMs && Date.now() - a.startedMs < 120_000 ? "Starting up" : "Working. No steps read yet");
     case "think":
       return a.steps[0] ? `Planning after ${lower(a.steps[0].label)}` : (a.lastText ?? "Planning");
     case "turn":
-      return a.lastText ?? "Wants to talk";
+      return a.lastText ?? "Waits for your answer";
+    // Stuck means its step runs long with the process quiet (src-tauri/src/live/mod.rs). How
+    // long is what tells a slow build from a hang.
     case "stuck":
-      return `Stuck on ${a.now?.label ?? "a step"}`;
+      return `No output for ${since(a.stateMs ?? a.now?.atMs ?? Date.now(), Date.now())} on ${lower(a.now?.label ?? "its step")}`;
     default:
       return a.lastText ?? (a.steps[0] ? `Last: ${lower(a.steps[0].label)}` : "Idle");
   }
+}
+
+/** A step running this long gets its age shown. Shorter ones change too fast for a time to help. */
+const LONG_STEP_MS = 3 * 60_000;
+
+/**
+ * How long an agent has been in what it shows, when that matters: waiting for you, or one step
+ * running long. "" otherwise, so the map carries no times that say nothing.
+ */
+export function ageOf(a: LiveAgent, now: number): string {
+  if (a.state === "turn" && a.stateMs) return since(a.stateMs, now);
+  if (a.state === "work" && a.now && now - a.now.atMs > LONG_STEP_MS) return since(a.now.atMs, now);
+  return "";
+}
+
+/** Who started an agent, in words. `via` is the process that launched it (src-tauri/src/live/mod.rs). */
+export function startedBy(via: string | null): string {
+  if (!via) return "Not known";
+  if (via === "Terminal") return "You, in Terminal";
+  if (/board\.py|launch\.py|fleet/.test(via)) return "The board";
+  return via;
 }
 
 export function plural(n: number, one: string, many = `${one}s`): string {

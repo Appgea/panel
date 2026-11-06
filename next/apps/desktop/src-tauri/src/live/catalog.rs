@@ -34,10 +34,13 @@ fn valid(verb: &str) -> bool {
     !verb.is_empty() && verb.len() <= 40 && verb.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '-'))
 }
 
-/// Makes the catalog folder. The first time, it also writes the seed scripts.
+/// Makes the catalog folder. The first time, it also writes the seed scripts. Once per run it
+/// brings older seeds up to date.
 fn ensure() -> Option<PathBuf> {
     let dir = dir();
     if dir.is_dir() {
+        static UPGRADED: std::sync::Once = std::sync::Once::new();
+        UPGRADED.call_once(|| upgrade_seeds(&dir));
         return Some(dir);
     }
     std::fs::create_dir_all(&dir).ok()?;
@@ -51,13 +54,38 @@ fn ensure() -> Option<PathBuf> {
     Some(dir)
 }
 
-/// Every script, with its verb and when it was written, and every verb still being written as
-/// `{verb, pending: true}`. A file that is not JSON is skipped.
+/// A seed with a higher `rev` replaces an older copy of itself in the catalog: a file with an
+/// older rev, the seed's own title, and no owner's improvement. A deleted seed stays deleted.
+/// The old file is kept beside it as `<verb>.json.v<rev>`, which the catalog never reads, so a
+/// writer's script that only looked like a seed can be put back. Seeds got `rev` 2 when green and
+/// red became result colours.
+fn upgrade_seeds(dir: &std::path::Path) {
+    let Ok(Value::Object(seeds)) = serde_json::from_str::<Value>(SEEDS) else { return };
+    let rev = |v: &Value| v.get("rev").and_then(Value::as_u64).unwrap_or(1);
+    for (verb, seed) in seeds {
+        let path = dir.join(format!("{verb}.json"));
+        let Some(have) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()) else { continue };
+        let old = rev(&have);
+        if !valid(&verb) || old >= rev(&seed) || have.get("title") != seed.get("title") || have.get("improved").is_some() {
+            continue;
+        }
+        if std::fs::copy(&path, dir.join(format!("{verb}.json.v{old}"))).is_ok() {
+            let _ = std::fs::write(&path, serde_json::to_vec_pretty(&seed).unwrap_or_default());
+        }
+    }
+}
+
+/// Every script, with its verb and when it was written, every verb still being written as
+/// `{verb, pending: true}`, and `improving: true` on a script being rewritten. A file that is not
+/// JSON is skipped.
 pub fn read() -> Vec<Value> {
     let Ok(entries) = std::fs::read_dir(dir()) else { return Vec::new() };
     let files: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    // A marker past the writer's limit is only a retry wait: no writer runs, so it is not
+    // "being written". Listed, it read so forever in the catalog.
     let pending = files.iter().filter_map(|p| {
-        let verb = p.file_name()?.to_str()?.strip_suffix(".pending")?;
+        let young = p.metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|d| d < WRITER_LIMIT);
+        let verb = p.file_name()?.to_str()?.strip_suffix(".pending").filter(|_| young)?;
         (!files.iter().any(|f| f.file_name().and_then(|n| n.to_str()) == Some(&format!("{verb}.json")))).then(|| serde_json::json!({ "verb": verb, "pending": true }))
     });
     let mut out: Vec<Value> = files
@@ -67,6 +95,10 @@ pub fn read() -> Vec<Value> {
             let mut v: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
             let made = path.metadata().ok()?.modified().ok()?.duration_since(SystemTime::UNIX_EPOCH).ok()?.as_millis() as u64;
             let o = v.as_object_mut()?;
+            let busy = path.with_extension("improving").metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|d| d < WRITER_LIMIT);
+            if busy {
+                o.insert("improving".into(), true.into());
+            }
             o.insert("verb".into(), verb.into());
             o.entry("madeMs").or_insert(made.into());
             Some(v)
@@ -126,9 +158,38 @@ pub fn write_missing(seen: &[(String, String)]) {
         let _ = std::io::Write::write_all(&mut f, example.as_bytes());
         room -= 1;
         started.push(unix);
-        spawn_writer(&dir, verb, example);
+        // A writer that did not start keeps its marker: the retry wait stops a launch loop.
+        let _ = spawn_writer(&dir, verb, Ask::New { example: example.clone() });
     }
     let _ = std::fs::write(&log, started.iter().map(|t| format!("{t}\n")).collect::<String>());
+}
+
+/// The owner's "make this one better": a writer rewrites the script with the owner's note and
+/// the new one replaces it. The old one stays until a playable rewrite exists.
+/// Owner, 2026-11-06: "Agents must be able to improve the dots on Live, come up with new kinds
+/// of animations."
+pub fn improve(verb: &str, note: &str) -> Result<(), String> {
+    if !valid(verb) {
+        return Err(format!("{verb} is not a verb"));
+    }
+    let dir = ensure().ok_or("the catalog folder could not be made")?;
+    let old = std::fs::read_to_string(dir.join(format!("{verb}.json"))).map_err(|_| format!("{verb} has no animation to improve"))?;
+    let mark = dir.join(format!("{verb}.improving"));
+    if mark.metadata().and_then(|m| m.modified()).ok().and_then(|t| SystemTime::now().duration_since(t).ok()).is_some_and(|d| d < WRITER_LIMIT) {
+        return Err(format!("{verb} is already being improved"));
+    }
+    std::fs::write(&mark, note).map_err(|e| e.to_string())?;
+    if !spawn_writer(&dir, verb, Ask::Improve { old, note: note.trim().chars().take(400).collect() }) {
+        // No writer runs, so nothing is being improved and a retry must not wait.
+        let _ = std::fs::remove_file(&mark);
+        return Err(format!("the writer for {verb} did not start"));
+    }
+    Ok(())
+}
+
+enum Ask {
+    New { example: String },
+    Improve { old: String, note: String },
 }
 
 /// A script the player can run: an object with a list of moves.
@@ -139,24 +200,35 @@ fn playable(text: &str) -> bool {
 /// A writer that runs longer than this is killed.
 const WRITER_LIMIT: Duration = Duration::from_secs(300);
 
-/// Runs one writer in its own scratch folder. Its file moves into the catalog only if it is a
-/// playable script and the verb still has none, so a writer can never overwrite another script.
-fn spawn_writer(dir: &PathBuf, verb: &str, example: &str) {
+/// Runs one writer in its own scratch folder. A new script moves into the catalog only if it is
+/// playable and the verb still has none. An improvement replaces its script only when playable.
+/// False when the writer did not start.
+fn spawn_writer(dir: &PathBuf, verb: &str, ask: Ask) -> bool {
     let work = dir.join(".writing").join(verb);
     let _ = std::fs::remove_dir_all(&work);
     if let Err(e) = std::fs::create_dir_all(&work) {
         eprintln!("[live] catalog writer for {verb}: {e}");
-        return;
+        return false;
     }
     let examples: Vec<String> = ["git.push", "search", "spawn"]
         .iter()
         .filter_map(|v| std::fs::read_to_string(dir.join(format!("{v}.json"))).ok().map(|s| format!("{v}.json:\n{s}")))
         .collect();
+    let job = match &ask {
+        Ask::New { example } => format!("An agent just did a step with the verb `{verb}`. Example step: \"{example}\".\nWrite the file `{verb}.json` in the current folder."),
+        Ask::Improve { old, note } => format!(
+            "The owner wants the animation for the verb `{verb}` improved. The owner's note: \"{note}\".\n\
+             The current script:\n{old}\n\
+             Write a better one as the file `{verb}.json` in the current folder. Keep what works, fix what the note asks. \
+             If no glyph fits, draw a new one under \"glyphs\"."
+        ),
+    };
     let prompt = format!(
         "You write one animation script for Panel Live, a dark map where coding agents are small glowing electrons.\n\
-         An agent just did a step with the verb `{verb}`. Example step: \"{example}\".\n\
-         Write the file `{verb}.json` in the current folder: a JSON object in the language described at the top of the player below.\n\
-         Make it show what this kind of work is, at a glance, in 2 to 6 seconds. Use the places and moves the player knows. Nothing else.\n\
+         {job}\n\
+         It is a JSON object in the language described at the top of the player below. Follow WHAT A GOOD SCRIPT DOES there: \
+         the owner must read what kind of work this is at a glance, so show one thing moving from where it is to where it goes, \
+         name it with a glyph and at most one short tag, and keep green and red out of it. Use the places, moves and glyphs the player knows. Nothing else.\n\
          Write only that one file, then stop.\n\n\
          Scripts already in the catalog:\n{}\n\nThe player, ui/src/features/live_script.ts:\n{PLAYER}",
         examples.join("\n\n")
@@ -172,7 +244,7 @@ fn spawn_writer(dir: &PathBuf, verb: &str, example: &str) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("[live] catalog writer for {verb} did not start: {e}");
-            return;
+            return false;
         }
     };
     let (dir, verb) = (dir.clone(), verb.to_string());
@@ -188,16 +260,34 @@ fn spawn_writer(dir: &PathBuf, verb: &str, example: &str) {
             std::thread::sleep(Duration::from_secs(2));
         }
         let text = std::fs::read_to_string(work.join(format!("{verb}.json"))).unwrap_or_default();
-        if playable(&text) {
-            let dest = dir.join(format!("{verb}.json"));
-            if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create_new(true).open(&dest) {
-                let _ = std::io::Write::write_all(&mut f, text.as_bytes());
+        let dest = dir.join(format!("{verb}.json"));
+        match (&ask, playable(&text)) {
+            (_, false) => eprintln!("[live] catalog writer for {verb} left no playable script"),
+            (Ask::New { .. }, true) => {
+                if let Ok(mut f) = std::fs::OpenOptions::new().write(true).create_new(true).open(&dest) {
+                    let _ = std::io::Write::write_all(&mut f, text.as_bytes());
+                }
+                // Done: the marker only holds back a retry, and a stale one read as "being written".
+                let _ = std::fs::remove_file(dir.join(format!("{verb}.pending")));
             }
-        } else {
-            eprintln!("[live] catalog writer for {verb} left no playable script");
+            (Ask::Improve { note, .. }, true) => {
+                // Marked, so a seed upgrade never puts the old look back.
+                let mut v: Value = serde_json::from_str(&text).unwrap_or_default();
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("improved".into(), note.clone().into());
+                }
+                let tmp = work.join("improved.json");
+                if std::fs::write(&tmp, serde_json::to_vec_pretty(&v).unwrap_or_default()).is_ok() {
+                    let _ = std::fs::rename(&tmp, &dest);
+                }
+            }
+        }
+        if matches!(ask, Ask::Improve { .. }) {
+            let _ = std::fs::remove_file(dir.join(format!("{verb}.improving")));
         }
         let _ = std::fs::remove_dir_all(&work);
     });
+    true
 }
 
 #[cfg(test)]

@@ -1063,6 +1063,12 @@ async fn live_catalog_delete(verb: String) -> Result<(), String> {
     off_main(move || live::catalog::delete(&verb)).await
 }
 
+/// Asks a writer to rewrite one animation with the owner's note. The old one plays until then.
+#[tauri::command]
+async fn live_catalog_improve(verb: String, note: String) -> Result<(), String> {
+    off_main(move || live::catalog::improve(&verb, &note)).await
+}
+
 /// Live's hold-to-stop. Only a process the scan lists right now as an agent or a job, never a
 /// service, so a stale or forged pid cannot reach anything else. SIGTERM lets it clean up.
 #[tauri::command]
@@ -4423,6 +4429,7 @@ fn main() {
             live_world,
             live_stop,
             live_catalog_delete,
+            live_catalog_improve,
             launch_context,
             manager_project,
             main_folder_project,

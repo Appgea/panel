@@ -5,8 +5,8 @@
  */
 
 import type { BoardFeed, BoardIssue } from "./live_cards";
-import { who } from "./live_text";
-import type { LiveAgent, LiveWorld } from "./live_types";
+import { cap, who, withoutRoom } from "./live_text";
+import type { LiveAgent, LiveEmber, LiveWorld } from "./live_types";
 
 export type Facts = {
   issueOf(a: LiveAgent): BoardIssue | undefined;
@@ -19,6 +19,8 @@ export type Facts = {
   /** The one name an agent goes by on screen. See `who` in live_text.ts. */
   nameOf(a: LiveAgent): string;
   whoOf(a: LiveAgent): ReturnType<typeof who>;
+  /** Who an ended agent was, named the same way. */
+  emberWho(e: LiveEmber): ReturnType<typeof who>;
 };
 
 export function facts(read: () => { world: LiveWorld | null; board: BoardFeed | null }): Facts {
@@ -32,9 +34,21 @@ export function facts(read: () => { world: LiveWorld | null; board: BoardFeed | 
   const roomOf = (a: LiveAgent): string => (a.room !== "elsewhere" && a.room !== "home" ? a.room : (issueOf(a)?.apps[0] ?? a.room));
   const roomMeta = (key: string) => read().world?.rooms.find((r) => r.key === key);
   const agentById = (id: string | null) => (id ? read().world?.agents.find((a) => a.id === id) : undefined);
+  // Five rows that all said "Board worker" told the owner nothing. A worker is its issue:
+  // "#742 Store build fails", with its role kept in the second line.
+  const named = (me: ReturnType<typeof who>, iss: BoardIssue | undefined, room: string) =>
+    iss && /^Board (worker|reviewer)$/.test(me.title) ? { ...me, title: `#${iss.number} ${cap(withoutRoom(iss.title, room))}`, sub: [me.title, me.sub].filter(Boolean).join(" · ") } : me;
+  const own = (a: LiveAgent, parent: string | null) => {
+    const room = roomOf(a);
+    return named(who(a, parent), issueOf(a), roomMeta(room)?.name ?? room);
+  };
   const whoOf = (a: LiveAgent) => {
     const p = agentById(a.parent);
-    return who(a, p ? who(p).title : null);
+    return own(a, p ? own(p, null).title : null);
+  };
+  const emberWho = (e: LiveEmber) => {
+    const n = Number(/#(\d{2,6})\b/.exec(e.task ?? "")?.[1] ?? 0);
+    return named(who(e, e.parentName), n ? issues(read().board).find((i) => i.number === n) : undefined, e.roomName);
   };
   return {
     issueOf,
@@ -44,5 +58,6 @@ export function facts(read: () => { world: LiveWorld | null; board: BoardFeed | 
     agentById,
     nameOf: (a) => whoOf(a).title,
     whoOf,
+    emberWho,
   };
 }

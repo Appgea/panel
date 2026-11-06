@@ -52,7 +52,7 @@ export const BUBBLE_DX = 18;
 /** The width a bubble may take in its row, in world pixels. */
 export const BUBBLE_W = PLOT.w - PLOT.dotX - BUBBLE_DX - 10;
 const TILES_PER_DISTRICT = 22;
-const TILE_STEP = 11;
+export const TILE_STEP = 11;
 /** More columns than this make plots too small to read at the zoom it takes. */
 const MAX_COLS = 6;
 /** A new column count must fit this much better before every plot moves for it. */
