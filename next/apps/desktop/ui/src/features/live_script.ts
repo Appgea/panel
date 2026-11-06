@@ -8,18 +8,22 @@
  * reads this comment as its spec (src-tauri/src/live/catalog.rs). The owner deletes bad ones in
  * the catalog view, and the next sighting writes a new one.
  *
- * THE MAP. A dark field. This Mac, the hub, sits in a band on top with two testlock bays, the
- * GitHub tower to its left and the web gate to its right. Under it each project with a running
- * agent is a plot, a rounded box with one row per agent and the files agents touched as small
- * tiles along its bottom. Agents are small glowing electrons that never leave their row.
+ * THE MAP. A dark field. This Mac, the hub, sits in a band on top with two testlock bays, a
+ * GitHub card to its left and a Web card to its right. Under it each project with a running
+ * agent is a plot, a rounded box with one row per agent. Agents are small glowing electrons
+ * that never leave their row.
+ *
+ * QUIET. Every step of every agent may play its script, three at once at most, so each one is a
+ * hint, never a show. Owner, 2026-11-06: "Every step, quieter". One glyph and one move is often
+ * the whole script.
  *
  * WHAT A GOOD SCRIPT DOES. The owner glances at the map and must read what kind of work this is
  * without opening anything. Owner, 2026-11-06: "Animations must not be vague. Nothing must be
  * vague, while keeping screen not overpopulated."
  *   - It shows one thing moving from where it is to where it goes: a file into This Mac, a
- *     crate up to GitHub, a question out to the web. A glow with no from and no to says nothing.
+ *     crate into GitHub, a question out to the web. A glow with no from and no to says nothing.
  *   - It names the thing with a glyph and, at most once, a tag of 1 to 3 words: "develop",
- *     "{file}", "3 helpers". Never a whole sentence: the bubble already says the step.
+ *     "3 helpers". Never a whole sentence: the bubble already says the step.
  *   - Green and red belong to results. Live itself shows ✓ or ✗ when a test, build or push
  *     ends. A script plays while the step runs, before anyone knows how it went.
  *   - Two or three effects at once at most, and done in 2 to 5 seconds.
@@ -39,17 +43,16 @@
  * PLACES. Every "at", "from" and "to" is one of these names:
  *   "self"     the agent, where it stands now
  *   "home"     the middle of the agent's district
- *   "file"     the tile of the file this step touches, or one of the agent's tiles
- *   "files"    each tile the agent touched (repeats the move per tile, at most 8)
  *   "parent"   the agent that started this one, or "self"
  *   "helpers"  each agent this one started (repeats per helper, at most 8), or points around "self"
  *   "hub"      This Mac
  *   "bay"      the agent's testlock bay, or the first one
- *   "tower"    the foot of the GitHub tower
- *   "sky"      high above the tower
- *   "web"      the web gate
- * Older scripts name "desk" and "board": they play at "hub" and "tower". Never write them.
- * or an object with an offset in pixels, y growing down: {"place": "tower", "dx": 0, "dy": -40}
+ *   "tower"    the GitHub card, 200 by 64. A trip ends at its bottom edge, and a tag fits
+ *              under it at {"place": "tower", "dy": 50}
+ *   "web"      the Web card, the same size, to the right of This Mac
+ * Older scripts name "desk", "board", "sky", "file" and "files": they play at "hub", "tower",
+ * "tower", "self" and "self". Never write them.
+ * or an object with an offset in pixels, y growing down: {"place": "self", "dy": -22}
  *
  * COLOURS: "work" cyan, "think" blue, "turn" amber, "idle" grey, "ink" white. Each one means
  * that state. "done" green and "stuck" red are for results, which Live draws: in a script they
@@ -75,7 +78,7 @@
  *   {"do": "sweep", "at": P, "color": C, "size": 60, "ms": 2000}              a radar arm turns around the place
  *   {"do": "orbit", "at": P, "color": C, "count": 3, "size": 18, "ms": 2000}  electrons circle the place
  *   {"do": "carry", "color": C}                      the agent holds a glowing crate. With no colour it drops it
- *   {"do": "light", "at": "files" or "file", "color": C, "ms": 1500}          file tiles glow
+ *   {"do": "light", "at": "file", "color": C, "ms": 1500}                     the agent glows softly
  *   {"do": "glyph", "name": "crate", "at": P, "to": P, "color": C, "ms": 1400} an icon shows at the place, or travels to "to"
  *   {"do": "tag", "at": P, "text": "develop", "ms": 1800}                     a few words at the place. "{file}" is the step's file name
  * At most 24 moves and 8 seconds. Unknown moves and places are skipped. When the script ends,

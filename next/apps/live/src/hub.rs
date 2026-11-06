@@ -1,9 +1,10 @@
-//! This Mac at the middle of the map with its testlock bays, and the landmarks agents travel to:
-//! the GitHub tower and the web gate. Shapes only.
+//! This Mac at the middle of the map with its testlock bays, and the cards beside it that agents
+//! travel to: GitHub and the web. Shapes only.
 //! - The hub is `--deck` with a `--line` edge. A hot Mac warms both toward amber.
 //! - A held bay is cyan at 7% with a cyan edge at 35%.
+//! - A card with news lately is tinted 6% with a 40% edge in its hue: cyan GitHub, blue web.
 
-use crate::draw::{edge_shape, line, rect_shape, Frame, Kit, Shape, DECK, INK_3, LINE, LINE_2, THINK, WAIT, WALL, WORK};
+use crate::draw::{edge_shape, rect_shape, Frame, Kit, DECK, LINE, THINK, WAIT, WALL, WORK};
 use crate::{Current, LandmarkKind, Step};
 use bevy::prelude::*;
 
@@ -35,8 +36,6 @@ fn redraw(
         put(kit.shape(meshes, rect_shape(w, h, r)), kit.paint(mats, fill.0, fill.1), at);
         put(kit.shape(meshes, edge_shape(w, h, r, 1.0)), kit.paint(mats, edge.0, edge.1), at.with_translation(at.translation.with_z(z + 0.01)));
     };
-    let square = kit.shape(&mut meshes, Shape::Square);
-    let glow = kit.shape(&mut meshes, Shape::Glow);
     if let Some(h) = &current.0.hub {
         let edge = if h.hot { (WAIT, 0.55) } else { (LINE, 1.0) };
         boxed(&mut kit, &mut meshes, &mut mats, &mut put, h.x, h.y, h.w, h.h, 12.0, (DECK, 1.0), edge, 0.0);
@@ -48,38 +47,18 @@ fn redraw(
             boxed(&mut kit, &mut meshes, &mut mats, &mut put, b.x, b.y, b.w, b.h, 7.0, fill, edge, 0.05);
         }
     }
+    // GitHub and the web are cards like This Mac, so every place on the map reads the same way:
+    // a box with its name and its news inside. Owner, 2026-11-06: keep them, but look better.
     for l in &current.0.landmarks {
-        let at = |dx: f32, dy: f32, z: f32| Transform::from_translation(frame.at(l.x + dx, l.y + dy, z));
-        // A quiet landmark keeps its shape, so the owner still finds it, but gives up its light.
-        let dim = if l.quiet { 0.4 } else { 1.0 };
-        match l.kind {
-            LandmarkKind::Tower => {
-                // A mast of light: a base, a thin pillar with rungs, and a lit tip.
-                boxed(&mut kit, &mut meshes, &mut mats, &mut put, l.x, l.y, 70.0, 14.0, 5.0, (DECK, 1.0), (LINE_2, dim), 0.0);
-                let paint = kit.paint(&mut mats, LINE_2, dim);
-                put(square.clone(), paint.clone(), line(frame, Vec2::new(l.x, l.y - 7.0), Vec2::new(l.x, l.y - 120.0), 0.02, 2.0));
-                for i in 1..4 {
-                    let y = l.y - 7.0 - i as f32 * 28.0;
-                    let half = 16.0 - i as f32 * 4.0;
-                    put(square.clone(), paint.clone(), line(frame, Vec2::new(l.x - half, y), Vec2::new(l.x + half, y), 0.02, 1.0));
-                }
-                let tip = if l.quiet { (INK_3, 0.5) } else { (WORK, 0.9) };
-                put(square.clone(), kit.paint(&mut mats, tip.0, tip.1), at(0.0, -124.0, 0.04).with_rotation(Quat::from_rotation_z(std::f32::consts::FRAC_PI_4)).with_scale(Vec3::new(8.0, 8.0, 1.0)));
-                if !l.quiet {
-                    put(glow.clone(), kit.paint(&mut mats, WORK, 0.45), at(0.0, -124.0, 0.03).with_scale(Vec3::splat(26.0)));
-                }
-            }
-            LandmarkKind::Web => {
-                for (r, a) in [(40.0f32, 0.5f32), (27.0, 0.3)] {
-                    let ring = kit.shape(&mut meshes, Shape::Ring((1.2 / r * 1000.0).round() as i32));
-                    put(ring, kit.paint(&mut mats, THINK, a * dim), at(0.0, 0.0, 0.02).with_scale(Vec3::splat(r)));
-                }
-                if !l.quiet {
-                    put(glow.clone(), kit.paint(&mut mats, THINK, 0.3), at(0.0, 0.0, 0.01).with_scale(Vec3::splat(44.0)));
-                }
-                put(kit.shape(&mut meshes, Shape::Circle), kit.paint(&mut mats, INK_3, 0.6), at(0.0, 0.0, 0.03).with_scale(Vec3::splat(3.0)));
-            }
-            LandmarkKind::Unknown => {}
+        let hue = match l.kind {
+            LandmarkKind::Tower => WORK,
+            LandmarkKind::Web => THINK,
+            LandmarkKind::Unknown => continue,
+        };
+        let (fill, edge) = if l.quiet { ((DECK, 1.0), (LINE, 1.0)) } else { ((hue, 0.06), (hue, 0.4)) };
+        boxed(&mut kit, &mut meshes, &mut mats, &mut put, l.x, l.y, l.w, l.h, 12.0, (DECK, 1.0), (LINE, 1.0), 0.0);
+        if !l.quiet {
+            boxed(&mut kit, &mut meshes, &mut mats, &mut put, l.x, l.y, l.w, l.h, 12.0, fill, edge, 0.01);
         }
     }
 }

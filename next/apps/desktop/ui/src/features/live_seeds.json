@@ -1,46 +1,37 @@
 {
   "git.push": {
     "title": "Push to GitHub",
-    "about": "A crate of commits travels from the agent to the GitHub tower and rises up it.",
+    "about": "A crate of commits travels from the agent into the GitHub card.",
     "by": "opus",
-    "rev": 3,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "glyph", "name": "crate", "at": "self", "to": { "place": "tower", "dy": -10 }, "color": "work", "ms": 1400 },
-      { "do": "wait", "ms": 1300 },
-      { "do": "orb", "from": "tower", "to": { "place": "tower", "dy": -124 }, "color": "work", "size": 6, "ms": 900 },
-      { "do": "tag", "at": { "place": "tower", "dx": 46, "dy": -60 }, "text": "commits", "ms": 2000 },
-      { "do": "wait", "ms": 900 },
-      { "do": "ring", "at": { "place": "tower", "dy": -124 }, "color": "work", "size": 40, "ms": 1000 },
-      { "do": "wait", "ms": 900 }
+      { "do": "glyph", "name": "crate", "at": "self", "to": "tower", "color": "work", "ms": 1600 },
+      { "do": "wait", "ms": 1400 },
+      { "do": "tag", "at": { "place": "tower", "dy": 50 }, "text": "commits pushed", "ms": 2000 },
+      { "do": "wait", "ms": 1800 }
     ]
   },
   "release": {
     "title": "Release to a store",
-    "about": "A rocket leaves the agent, climbs the GitHub tower and goes out to the store.",
+    "about": "A rocket leaves the agent for the GitHub card, on its way to the store.",
     "by": "opus",
-    "rev": 3,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "glyph", "name": "rocket", "at": "self", "to": { "place": "tower", "dx": 34 }, "color": "ink", "ms": 1400 },
-      { "do": "wait", "ms": 1300 },
-      { "do": "orb", "from": "tower", "to": { "place": "tower", "dy": -124 }, "color": "ink", "size": 7, "ms": 1100 },
-      { "do": "tag", "at": { "place": "tower", "dx": 56, "dy": -60 }, "text": "to the store", "ms": 2200 },
-      { "do": "wait", "ms": 1100 },
-      { "do": "ring", "at": { "place": "tower", "dy": -124 }, "color": "ink", "size": 70, "ms": 1300 },
-      { "do": "wait", "ms": 900 }
+      { "do": "glyph", "name": "rocket", "at": "self", "to": "tower", "color": "ink", "ms": 1600 },
+      { "do": "wait", "ms": 1400 },
+      { "do": "tag", "at": { "place": "tower", "dy": 50 }, "text": "to the store", "ms": 2200 },
+      { "do": "wait", "ms": 2000 }
     ]
   },
   "git.commit": {
     "title": "Commit",
-    "about": "The agent's changed files light up and fold into one crate beside it.",
+    "about": "A crate of the agent's changes appears above it, and the agent carries it.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "light", "at": "files", "color": "work", "ms": 1600 },
-      { "do": "packets", "from": "files", "to": "self", "color": "work", "count": 2, "ms": 800 },
-      { "do": "wait", "ms": 900 },
       { "do": "glyph", "name": "crate", "at": { "place": "self", "dy": -22 }, "color": "work", "ms": 1800 },
       { "do": "carry", "color": "work" },
       { "do": "wait", "ms": 1600 },
@@ -49,13 +40,13 @@
   },
   "git.pull": {
     "title": "Pull from GitHub",
-    "about": "A crate comes down from the GitHub tower to the agent.",
+    "about": "A crate comes from the GitHub card to the agent.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "glyph", "name": "crate", "at": { "place": "tower", "dy": -10 }, "to": "self", "color": "work", "ms": 1500 },
-      { "do": "tag", "at": { "place": "tower", "dy": -30 }, "text": "from GitHub", "ms": 1600 },
+      { "do": "glyph", "name": "crate", "at": "tower", "to": "self", "color": "work", "ms": 1500 },
+      { "do": "tag", "at": { "place": "tower", "dy": 50 }, "text": "pulled", "ms": 1600 },
       { "do": "wait", "ms": 1400 },
       { "do": "pulse", "at": "self", "color": "work", "size": 26 },
       { "do": "wait", "ms": 600 }
@@ -63,42 +54,37 @@
   },
   "search": {
     "title": "Search the code",
-    "about": "A magnifier over the agent while a radar arm sweeps its project's files.",
+    "about": "A magnifier over the agent while a radar arm sweeps around it.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "search", "at": { "place": "self", "dy": -22 }, "color": "work", "ms": 2200 },
       { "do": "sweep", "at": "self", "color": "work", "size": 46, "ms": 2000 },
-      { "do": "light", "at": "files", "color": "work", "ms": 1400 },
       { "do": "wait", "ms": 2100 }
     ]
   },
   "read": {
     "title": "Read a file",
-    "about": "An eye goes from the agent to the file it reads, and the file's tile lights with its name.",
+    "about": "An eye opens over the agent while it reads.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "glyph", "name": "eye", "at": "self", "to": { "place": "file", "dy": -12 }, "color": "work", "ms": 1500 },
-      { "do": "light", "at": "file", "color": "work", "ms": 1800 },
-      { "do": "tag", "at": { "place": "file", "dy": 14 }, "text": "{file}", "ms": 1800 },
+      { "do": "glyph", "name": "eye", "at": { "place": "self", "dy": -22 }, "color": "work", "ms": 1800 },
       { "do": "wait", "ms": 1800 }
     ]
   },
   "edit": {
     "title": "Edit a file",
-    "about": "A page goes from the agent into the file it changes, and the file's tile lights with its name.",
+    "about": "A page over the agent, with a small burst as the change lands.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "glyph", "name": "file", "at": "self", "to": { "place": "file", "dy": -12 }, "color": "work", "ms": 1300 },
-      { "do": "wait", "ms": 1100 },
-      { "do": "burst", "at": "file", "color": "work", "count": 8, "size": 12 },
-      { "do": "light", "at": "file", "color": "work", "ms": 2000 },
-      { "do": "tag", "at": { "place": "file", "dy": 14 }, "text": "{file}", "ms": 1800 },
+      { "do": "glyph", "name": "file", "at": { "place": "self", "dy": -22 }, "color": "work", "ms": 1800 },
+      { "do": "wait", "ms": 900 },
+      { "do": "burst", "at": "self", "color": "work", "count": 6, "size": 10 },
       { "do": "wait", "ms": 1600 }
     ]
   },
@@ -134,14 +120,13 @@
   },
   "typecheck": {
     "title": "Typecheck",
-    "about": "A checklist over the agent while a fast sweep passes over its files.",
+    "about": "A checklist over the agent while a fast sweep passes around it.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "list", "at": { "place": "self", "dy": -22 }, "color": "work", "ms": 1800 },
       { "do": "sweep", "at": "self", "color": "work", "size": 40, "ms": 1400 },
-      { "do": "light", "at": "files", "color": "work", "ms": 1200 },
       { "do": "wait", "ms": 1700 }
     ]
   },
@@ -187,14 +172,13 @@
   },
   "web": {
     "title": "Read the web",
-    "about": "A globe goes from the agent to the web gate, and a page comes back.",
+    "about": "A globe goes from the agent to the Web card, and a page comes back.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "globe", "at": "self", "to": "web", "color": "think", "ms": 1400 },
-      { "do": "wait", "ms": 1300 },
-      { "do": "ring", "at": "web", "color": "think", "size": 50, "ms": 900 },
+      { "do": "wait", "ms": 1500 },
       { "do": "glyph", "name": "file", "at": "web", "to": "self", "color": "think", "ms": 1400 },
       { "do": "wait", "ms": 1400 }
     ]
@@ -203,24 +187,23 @@
     "title": "Work the board",
     "about": "A card comes down from GitHub, where the board lives, to the agent.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
-      { "do": "tag", "at": { "place": "tower", "dy": -30 }, "text": "board", "ms": 1800 },
-      { "do": "glyph", "name": "list", "at": { "place": "tower", "dy": -10 }, "to": "self", "color": "ink", "ms": 1500 },
+      { "do": "tag", "at": { "place": "tower", "dy": 50 }, "text": "board", "ms": 1800 },
+      { "do": "glyph", "name": "list", "at": "tower", "to": "self", "color": "ink", "ms": 1500 },
       { "do": "wait", "ms": 1600 }
     ]
   },
   "review": {
     "title": "Review",
-    "about": "An eye over the agent while rings close in and its changed files light one by one.",
+    "about": "An eye over the agent while a ring closes in.",
     "by": "opus",
-    "rev": 2,
+    "rev": 4,
     "steps": [
       { "do": "say", "text": "{label}" },
       { "do": "glyph", "name": "eye", "at": { "place": "self", "dy": -22 }, "color": "think", "ms": 2600 },
       { "do": "ring", "at": "self", "color": "think", "size": 44, "ms": 1200 },
-      { "do": "light", "at": "files", "color": "think", "ms": 2200 },
       { "do": "wait", "ms": 2400 }
     ]
   },

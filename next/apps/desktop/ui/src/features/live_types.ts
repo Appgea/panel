@@ -146,8 +146,6 @@ export type LiveState = {
   /** What running scripts change: what an agent carries, what it says. */
   carries: Map<string, string>;
   bubbles: Map<string, string>;
-  /** File tiles a script lit, by path, until a time. */
-  lights: Map<string, { color: string; until: number }>;
   selection: Selection;
   /** The dot under the pointer, or the agent row under it in the side list, by agent id. */
   hover: string | null;

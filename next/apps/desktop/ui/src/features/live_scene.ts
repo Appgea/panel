@@ -7,32 +7,12 @@
 import { LANDMARK_QUIET_MS, landmarkNews, type News } from "./live_playbook";
 import type { LiveCtx } from "./live_types";
 
-/** A file tile glows for this long after an agent last touched it. */
-const FRESH_MS = 120_000;
-
 export function scene(ctx: LiveCtx, width: number, height: number): object {
   const s = ctx.s;
   const w = s.layout!;
   const world = s.world!;
   const now = Date.now();
   const sel = s.selection;
-
-  const touched = new Map<string, { at: number; edited: boolean }>();
-  for (const a of world.agents)
-    for (const st of a.steps) {
-      if (!st.file) continue;
-      const t = touched.get(st.file);
-      const edited = st.verb === "edit" || st.station === "build";
-      if (!t || st.atMs > t.at) touched.set(st.file, { at: st.atMs, edited: edited || !!t?.edited });
-    }
-  const tiles = w.districts.flatMap((d) =>
-    d.tiles.map((t) => {
-      const lit = s.lights.get(t.path);
-      const fresh = touched.get(t.path);
-      const glow = Math.max(lit && lit.until > now ? 1 : 0, fresh ? Math.max(0, 1 - (now - fresh.at) / FRESH_MS) : 0);
-      return { x: t.x, y: t.y, lit: glow, edited: !!fresh?.edited };
-    }),
-  );
 
   const news = landmarkNews(world);
   const quiet = (n: News | null) => !n || now - n.at > LANDMARK_QUIET_MS;
@@ -62,9 +42,8 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     camera: s.camera,
     // The amber `card` edge: an agent in this district waits for the owner.
     districts: w.districts.map((d) => ({ x: d.x, y: d.y, w: d.w, h: d.h, edge: d.stuck ? "stuck" : d.waiting ? "card" : "quiet", selected: sel?.kind === "room" && sel.id === d.key })),
-    tiles,
     hub: { ...w.hub, hot: world.mac.hot, bays: w.hub.bays.map((b, i) => ({ ...b, held: !!world.mac.bays[i]?.holder })) },
-    // A landmark with no recent news dims, so the light on the map is where work happens.
+    // A card with news lately is lit at its edge, so the light on the map is where work happens.
     landmarks: [
       { kind: "tower", ...w.landmarks.tower, quiet: quiet(news.tower) },
       { kind: "web", ...w.landmarks.web, quiet: quiet(news.web) },

@@ -1,8 +1,7 @@
 //! The districts: one rounded box per project with something going on, holding a row per agent.
-//! A faint floor and an edge that turns amber for a card and red for a stuck agent. The files
-//! agents touched are small tiles along the bottom that glow while fresh.
+//! A faint floor and an edge that turns amber for a card and red for a stuck agent.
 
-use crate::draw::{edge_shape, rect_shape, Frame, Kit, Shape, DONE, FAIL, LINE, LINE_2, RAISE, WAIT, WALL, WORK};
+use crate::draw::{edge_shape, rect_shape, Frame, Kit, FAIL, LINE, LINE_2, RAISE, WAIT, WALL};
 use crate::{Current, Edge, Step};
 use bevy::prelude::*;
 
@@ -32,8 +31,6 @@ fn redraw(
     let mut put = |mesh: Handle<Mesh>, mat: Handle<ColorMaterial>, t: Transform| {
         commands.spawn((Drawn, Mesh2d(mesh), MeshMaterial2d(mat), t));
     };
-    let glow = kit.shape(&mut meshes, Shape::Glow);
-    let square = kit.shape(&mut meshes, Shape::Square);
     for d in &current.0.districts {
         let at = |z: f32| Transform::from_translation(frame.at(d.x, d.y, z));
         let floor = kit.shape(&mut meshes, rect_shape(d.w, d.h, CORNER));
@@ -46,14 +43,5 @@ fn redraw(
         };
         let edge = kit.shape(&mut meshes, edge_shape(d.w, d.h, CORNER, 1.0));
         put(edge, kit.paint(&mut mats, hex, alpha), at(0.02));
-    }
-    for t in &current.0.tiles {
-        let at = |z: f32| Transform::from_translation(frame.at(t.x, t.y, z));
-        let hex = if t.edited { DONE } else { WORK };
-        put(square.clone(), kit.paint(&mut mats, LINE_2, 1.0), at(0.1).with_scale(Vec3::new(5.0, 5.0, 1.0)));
-        if t.lit > 0.05 {
-            put(square.clone(), kit.paint(&mut mats, hex, 0.35 + 0.6 * t.lit), at(0.11).with_scale(Vec3::new(5.0, 5.0, 1.0)));
-            put(glow.clone(), kit.paint(&mut mats, hex, 0.5 * t.lit), at(0.09).with_scale(Vec3::splat(12.0)));
-        }
     }
 }

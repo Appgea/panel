@@ -16,11 +16,9 @@
 //!   `h` its size, with its `edge` (`quiet`, `card`
 //!   when an agent there waits for the owner, `stuck`) and `selected`. Other projects are not on
 //!   the map.
-//! - `tiles`: the files agents touched, as small squares in their district. `lit` from 0 to 1
-//!   is how recently, `edited` when an agent wrote it.
 //! - `hub`: This Mac's box, `hot` when macOS slowed the CPU, and its testlock `bays`.
-//! - `landmarks`: the GitHub `tower` and the `web` gate. A kind this build does not know draws
-//!   nothing.
+//! - `landmarks`: GitHub (`tower`) and the `web`, each a card `w` by `h` beside This Mac, lit
+//!   at the edge when it had news lately. A kind this build does not know draws nothing.
 //! - `links`: lines from the hovered or selected dot to its parent and children.
 //! - `dots`: the agents. Each keeps its id across scenes and glides to its new `x`, `y`. `r`
 //!   is its core size, `state` its colour and blink, `helpers` the electrons circling it,
@@ -32,8 +30,8 @@
 //!
 //! # Modules
 //!
-//! Each draws one part and owns its own entities. `bg` the dot grid, `district` the districts
-//! and their file tiles, `hub` This Mac, its bays and the landmarks, `link` family lines, `dot`
+//! Each draws one part and owns its own entities. `bg` the dot grid, `district` the districts,
+//! `hub` This Mac, its bays and the landmarks, `link` family lines, `dot`
 //! the agents, `fx` the effects. `draw` holds the shared parts. A module redraws when `Current`
 //! changes, and asks `Pace` for the frame rate it needs. A still world draws four frames a
 //! second at most, to pick up a new scene. A closed section draws nothing (`set_paused`).
@@ -141,8 +139,6 @@ pub(crate) struct Scene {
     #[serde(default)]
     pub districts: Vec<District>,
     #[serde(default)]
-    pub tiles: Vec<Tile>,
-    #[serde(default)]
     pub hub: Option<Hub>,
     #[serde(default)]
     pub landmarks: Vec<Landmark>,
@@ -186,16 +182,6 @@ pub(crate) enum Edge {
     Stuck,
 }
 
-#[derive(Deserialize, Clone, Copy)]
-pub(crate) struct Tile {
-    pub x: f32,
-    pub y: f32,
-    #[serde(default)]
-    pub lit: f32,
-    #[serde(default)]
-    pub edited: bool,
-}
-
 #[derive(Deserialize, Clone)]
 pub(crate) struct Hub {
     pub x: f32,
@@ -223,7 +209,9 @@ pub(crate) struct Landmark {
     pub kind: LandmarkKind,
     pub x: f32,
     pub y: f32,
-    /// No news here lately: drawn dim, so the map's light is where work happens.
+    pub w: f32,
+    pub h: f32,
+    /// No news here lately: a plain edge, so the map's light is where work happens.
     #[serde(default)]
     pub quiet: bool,
 }

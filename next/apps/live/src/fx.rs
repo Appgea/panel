@@ -43,6 +43,10 @@ pub(crate) fn plugin(app: &mut App) {
     app.add_systems(Update, (start.run_if(resource_changed::<Current>), play).chain().in_set(Step::Draw));
 }
 
+/// Every effect's light, against the words on the map. Every step animates, so each one must
+/// stay a hint. Owner, 2026-11-06: "Every step, quieter".
+const QUIET: f32 = 0.6;
+
 /// What to spawn: a kind, its length, colour, mesh and start time.
 struct New {
     kind: Kind,
@@ -140,33 +144,33 @@ fn play(
         let (alpha, t) = match fx.kind {
             Kind::Orb { a, b, size } => {
                 let p = a.lerp(b, ease(u));
-                trails.push(New { kind: Kind::Trail { at: p, size: size * 2.6 }, len: 0.5, hex: fx.hex, mesh: glow.clone(), began: now });
-                (0.95 * (u / 0.08).min(1.0), glow_at(p, size * 3.2, 0.72))
+                trails.push(New { kind: Kind::Trail { at: p, size: size * 1.6 }, len: 0.5, hex: fx.hex, mesh: glow.clone(), began: now });
+                (QUIET * 0.95 * (u / 0.08).min(1.0), glow_at(p, size * 2.2, 0.72))
             }
-            Kind::Trail { at, size } => (0.45 * (1.0 - u), glow_at(at, size * (1.0 - u), 0.71)),
-            Kind::BeamLine { a, b } => (0.6 * envelope(u), line(frame, a, b, 0.68, 1.6)),
-            Kind::BeamHead { a, b } => (envelope(u), glow_at(a.lerp(b, ease((u / 0.45).min(1.0))), 18.0, 0.69)),
-            Kind::Pulse { at, size } => (0.6 * (1.0 - u), glow_at(at, size * (0.5 + u), 0.7)),
-            Kind::Ring { at, size } => (0.8 * (1.0 - u), glow_at(at, size * (0.15 + 0.85 * ease(u)), 0.7)),
+            Kind::Trail { at, size } => (QUIET * 0.4 * (1.0 - u), glow_at(at, size * (1.0 - u), 0.71)),
+            Kind::BeamLine { a, b } => (QUIET * 0.6 * envelope(u), line(frame, a, b, 0.68, 1.2)),
+            Kind::BeamHead { a, b } => (QUIET * envelope(u), glow_at(a.lerp(b, ease((u / 0.45).min(1.0))), 11.0, 0.69)),
+            Kind::Pulse { at, size } => (QUIET * 0.6 * (1.0 - u), glow_at(at, size * (0.5 + u), 0.7)),
+            Kind::Ring { at, size } => (QUIET * 0.8 * (1.0 - u), glow_at(at, size * (0.15 + 0.85 * ease(u)), 0.7)),
             Kind::Spark { pos, vel } => {
                 // Damped by 0.94 a frame at 60 frames a second.
                 let next = pos + vel * dt;
                 fx.kind = Kind::Spark { pos: next, vel: vel * 0.94f32.powf(dt * 60.0) };
-                (1.0 - u, glow_at(next, 7.0, 0.7))
+                (QUIET * (1.0 - u), glow_at(next, 5.0, 0.7))
             }
             Kind::SweepArm { at, size } => {
                 let an = age * std::f32::consts::TAU * 2.0;
                 let tip = at + Vec2::new(an.cos(), an.sin()) * size;
-                (0.55 * envelope(u), line(frame, at, tip, 0.69, 1.4))
+                (QUIET * 0.55 * envelope(u), line(frame, at, tip, 0.69, 1.2))
             }
             Kind::SweepTip { at, size } => {
                 let an = age * std::f32::consts::TAU * 2.0;
-                (0.9 * envelope(u), glow_at(at + Vec2::new(an.cos(), an.sin()) * size, 14.0, 0.7))
+                (QUIET * 0.9 * envelope(u), glow_at(at + Vec2::new(an.cos(), an.sin()) * size, 9.0, 0.7))
             }
             Kind::Electron { at, size, i, n } => {
                 let an = age * 3.2 + i as f32 * std::f32::consts::TAU / n as f32;
                 let p = at + Vec2::new(an.cos() * size, an.sin() * size * 0.42);
-                (envelope(u), glow_at(p, 8.0, 0.72))
+                (QUIET * envelope(u), glow_at(p, 6.0, 0.72))
             }
         };
         *tf = t;

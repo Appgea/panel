@@ -180,8 +180,8 @@ fn build(commands: &mut Commands, e: Entity, kit: &mut Kit, meshes: &mut Assets<
         }
         for i in 0..n {
             p.spawn((Transform::from_xyz(0.0, 0.0, 0.005), Visibility::default(), Helper { i, n, r: d.r })).with_children(|h| {
-                h.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(mats, col, 0.7)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(7.0))));
-                h.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(mats, col, 1.0)), Transform::from_scale(Vec3::splat(1.6))));
+                h.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(mats, col, 0.4)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(5.0))));
+                h.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(mats, col, 0.85)), Transform::from_scale(Vec3::splat(1.4))));
             });
         }
     });

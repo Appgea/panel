@@ -22,7 +22,6 @@ pub const THINK: u32 = 0x93B4FF;
 pub const WAIT: u32 = 0xFFB23F;
 pub const IDLE: u32 = 0x6B7689;
 pub const FAIL: u32 = 0xFF5A6A;
-pub const DONE: u32 = 0x4BE38F;
 
 pub fn srgb(hex: u32) -> Color {
     Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)

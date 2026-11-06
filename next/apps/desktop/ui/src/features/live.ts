@@ -46,8 +46,11 @@ export type LiveHandle = { open(): void; clear(): void };
 
 const POLL_MS = 2000;
 const BOARD_MS = 60_000;
-/** More scripts at once than this is noise. A step that finds no room just shows its words. */
-const MAX_SCRIPTS = 6;
+/**
+ * More scripts at once than this is noise. A step that finds no room just shows its words.
+ * Owner, 2026-11-06: every step animates, but quieter. Six at once was too busy to follow.
+ */
+const MAX_SCRIPTS = 3;
 /** Glyphs and tags on the map at once. Past this a new one is dropped: a crowd says nothing. */
 const MAX_MARKS = 12;
 /** A trip's faint way stays this long after the trip ends, so the eye can follow it back. */
@@ -98,7 +101,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     cameraHeld: false,
     carries: new Map(),
     bubbles: new Map(),
-    lights: new Map(),
     selection: null,
     hover: null,
     pendingFx: [],
@@ -224,20 +226,16 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       const self = spot;
       const a = ctx.agentById(id);
       const district = w.districts.find((d) => d.key === spot.room);
-      const mine = district?.tiles.filter((t) => t.agents.includes(id)) ?? [];
       const L = w.landmarks;
       switch (place) {
         case "self":
           return [self];
         case "home":
           return district ? [district] : [self];
-        case "file": {
-          const f = a?.now?.file;
-          const t = district?.tiles.find((x) => x.path === f) ?? mine[0];
-          return [t ?? self];
-        }
+        // The file squares left the map (owner, 2026-11-06). A file move happens at the agent.
+        case "file":
         case "files":
-          return mine;
+          return [self];
         case "parent": {
           const p = a?.parent ? w.dots.get(a.parent) : undefined;
           return [p ?? self];
@@ -300,15 +298,10 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       if (text) s.bubbles.set(id, text);
       else s.bubbles.delete(id);
     },
-    light(id, at, color, ms) {
-      const w = s.layout;
-      const a = ctx.agentById(id);
-      const spot = w?.dots.get(id);
-      const district = w?.districts.find((d) => d.key === spot?.room);
-      const tiles = (district?.tiles ?? []).filter((t) => t.agents.includes(id));
-      const pick = at === "file" ? [tiles.find((t) => t.path === a?.now?.file) ?? tiles[0]].filter(Boolean) : tiles;
-      const until = Date.now() + ms;
-      for (const t of pick) s.lights.set(t.path, { color, until });
+    // Files lit up in their squares. With the squares gone, the agent itself glows softly.
+    light(id, _at, color, ms) {
+      const spot = s.layout?.dots.get(id);
+      if (spot && !s.reduced) s.pendingFx.push({ kind: "pulse", x: spot.x, y: spot.y, color, size: 22, ms: Math.min(ms, 1400) });
     },
     mark(_id, m) {
       if (s.marks.filter((x) => !x.line).length >= MAX_MARKS) return;
@@ -426,7 +419,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     if (!w || !width) return;
     const now = Date.now();
     s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots, stage: { w: width, h: stage.clientHeight } });
-    for (const [path, l] of s.lights) if (l.until < now) s.lights.delete(path);
     if (!s.cameraHeld) {
       const { x, y, zoom } = s.camera;
       fit();

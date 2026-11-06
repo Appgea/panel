@@ -8,7 +8,7 @@
 .live-fixed > *, .live-bubble { transition: opacity 0.15s ease, visibility 0s linear 0s; }
 .live-labels .is-culled { opacity: 0; visibility: hidden; pointer-events: none; transition: opacity 0.15s ease, visibility 0s linear 0.15s; }
 .is-reduced .live-fixed > *, .is-reduced .live-bubble, .is-reduced .live-labels .is-culled { transition: none; }
-.live-sign.is-small .live-sign-meta, .live-mark.is-small .live-mark-line { display: none; }
+.live-sign.is-small .live-sign-meta { display: none; }
 
 /* A plot's sign: its name and counts on one line in the plot's head. */
 .live-sign {
@@ -44,9 +44,13 @@
 .live-bay-who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
 .live-bay.is-held .live-bay-who { color: var(--l-ink); }
 
-.live-mark { display: grid; justify-items: center; gap: 1px; pointer-events: none; white-space: nowrap; translate: -50% -100%; }
-.live-mark-name { font: 600 12.5px/1.3 var(--l-sans); color: var(--l-ink-2); }
-.live-mark-line { max-width: 210px; overflow: hidden; text-overflow: ellipsis; font: 400 10.5px/1.3 var(--l-mono); color: var(--l-ink-3); }
+/* GitHub and Web: cards like This Mac, the name with its icon over the last news. */
+.live-mark { display: grid; gap: 2px; pointer-events: none; }
+.live-mark-name { display: flex; align-items: center; gap: 6px; font: 600 12.5px/1.3 var(--l-sans); color: var(--l-ink); }
+.live-mark-name .live-glyph svg { width: 13px; height: 13px; stroke: var(--l-ink-3); stroke-width: 1.8; filter: none; }
+/* Two lines fit the card, so who and what both show. */
+.live-mark-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-2); }
+.live-mark.is-small .live-mark-line { display: none; }
 
 /* An agent: an invisible hit circle on its dot, and its bubble to the right in its row. The
    bubble is part of the button, so a click on the words follows the agent too. A plot moves
@@ -114,33 +118,31 @@
 .live-age:empty { display: none; }
 .live-agent.is-turn .live-age { color: var(--l-turn); }
 
-/* What the squares along a plot's foot are. */
-.live-foot { pointer-events: auto; white-space: nowrap; font: 400 10px/1.2 var(--l-mono); color: var(--l-ink-3); cursor: default; }
-
 /* Glyphs and tags from animation scripts. They centre on their point and never take a click. */
 .live-fxmarks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .live-fx { position: absolute; left: 0; top: 0; will-change: transform, opacity; }
 /* The faint way a trip takes, in the trip's colour. */
 .live-path { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-.live-path polyline { fill: none; stroke: var(--c); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 5; }
+.live-path polyline { fill: none; stroke: var(--c); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 2 5; }
+/* An icon is a hint beside the words, so it stays small and soft: no glow. */
 .live-glyph svg {
   display: block;
-  width: 18px;
-  height: 18px;
+  width: 15px;
+  height: 15px;
   fill: none;
-  stroke: var(--c);
-  stroke-width: 1.7;
+  stroke: color-mix(in srgb, var(--c) 80%, transparent);
+  stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
-  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--c) 60%, transparent));
 }
+/* A tag is a caption, not a button: no border, the map's quiet ink, a backing only so it
+   stays legible over a line. */
 .live-tag {
-  padding: 1px 6px;
-  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--l-bg) 85%, transparent);
-  font: 500 10.5px/1.4 var(--l-mono);
-  color: var(--c);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--l-bg) 80%, transparent);
+  font: 400 10.5px/1.4 var(--l-mono);
+  color: var(--l-ink-2);
   white-space: nowrap;
 }
 

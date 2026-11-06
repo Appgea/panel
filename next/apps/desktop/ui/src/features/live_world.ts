@@ -17,12 +17,12 @@ import type { LiveAgent, LiveWorld } from "./live_types";
 
 export type Pt = { x: number; y: number };
 export type Box = { x: number; y: number; w: number; h: number };
-export type Tile = { x: number; y: number; path: string; agents: string[] };
 /** `x`, `y` is the centre. `r` is half the longer side, for effects that ring the whole plot. */
-export type District = { key: string; name: string; x: number; y: number; w: number; h: number; r: number; agents: string[]; waiting: number; stuck: boolean; tiles: Tile[] };
+export type District = { key: string; name: string; x: number; y: number; w: number; h: number; r: number; agents: string[]; waiting: number; stuck: boolean };
 /** `swarm` is how many helpers ride on this agent, or -1 for a helper riding on its parent. */
 export type DotSpot = { x: number; y: number; r: number; room: string; swarm: number };
-export type Landmarks = { tower: Pt; web: Pt; sky: Pt };
+/** GitHub and the web as cards beside This Mac. `sky` is GitHub's, for scripts written before. */
+export type Landmarks = { tower: Box; web: Box; sky: Box };
 export type World = {
   hub: Box & { bays: Box[] };
   landmarks: Landmarks;
@@ -40,18 +40,18 @@ export type World = {
 export type Slots = { cols: number; col: Map<string, number>; size: string };
 
 export const HUB = { w: 320, h: 118 };
-const LANDMARKS: Landmarks = { tower: { x: -HUB.w / 2 - 120, y: 46 }, sky: { x: -HUB.w / 2 - 120, y: -320 }, web: { x: HUB.w / 2 + 120, y: 0 } };
+/** A card beside This Mac, its top in line with This Mac's top. */
+export const CARD = { w: 200, h: 64, gap: 30 };
+const card = (side: number): Box => ({ x: side * (HUB.w / 2 + CARD.gap + CARD.w / 2), y: -HUB.h / 2 + CARD.h / 2, w: CARD.w, h: CARD.h });
+const LANDMARKS: Landmarks = { tower: card(-1), sky: card(-1), web: card(1) };
+/** The band's extent: This Mac and the cards beside it, with a margin. */
+const BAND = { x0: -(HUB.w / 2 + CARD.gap + CARD.w + 10), x1: HUB.w / 2 + CARD.gap + CARD.w + 10, y0: -HUB.h / 2 - 12 };
 /**
- * The band's extent, with room for the tower's glow and the landmarks' words, which sit above
- * them so trips can come up from the lane below.
- */
-const BAND = { x0: -350, x1: 350, y0: -140 };
-/**
- * A plot's parts. `head` holds the project's name, `row` one agent and its bubble, `foot` the
- * file tiles. A two-line bubble is 39 px and the labels keep 3 px clear around each word, so a
+ * A plot's parts. `head` holds the project's name, `row` one agent and its bubble, `pad` the
+ * room under the last row. A two-line bubble is 39 px and the labels keep 3 px clear around each word, so a
  * row of 46 keeps two of them apart at zoom 1, and a head of 34 keeps one clear of the sign.
  */
-export const PLOT = { w: 300, head: 34, row: 46, foot: 20, pad: 8, gap: 20, top: 116, dotX: 20 };
+export const PLOT = { w: 300, head: 34, row: 46, pad: 8, gap: 20, top: 116, dotX: 20 };
 /** A bubble starts this far right of its dot, past the orbits of the helpers riding on it. */
 export const BUBBLE_DX = 18;
 /** The width a bubble may take in its row, in world pixels, for a plot this wide. */
@@ -61,8 +61,6 @@ export const bubbleW = (plotW: number) => plotW - PLOT.dotX - BUBBLE_DX - 10;
  * too long to read at a glance. Owner, 2026-11-06: bubbles cut to "Edited…" with half the map empty.
  */
 const PLOT_MAX_W = 440;
-const TILES_PER_DISTRICT = 22;
-export const TILE_STEP = 11;
 /** More columns than this make plots too small to read at the zoom it takes. */
 const MAX_COLS = 6;
 /** A new column count must fit this much better before every plot moves for it. */
@@ -85,7 +83,7 @@ export type WorldInput = {
   stage: { w: number; h: number };
 };
 
-type Plot = { key: string; agents: LiveAgent[]; rows: LiveAgent[]; riders: Map<string, LiveAgent[]>; files: { path: string; agents: string[] }[]; h: number };
+type Plot = { key: string; agents: LiveAgent[]; rows: LiveAgent[]; riders: Map<string, LiveAgent[]>; h: number };
 
 export function lay(input: WorldInput): World {
   const { world, slots } = input;
@@ -134,9 +132,8 @@ export function lay(input: WorldInput): World {
       dots.set(a.id, spot);
       for (const k of p.riders.get(a.id) ?? []) dots.set(k.id, { ...spot, swarm: -1 });
     });
-    const tiles: Tile[] = p.files.map((f, i) => ({ x: x0 + PLOT.dotX + i * TILE_STEP, y: y0 + p.h - PLOT.foot / 2 - 1, ...f }));
     const waiting = p.agents.filter((a) => a.state === "turn").length;
-    return { key, name: input.roomName(key), x: x0 + plotW / 2, y: y0 + p.h / 2, w: plotW, h: p.h, r: Math.max(plotW, p.h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck"), tiles };
+    return { key, name: input.roomName(key), x: x0 + plotW / 2, y: y0 + p.h / 2, w: plotW, h: p.h, r: Math.max(plotW, p.h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck") };
   });
 
   const half = Math.max(BAND.x1, gridWidth(slots.cols, plotW) / 2 + 10);
@@ -170,16 +167,9 @@ function plot(key: string, list: LiveAgent[]): Plot {
     if (t === a || a.state === "turn" || a.state === "stuck") rows.push(a);
     else push(riders, t.id, a);
   }
-  const files: Plot["files"] = [];
-  for (const a of agents)
-    for (const f of [...a.steps.map((s) => s.file).filter((f): f is string => !!f), ...a.files]) {
-      const have = files.find((x) => x.path === f);
-      if (have) {
-        if (!have.agents.includes(a.id)) have.agents.push(a.id);
-      } else if (files.length < TILES_PER_DISTRICT) files.push({ path: f, agents: [a.id] });
-    }
-  const h = PLOT.head + rows.length * PLOT.row + (files.length ? PLOT.foot : PLOT.pad);
-  return { key, agents, rows, riders, files, h };
+  // No file squares: the owner would not miss them (2026-11-06), and they cost a strip per plot.
+  const h = PLOT.head + rows.length * PLOT.row + PLOT.pad;
+  return { key, agents, rows, riders, h };
 }
 
 /**
@@ -241,8 +231,10 @@ function leg(w: World, p: Pt): { at: Pt; inner?: Pt; gutter: number | null; band
     return { at: { x, y: h.y + h.h / 2 }, inner: bay ? { x, y: bay.y } : undefined, gutter: null, band: true };
   }
   const L = w.landmarks;
-  if (Math.abs(p.x - L.web.x) <= 50 && Math.abs(p.y - L.web.y) <= 50) return { at: { x: L.web.x, y: L.web.y + 42 }, gutter: null, band: true };
-  if (Math.abs(p.x - L.tower.x) <= 40 && p.y <= LANE_Y) return { at: p.y > L.tower.y - 10 ? { x: L.tower.x, y: L.tower.y + 8 } : p, gutter: null, band: true };
+  // A card is reached at the middle of its bottom edge. A point above it, from a script written
+  // for the old tower, counts as the card too, so nothing travels through its words.
+  for (const c of [L.tower, L.web])
+    if (Math.abs(p.x - c.x) <= c.w / 2 && p.y <= c.y + c.h / 2 + 2) return { at: { x: c.x, y: c.y + c.h / 2 }, gutter: null, band: true };
   return { at: p, gutter: null, band: p.y < LANE_Y };
 }
 

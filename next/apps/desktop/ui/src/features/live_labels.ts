@@ -20,7 +20,8 @@
 import { landmarkNews, type News } from "./live_playbook";
 import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveState } from "./live_types";
-import { along, BUBBLE_DX, bubbleW, TILE_STEP } from "./live_world";
+import { GLYPHS } from "./live_script";
+import { along, BUBBLE_DX, bubbleW } from "./live_world";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
@@ -38,16 +39,16 @@ const GAP = 3;
 /** How long a bubble's edge stays lit after the agent starts a new step. */
 const NEW_MS = 1200;
 /** A trip's way is a hint under the trip, never louder than the words. */
-const LINE_OPACITY = 0.28;
+const LINE_OPACITY = 0.22;
 
 /**
  * Which word wins a spot, lowest first. What an agent says is the point of Live, so its bubble
  * beats a plot's sign. The words that are always the same lose first.
  */
-const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark: 6, bay: 7, foot: 8 } as const;
+const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark: 6, bay: 7 } as const;
 
 /** Where a word's box sits against its point. `right` starts just right of an agent's dot. */
-type Anchor = "below" | "above" | "corner" | "right";
+type Anchor = "corner" | "right";
 type Word = { el: HTMLElement; rank: number; x: number; y: number; anchor: Anchor; dx: number };
 type Rect = { x0: number; y0: number; x1: number; y1: number };
 
@@ -274,18 +275,6 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const p = place(sign, d.x - d.w / 2 + 10, d.y - d.h / 2 + 6);
       words.push({ el: sign, rank: RANK.sign, x: p.x, y: p.y, anchor: "corner", dx: 0 });
 
-      // The squares along a plot's foot are files. Unnamed, they read as decoration.
-      const last = d.tiles[d.tiles.length - 1];
-      if (last && z >= META_ZOOM) {
-        const changed = d.tiles.filter((t) => here.some((a) => a.files.includes(t.path) || a.steps.some((st) => st.file === t.path && (st.verb === "edit" || st.station === "build")))).length;
-        const read = d.tiles.length - changed;
-        const foot = keep(`foot:${d.key}`, used, () => div("live-foot"));
-        const said = [changed ? `${changed} ${plural(changed, "file")} changed` : "", read ? `${read} read` : ""].filter(Boolean).join(" · ");
-        text(foot, said);
-        foot.title = d.tiles.map((t) => t.path.split("/").slice(-2).join("/")).join("\n");
-        const fp = place(foot, last.x + TILE_STEP, last.y - 7);
-        words.push({ el: foot, rank: RANK.foot, x: fp.x, y: fp.y, anchor: "corner", dx: 0 });
-      }
     }
 
     const m = world.mac;
@@ -324,28 +313,32 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
 
     const L = w.landmarks;
     const now = Date.now();
-    const mark = (key: string, name: string, line: string, x: number, y: number) => {
+    // GitHub and the web are cards like This Mac: the name with its icon, then the last news.
+    const card = (key: "tower" | "web", name: string, icon: string, line: string) => {
+      const c = L[key];
       const el = keep(`mark:${key}`, used, () => {
         const e = div(`live-mark is-${key}`);
-        e.append(span("live-mark-name", name), span("live-mark-line"));
+        const head = span("live-mark-name");
+        head.append(glyphEl(icon), span("", name));
+        e.append(head, span("live-mark-line"));
         return e;
       });
       text(el.children[1] as HTMLElement, line);
       el.title = line;
-      el.classList.toggle("is-small", z < META_ZOOM);
-      const p = place(el, x, y);
-      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "above", dx: 0 });
+      el.style.width = `${Math.max(60, c.w * z - 28)}px`;
+      el.classList.toggle("is-small", z < HUB_LINE_ZOOM);
+      const p = place(el, c.x - c.w / 2 + 14, c.y - c.h / 2 + 10);
+      words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "corner", dx: 0 });
     };
-    // A landmark says its last real news, not what it is for.
+    // A card says its last real news, not what it is for.
     const news = landmarkNews(world);
     const told = (n: News | null, none: string) => {
       if (!n) return none;
       const by = n.agent ? ctx.nameOf(n.agent) : n.ember ? ctx.emberWho(n.ember).title : "";
       return `${ago(n.at, now)} · ${by ? `${by}: ` : ""}${n.label}`;
     };
-    // Above their landmark: trips come in from the lane below, so the words are never crossed.
-    mark("tower", "GitHub", told(news.tower, "No push lately"), L.tower.x, L.tower.y - 142);
-    mark("web", "Web", told(news.web, "No web visit lately"), L.web.x, L.web.y - 50);
+    card("tower", "GitHub", GLYPHS.branch, told(news.tower, "No push lately"));
+    card("web", "Web", GLYPHS.globe, told(news.web, "No web visit lately"));
     for (const [key, el] of pool)
       if (!used.has(key)) {
         el.remove();
@@ -406,8 +399,8 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         sizes.set(wd.el, size);
       }
       const { w, h } = size;
-      const x0 = wd.anchor === "below" || wd.anchor === "above" ? wd.x - w / 2 : wd.x + wd.dx;
-      const y0 = wd.anchor === "right" ? wd.y - h / 2 : wd.anchor === "above" ? wd.y - h : wd.y;
+      const x0 = wd.x + wd.dx;
+      const y0 = wd.anchor === "right" ? wd.y - h / 2 : wd.y;
       return { wd, x0: x0 - GAP, y0: y0 - GAP, x1: x0 + w + GAP, y1: y0 + h + GAP };
     });
     boxes.sort((a, b) => a.wd.rank - b.wd.rank);
