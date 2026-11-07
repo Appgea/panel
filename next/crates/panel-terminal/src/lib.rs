@@ -156,11 +156,17 @@ impl TerminalManager {
             pixel_height: 0,
         })?;
 
+        #[cfg(windows)]
+        let plain_shell = program.is_none() && args.is_empty();
         let program = program.unwrap_or_else(default_shell);
         #[cfg(windows)]
         let terminal_path = windows_terminal_path();
         #[cfg(windows)]
-        let (launch, prefix) = windows_launch(&program, &terminal_path);
+        let (launch, mut prefix) = windows_launch(&program, &terminal_path);
+        #[cfg(windows)]
+        if plain_shell {
+            prefix.extend(["-NoExit".into(), "-EncodedCommand".into(), powershell_encoded(POWERSHELL_FOLLOW_CWD)]);
+        }
         #[cfg(not(windows))]
         let (launch, prefix) = (program.clone(), Vec::<String>::new());
         let mut command = CommandBuilder::new(&launch);
@@ -714,6 +720,29 @@ mod job {
             }
         }
     }
+}
+
+/// PowerShell's `cd` moves only its own location, never the process directory, so Panel could not
+/// tell which folder a PowerShell terminal is in. This hook copies the location to the process
+/// directory each time the prompt draws. It wraps the profile's prompt, so a custom one still shows,
+/// and runs it first, so prompts that read `$?` still see the last command's result.
+#[cfg(windows)]
+const POWERSHELL_FOLLOW_CWD: &str = "$global:__panelPrompt = $function:prompt\n\
+function global:prompt { $shown = & $global:__panelPrompt; try { [Environment]::CurrentDirectory = (Get-Location -PSProvider FileSystem).ProviderPath } catch {}; $shown }";
+
+/// `-EncodedCommand` takes base64 of UTF-16LE. Encoded, no quote or `$` meets Windows command-line parsing.
+#[cfg(windows)]
+fn powershell_encoded(script: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.iter().enumerate().fold(0u32, |acc, (i, b)| acc | u32::from(*b) << (16 - 8 * i));
+        for i in 0..4 {
+            out.push(if i <= chunk.len() { TABLE[(n >> (18 - 6 * i) & 63) as usize] as char } else { '=' });
+        }
+    }
+    out
 }
 
 fn default_shell() -> String {

@@ -291,7 +291,7 @@ Open **Skills** from the sidebar Desk group, a Claude/Codex terminal header, the
 | Full screen (project Terminals, or zoom on wall) | `⌃F` | `F11` |
 | Move terminal to tab 1…9 / to a new tab | `⌘⌥1…9` / `⌘⌥T` | `Ctrl+Alt+1…9` / `Ctrl+Alt+T` |
 | Git: press Next move | `⌘↵` | `Ctrl+↵` |
-| Terminal text size (bigger / smaller / reset) | `⌘=` / `⌘-` / `⌘0` | bound to `Meta` in source; behaviour on Windows/Linux unverified |
+| Terminal text size (bigger / smaller / reset) | `⌘=` / `⌘-` / `⌘0` | `Ctrl+=` / `Ctrl+-` / `Ctrl+0` |
 | Review screen | `J K Enter` | same |
 | Review deck | `← → Space C B F Esc` | same |
 

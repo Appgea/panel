@@ -107,7 +107,7 @@ export async function paintRevenueCatCard(path: string, host: HTMLElement): Prom
   const data = await getData(path);
   if (data.status === "needs_setup") {
     host.innerHTML = data.configured
-      ? `<div class="rc-card-empty"><b>Reconnect RevenueCat</b><small>Paste a read-only key once; Panel stores it in macOS Keychain.</small></div>`
+      ? `<div class="rc-card-empty"><b>Reconnect RevenueCat</b><small>Paste a read-only key once; Panel stores it in ${data.storageTarget ?? "macOS Keychain"}.</small></div>`
       : `<div class="rc-card-empty"><b>Connect RevenueCat</b><small>Create a read-only API v2 key to see live product revenue.</small></div>`;
     return;
   }
@@ -231,7 +231,7 @@ export function mountRevenueCat(pane: HTMLElement): RevenueCatHandle {
     head.querySelector("p")!.textContent = data.status === "ready"
       ? `${data.projectId} · ${data.revenueType === "proceeds" ? "after tax and store commission" : data.revenueType}${data.keySource ? ` · ${data.keySource}` : ""}`
       : data.configured
-        ? "Reconnect this project's read-only key to macOS Keychain."
+        ? `Reconnect this project's read-only key to ${data.storageTarget ?? "macOS Keychain"}.`
         : "Connect one RevenueCat project to this Panel project.";
     root.append(head);
 

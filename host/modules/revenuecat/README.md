@@ -21,7 +21,9 @@ Each opted-in repository stores non-secret settings in `.panel/revenuecat.json`:
 API v2 keys are never written there. The connection form uses the pasted key to discover its
 RevenueCat project, verifies Projects, Overview, and Charts read access, then stores one credential
 per RevenueCat project in macOS Keychain under service `com.appgea.panel.revenuecat`. The secret is
-sent to the Keychain utility over stdin, not placed in process arguments. Existing keys in the
+sent to the Keychain utility over stdin, not placed in process arguments. On Windows the key goes
+to Windows Credential Manager as a generic credential named `com.appgea.panel.revenuecat:<project id>`,
+written in-process through `advapi32`. Existing keys in the
 module's gitignored state directory remain a read-only fallback and receive no new keys.
 
 For unattended launches, `REVENUECAT_API_V2_KEY` is also accepted. If RevenueCat is already

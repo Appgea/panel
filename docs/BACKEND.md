@@ -119,7 +119,7 @@ Mutating git actions (commit, push, pull, …) are **not** commands; they go thr
 | `start_session` | `project, kind, cols, rows, cwd?` → `Session` | **Adds** a session (never replaces). `kind` = `shell` or an agent binary. Binds the agent in the ingress *before* spawning. Bad/vanished `cwd` falls back to the project root. Collections are refused. |
 | `restore_wall` | `cols, rows` → `RestoredWall` | Re-fork every saved terminal with the same ids, resume flags, and saved screen. The snapshot file is **consumed** (read, deleted, then spawned) so a crash mid-restore can't double-launch. |
 | `stop_session` | `session` | Close one session (kills the process tree). |
-| `session_cwd` | `session` → `Option<String>` | Live cwd of the shell, asked of the OS (macOS/Linux; `None` if unknown → UI falls back to root). |
+| `session_cwd` | `session` → `Option<String>` | Live cwd of the shell, asked of the OS (macOS `lsof`, Linux `/proc`, 64-bit Windows the process PEB; `None` if unknown → UI falls back to root). A plain Windows terminal starts PowerShell with a prompt hook that keeps its process directory on its location. |
 | `session_busy` | `session` → `bool` | Is anything running in the foreground? Foreground process-group ≠ spawned pid. Errs toward `true`; unknown session → `false`. |
 | `write_terminal` | `terminalId, data` | Keystrokes → PTY. Sync. |
 | `resize_terminal` | `terminalId, cols, rows` | PTY resize. |

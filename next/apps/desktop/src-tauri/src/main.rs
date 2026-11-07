@@ -2088,7 +2088,86 @@ fn process_cwd(pid: u32) -> Result<Option<String>, String> {
         .map(|path| path.to_string_lossy().into_owned()))
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+/// Windows keeps a process's working directory only inside that process, in its PEB. Reading it
+/// takes the documented NtQueryInformationProcess plus two reads of its memory; no crate needed.
+/// The offsets are the 64-bit layout, which ARM64 shares. PowerShell's `cd` alone would not move
+/// it; panel-terminal's prompt hook keeps it on the PowerShell location.
+#[cfg(all(windows, target_pointer_width = "64"))]
+fn process_cwd(pid: u32) -> Result<Option<String>, String> {
+    use std::ffi::{c_void, OsString};
+    use std::os::windows::ffi::OsStringExt;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        fn ReadProcessMemory(
+            process: *mut c_void,
+            base: *const c_void,
+            buffer: *mut c_void,
+            size: usize,
+            read: *mut usize,
+        ) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn NtQueryInformationProcess(
+            process: *mut c_void,
+            class: u32,
+            info: *mut c_void,
+            len: u32,
+            returned: *mut u32,
+        ) -> i32;
+    }
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+    const PEB_PROCESS_PARAMETERS: usize = 0x20;
+    const PARAMS_CURRENT_DIRECTORY: usize = 0x38;
+
+    unsafe fn read_into(process: *mut c_void, address: usize, out: *mut c_void, size: usize) -> bool {
+        let mut got = 0usize;
+        ReadProcessMemory(process, address as *const c_void, out, size, &mut got) != 0 && got == size
+    }
+    unsafe fn read_usize(process: *mut c_void, address: usize) -> Option<usize> {
+        let mut value = 0usize;
+        read_into(process, address, (&mut value as *mut usize).cast(), 8).then_some(value)
+    }
+
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if process.is_null() {
+            return Ok(None);
+        }
+        let wide = (|| {
+            // PROCESS_BASIC_INFORMATION is six pointer-sized fields; PebBaseAddress is the second.
+            let mut basic = [0usize; 6];
+            let size = std::mem::size_of_val(&basic) as u32;
+            if NtQueryInformationProcess(process, 0, basic.as_mut_ptr().cast(), size, std::ptr::null_mut()) != 0 {
+                return None;
+            }
+            let params = read_usize(process, basic[1] + PEB_PROCESS_PARAMETERS)?;
+            // CurrentDirectory.DosPath is a UNICODE_STRING: a u16 byte length, then the buffer at +8.
+            let mut length = 0u16;
+            if !read_into(process, params + PARAMS_CURRENT_DIRECTORY, (&mut length as *mut u16).cast(), 2) {
+                return None;
+            }
+            let buffer = read_usize(process, params + PARAMS_CURRENT_DIRECTORY + 8)?;
+            let mut wide = vec![0u16; usize::from(length) / 2];
+            if wide.is_empty() || !read_into(process, buffer, wide.as_mut_ptr().cast(), wide.len() * 2) {
+                return None;
+            }
+            Some(wide)
+        })();
+        CloseHandle(process);
+        let Some(wide) = wide else { return Ok(None) };
+        let text = OsString::from_wide(&wide).to_string_lossy().into_owned();
+        // Windows keeps the trailing backslash ("C:\work\app\"); keep it only on a drive root.
+        let trimmed = if text.len() > 3 { text.trim_end_matches('\\') } else { text.as_str() };
+        Ok(Some(trimmed.to_string()).filter(|path| Path::new(path).is_dir()))
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", all(windows, target_pointer_width = "64"))))]
 fn process_cwd(_pid: u32) -> Result<Option<String>, String> {
     Ok(None)
 }

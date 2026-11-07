@@ -5,7 +5,7 @@ CGI-argv protocol:
     host.py METHOD PATH[?query]
 
 The webview never receives a stored credential. Per-project config contains only the RevenueCat
-project id and display preferences; newly entered API keys live in macOS Keychain (or arrive
+project id and display preferences; newly entered API keys live in macOS Keychain or Windows Credential Manager (or arrive
 through an existing local MCP connection / REVENUECAT_API_V2_KEY).
 """
 
@@ -119,12 +119,89 @@ def secret_path(project_id: str) -> Path:
 
 
 def keychain_available() -> bool:
+    if sys.platform == "win32":
+        return True
     return sys.platform == "darwin" and bool(shutil.which("security"))
+
+
+def storage_target() -> str:
+    return "Windows Credential Manager" if sys.platform == "win32" else "macOS Keychain"
+
+
+def _wincred():
+    """advapi32's Cred* calls and the CREDENTIALW layout, built only on Windows."""
+    import ctypes
+    from ctypes import wintypes
+
+    class Credential(ctypes.Structure):
+        _fields_ = [
+            ("Flags", wintypes.DWORD),
+            ("Type", wintypes.DWORD),
+            ("TargetName", wintypes.LPWSTR),
+            ("Comment", wintypes.LPWSTR),
+            ("LastWritten", wintypes.FILETIME),
+            ("CredentialBlobSize", wintypes.DWORD),
+            ("CredentialBlob", ctypes.POINTER(ctypes.c_ubyte)),
+            ("Persist", wintypes.DWORD),
+            ("AttributeCount", wintypes.DWORD),
+            ("Attributes", ctypes.c_void_p),
+            ("TargetAlias", wintypes.LPWSTR),
+            ("UserName", wintypes.LPWSTR),
+        ]
+
+    advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+    advapi.CredReadW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.POINTER(ctypes.POINTER(Credential)),
+    ]
+    advapi.CredReadW.restype = wintypes.BOOL
+    advapi.CredWriteW.argtypes = [ctypes.POINTER(Credential), wintypes.DWORD]
+    advapi.CredWriteW.restype = wintypes.BOOL
+    advapi.CredFree.argtypes = [ctypes.c_void_p]
+    advapi.CredFree.restype = None
+    return ctypes, Credential, advapi
+
+
+CRED_TYPE_GENERIC = 1
+CRED_PERSIST_LOCAL_MACHINE = 2
+
+
+def _wincred_target(project_id: str) -> str:
+    return f"{KEYCHAIN_SERVICE}:{project_id}"
+
+
+def _wincred_read(project_id: str) -> str:
+    ctypes, Credential, advapi = _wincred()
+    found = ctypes.POINTER(Credential)()
+    if not advapi.CredReadW(_wincred_target(project_id), CRED_TYPE_GENERIC, 0, ctypes.byref(found)):
+        return ""
+    try:
+        blob = ctypes.string_at(found.contents.CredentialBlob, found.contents.CredentialBlobSize)
+        return blob.decode("utf-8", "replace").strip()
+    finally:
+        advapi.CredFree(found)
+
+
+def _wincred_write(project_id: str, key: str) -> None:
+    ctypes, Credential, advapi = _wincred()
+    blob = key.encode("utf-8")
+    buffer = (ctypes.c_ubyte * len(blob)).from_buffer_copy(blob)
+    credential = Credential()
+    credential.Type = CRED_TYPE_GENERIC
+    credential.TargetName = _wincred_target(project_id)
+    credential.Comment = "Read-only RevenueCat Charts & Metrics API key"
+    credential.CredentialBlobSize = len(blob)
+    credential.CredentialBlob = ctypes.cast(buffer, ctypes.POINTER(ctypes.c_ubyte))
+    credential.Persist = CRED_PERSIST_LOCAL_MACHINE
+    credential.UserName = project_id
+    if not advapi.CredWriteW(ctypes.byref(credential), 0):
+        raise RuntimeError("Windows Credential Manager could not save the RevenueCat key")
 
 
 def keychain_api_key(project_id: str) -> str:
     if not keychain_available() or not project_id:
         return ""
+    if sys.platform == "win32":
+        return _wincred_read(project_id)
     result = subprocess.run(
         ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", project_id, "-w"],
         text=True,
@@ -138,6 +215,9 @@ def keychain_api_key(project_id: str) -> str:
 def save_keychain_api_key(project_id: str, key: str) -> None:
     if not keychain_available():
         raise ValueError("macOS Keychain is unavailable")
+    if sys.platform == "win32":
+        _wincred_write(project_id, key)
+        return
     # `-w` as the final option prompts on stdin, keeping the secret out of process arguments.
     result = subprocess.run(
         [
@@ -226,7 +306,7 @@ def resolve_api_key(project_id: str, root: str = "") -> tuple[str, str]:
         return env.strip(), "environment"
     key = keychain_api_key(project_id)
     if key:
-        return key, "macOS Keychain"
+        return key, storage_target()
     # Compatibility with the first module prototype. New credentials are never written here.
     try:
         key = secret_path(project_id).read_text(encoding="utf-8").strip()
@@ -261,7 +341,7 @@ def status_payload(root: str) -> dict:
         "currency": config["currency"],
         "revenueType": config["revenue_type"],
         "secureStorageReady": keychain_available(),
-        "storageTarget": "macOS Keychain",
+        "storageTarget": storage_target(),
     }
 
 
