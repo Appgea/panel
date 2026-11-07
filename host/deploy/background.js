@@ -55,6 +55,9 @@ function pageSnapshot() {
     t = t || el.getAttribute('placeholder') || el.getAttribute('aria-placeholder') || el.getAttribute('title') || '';
     if (!t && !el.isContentEditable && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') t = el.innerText || '';
     if (!t) t = el.getAttribute('name') || '';
+    // An icon-only control: name it by its icon. Instagram's narrow sidebar is all bare links whose
+    // svg says "New post", "Home"...; without this the recipe could not find Create (2026-11-07).
+    if (!t) { const ic = el.querySelector('svg[aria-label], img[alt], [title]'); if (ic) t = ic.getAttribute('aria-label') || ic.getAttribute('alt') || ic.getAttribute('title') || ''; }
     return t.replace(/\s+/g, ' ').trim().slice(0, 70);
   };
   const dialogs = [];
@@ -254,6 +257,8 @@ function pageText() {
     if (el.shadowRoot) { parts.push(el.shadowRoot.textContent || ''); walk(el.shadowRoot); }
   });
   walk(document);
+  // TikTok Studio's upload page names the account only in the avatar menu's Profile link (/@handle).
+  document.querySelectorAll('a[href*="/@"]').forEach((a) => { if (/^profil/i.test(a.innerText.trim())) parts.push(a.getAttribute('href')); });
   return parts.join('\n');
 }
 
@@ -294,6 +299,9 @@ async function run(c) {
   if (c.op === 'close') { await chrome.tabs.remove(tabId); return { ok: true }; }
   if (c.op === 'reload') { setTimeout(() => chrome.runtime.reload(), 300); return { ok: true, note: 'extension reloading from disk' }; }
   await ensure(tabId);
+  // Chrome froze uploads in windows behind others: X, Facebook and Instagram sent 0 bytes for 15 minutes (2026-11-06).
+  await cdp(tabId, 'Page.setWebLifecycleState', { state: 'active' }).catch(() => {});
+  await cdp(tabId, 'Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {});
   await settle(tabId);
   if (c.op === 'verify') return verify(tabId, c.platform);
   if ((c.op === 'upload' || c.op === 'type') && !(await verified())[tabId])

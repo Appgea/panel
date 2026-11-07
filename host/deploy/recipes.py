@@ -59,10 +59,18 @@ class Tab:
     def has(self, pat):
         return self.find(pat, wait=0, enabled=False, quiet=True)[0] is not None
 
+    def seen(self, pat):
+        """True or False from a good snapshot, None when the snapshot failed or came back empty.
+        A publish loop reads success from an element going away, and a failed snap is not that."""
+        ls = self.lines()
+        if not ls:
+            return None
+        return any(re.search(pat, ln) for ln in ls)
+
     def _do(self, op, **a):
         r = self.cmd(op, tab=self.id, **a)
         if 'locked' in str(r.get('error', '')):  # a page load re-locked the tab
-            self.verify()
+            prep(self)  # TikTok and Instagram need their menu or popup handled before verify passes
             r = self.cmd(op, tab=self.id, **a)
         if r.get('error'):
             raise Stop(f'{op}: {r["error"]}')
@@ -95,6 +103,40 @@ class Tab:
 
     def shot(self):
         return self.cmd('shot', tab=self.id).get('path')
+
+
+# ---------- before verify ----------
+def tiktok_prep(t):
+    """TikTok Studio names the account only in the avatar menu. The avatar is the unnamed button
+    after "Back to TikTok". Without this, verify failed on every fresh tab (2026-11-07)."""
+    try:
+        return t.verify()
+    except Stop:
+        pass
+    ls = t.lines()
+    for a, b in zip(ls, ls[1:]):
+        m = re.match(r'\[(\d+)\] button ""$', b)
+        if 'Back to TikTok' in a and m:
+            t._do('click', el=int(m.group(1)))
+            time.sleep(1.5)
+            break
+    acc = t.verify()
+    t.key('Escape')
+    return acc
+
+
+def instagram_prep(t):
+    """A 'Turn on notifications' pop-up covers the feed on a fresh tab (2026-11-07)."""
+    if t.find(r'"(Not Now|Şimdi Değil|Şimdi değil)"', wait=6, enabled=False, quiet=True)[0] is not None:
+        t.click(r'"(Not Now|Şimdi Değil|Şimdi değil)"')
+    return t.verify()
+
+
+PREP = {'tiktok': tiktok_prep, 'instagram': instagram_prep}
+
+
+def prep(t):
+    return PREP.get(t.p, Tab.verify)(t)
 
 
 # ---------- platforms ----------
@@ -136,15 +178,37 @@ def youtube(t, j, publish, accounts):
         t.click(nxt)
     t.click(r'role=radio "(Public|Herkese açık)"')
     if publish:
-        t.click(r'button "(Publish|Yayınla|Save|Kaydet)"', publish=True)
-        time.sleep(4)
+        # Before its checks end, Publish opens "We're still checking your content" and warns of a
+        # strike. The recipe once read that dialog as published, and the video sat as a private draft
+        # (kazakistan, 2026-11-07). Go back, wait a minute, press again, up to 25 minutes.
+        btn = r'button "(Publish|Yayınla|Save|Kaydet)"'
+        anyway = r'"(Publish anyway|Yine de yayınla)"'
+        for _ in range(25):
+            t.click(btn, publish=True)
+            # Done only when a good snapshot shows the editor's visibility step gone and no
+            # "still checking" dialog, held for 15 s: that dialog can come up a few seconds late.
+            done = 0
+            for _ in range(8):
+                time.sleep(3)
+                if t.seen(anyway):
+                    done = -1
+                    break
+                left = t.seen(r'role=radio "(Public|Herkese açık)"')
+                done = done + 1 if left is False else 0
+                if done >= 5:
+                    return
+            if done != -1:
+                raise Stop("YouTube: Publish pressed, no clear result: check Studio before pressing again")
+            t.click(r'"(Go back|Geri dön)"')
+            time.sleep(60)
+        raise Stop("YouTube checks still running after 25 min: left private, press Publish later")
 
 
 def tiktok(t, j, publish, accounts):
-    t.verify()  # the lock needs the account on the page before any upload
+    tiktok_prep(t)  # the lock needs the account on the page before any upload
     t.upload(r'input:file .*accept=video', j['video'])
     t.find(r'"Replace"', wait=900, enabled=False)  # upload finished
-    t.verify()
+    tiktok_prep(t)
     cap = j['caption']
     for _ in range(3):  # the editor resets once the upload completes; retype until it sticks
         t.type(r'^\[\d+\] editable role=combobox', cap)
@@ -152,9 +216,15 @@ def tiktok(t, j, publish, accounts):
             break
     if j.get('cover'):
         t.click(r'clickable "(Edit cover|Kapağı düzenle)"')
-        t.upload(r'input:file "Upload cover"', j['cover'])
-        time.sleep(2)
-        t.click(r'role=button "(Save|Kaydet)"')
+        # A long video's cover dialog may offer frames only, no upload (kazakistan, 2026-11-07).
+        # The cut's first frame is the cover, so going on with it beats stopping the post.
+        if t.find(r'input:file "Upload cover"', wait=15, enabled=False, quiet=True)[0] is not None:
+            t.upload(r'input:file "Upload cover"', j['cover'])
+            time.sleep(2)
+            t.click(r'role=button "(Save|Kaydet)"')
+        else:
+            t.say('cover upload not offered: the first frame is the cover')
+            t.key('Escape')
     if publish:
         t.click(r'role=button "(Post|Paylaş|Yayınla)"', wait=120, publish=True)
         time.sleep(5)
@@ -184,7 +254,7 @@ def facebook(t, j, publish, accounts):
 
 
 def instagram(t, j, publish, accounts):
-    t.verify()
+    instagram_prep(t)
     t.click(r'"(New post|Create|Yeni gönderi|Oluştur)"')
     if t.has(r'"(Post|Gönderi)"$'):
         t.click(r'"(Post|Gönderi)"$')
@@ -213,8 +283,22 @@ def x(t, j, publish, accounts):
     t.find(r'button role=button "(Gönderi yayınla|Post)"', wait=900)
     time.sleep(20)  # enabled is not the same as processed
     if publish:
-        t.click(r'button role=button "(Gönderi yayınla|Post)"', publish=True)
-        time.sleep(6)
+        # A long video is still processing when the button turns on: the click does nothing and the
+        # composer stays open. Kazakistan (16 min) sat unsent that way, 2026-11-07. Press until it closes.
+        # Sent only when a good snapshot shows the filled composer gone. It is checked again right
+        # before every press, so a post that went out during the wait is never pressed twice.
+        box = r'^\[\d+\] editable role=textbox "(Metni gönderi olarak yayınla|Post text)" value='
+        if not t.seen(box):
+            raise Stop("X: the filled composer is not on the page, so its closing cannot prove the post")
+        for _ in range(30):
+            if t.seen(box) is False:
+                return
+            t.click(r'button role=button "(Gönderi yayınla|Post)"', publish=True)
+            for _ in range(10):
+                time.sleep(3)
+                if t.seen(box) is False:
+                    return
+        raise Stop("X kept the composer open for 15 min: the post is not sent")
 
 
 RECIPES = {'youtube': youtube, 'tiktok': tiktok, 'facebook': facebook, 'instagram': instagram, 'x': x}
@@ -235,7 +319,7 @@ def check(cmd, start, platforms):
     def one(p):
         try:
             t = Tab(cmd, p, start[p], print)
-            acc = t.verify()
+            acc = prep(t)
             t.find(FIRST[p], wait=20, enabled=False)
             out[p] = f'ok ({acc})'
             cmd('close', tab=t.id)
