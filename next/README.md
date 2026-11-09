@@ -291,7 +291,8 @@ Only the page is stuck. Every terminal lives in `appgea-panel-desktop`, so never
 force-quit Panel: both end every session, and neither saves the wall. Kill the web view alone:
 the `com.apple.WebKit.WebContent` process whose start time (`ps -axo pid,lstart,%cpu,command`)
 matches Panel's, usually at 100% CPU. Tauri reloads the page, and the new page adopts every live
-session through `live_wall`. Before killing it, `sample <pid> 3` shows the stuck handler.
+session through `live_wall`. `sample <pid> 3` first names the stuck event (mouse move, wheel,
+timer), but not the JavaScript function: JIT frames print as `???`.
 
 ## Checks
 
