@@ -1988,6 +1988,35 @@ async fn restore_wall(
     })
 }
 
+/// The wall as it is right now, for a page that loads under a running Panel. The web view is
+/// reloaded when its process dies, and every PTY lives on in this process. Without this the new
+/// page showed an empty wall over seven running agents, and quitting looked like the only way
+/// back (2026-11-09). Same shape as `restore_wall`, so the UI adopts both the same way.
+#[tauri::command]
+async fn live_wall(state: State<'_, DesktopState>) -> Result<RestoredWall, String> {
+    let awake: Vec<Session> = live_sessions(&state)
+        .into_iter()
+        .filter(|session| session.kind != "sim" && session.kind != "task")
+        .collect();
+    let mut sessions: Vec<RestoredSession> = {
+        let terminals = state.terminals.lock().unwrap();
+        awake
+            .into_iter()
+            .map(|session| RestoredSession {
+                screen: terminals.screen(&session.terminal_id).unwrap_or_default(),
+                session,
+                asleep: false,
+            })
+            .collect()
+    };
+    sessions.extend(state.sleeping.lock().unwrap().values().map(|sleeper| RestoredSession {
+        session: sleeper.session.clone(),
+        screen: sleeper.screen.clone(),
+        asleep: true,
+    }));
+    Ok(RestoredWall { saved_at: 0, sessions })
+}
+
 /// Where this session's shell is standing RIGHT NOW — not where it was forked. Asking the OS is
 /// the only honest answer: a `cd` inside the PTY is invisible to us, and remembering the launch
 /// folder would open "another shell here" in the wrong place the moment anyone moved.
@@ -4564,6 +4593,7 @@ fn main() {
             skills_archive,
             skills_usage,
             restore_wall,
+            live_wall,
             start_session,
             session_history,
             search_history,

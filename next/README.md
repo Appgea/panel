@@ -285,6 +285,14 @@ relaunch. To iterate, run **`./dev.command`** (`cargo tauri dev`) instead:
 Rule of thumb: keep logic that changes often in the frontend or in disk-read config so it reloads
 live; reserve Rust for the parts that rarely change.
 
+### When the window freezes
+
+Only the page is stuck. Every terminal lives in `appgea-panel-desktop`, so never kill that or
+force-quit Panel: both end every session, and neither saves the wall. Kill the web view alone:
+the `com.apple.WebKit.WebContent` process whose start time (`ps -axo pid,lstart,%cpu,command`)
+matches Panel's, usually at 100% CPU. Tauri reloads the page, and the new page adopts every live
+session through `live_wall`. Before killing it, `sample <pid> 3` shows the stuck handler.
+
 ## Checks
 
 - `cargo test --workspace` — includes a real PTY round trip, the blocking-ask round trip, and the

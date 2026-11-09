@@ -29,6 +29,7 @@ import {
   PLACE_IN_TEXT,
   commandFrom,
   fileTarget,
+  logicalLine,
   parsePlace,
   type FileTarget,
   type Place,
@@ -218,19 +219,6 @@ function linkHint(link: TermLink): string {
 }
 
 /** A row and the rows it wraps into, as one string. Long paths wrap; a link must survive it. */
-function logicalLine(term: Terminal, y: number): { text: string; first: number } {
-  const buffer = term.buffer.active;
-  let first = y - 1;
-  while (first > 0 && buffer.getLine(first)?.isWrapped) first -= 1;
-  let last = y - 1;
-  while (buffer.getLine(last + 1)?.isWrapped) last += 1;
-  let text = "";
-  for (let row = first; row <= last; row += 1) {
-    text += buffer.getLine(row)?.translateToString(row === last) ?? "";
-  }
-  return { text, first };
-}
-
 
 /** What the on-terminal close prompt needs to name itself: the session, and the app it belongs
  *  to (id for the icon, name for the letter that stands in until it loads). */
@@ -629,6 +617,13 @@ export class TerminalDeck {
     if (pane) this.writeChunk(sessionId, pane, { terminalId: pane.terminalId, data: "", closed: true });
   }
 
+  /** Forget the output parked for panes not open yet. Call it just before reading `live_wall`:
+   *  each screen read after this already holds that output, and add() would write it twice. */
+  dropPending(): void {
+    for (const { timer } of this.pending.values()) window.clearTimeout(timer);
+    this.pending.clear();
+  }
+
   /** Hand a pane the output its PTY made before the pane was listening. See `pending`. */
   private flushPending(sessionId: string, pane: Pane): void {
     const startup = this.pending.get(pane.terminalId);
@@ -696,7 +691,8 @@ export class TerminalDeck {
   add(
     sessionId: string,
     terminalId: string,
-    restore?: { screen: string; savedAt: number; asleep?: boolean },
+    /** `savedAt` absent: the screen is from the process still running under this pane. */
+    restore?: { screen: string; savedAt?: number; asleep?: boolean },
   ): void {
     const mount = document.createElement("div");
     mount.className = "terminal-mount";
@@ -764,7 +760,7 @@ export class TerminalDeck {
     // what every agent prints, so this is the part that needs no cooperation from any of them.
     term.registerLinkProvider({
       provideLinks: (y, callback) => {
-        const { text, first } = logicalLine(term, y);
+        const { text, first } = logicalLine(term.buffer.active, y);
         const cols = term.cols;
         const found: { index: number; text: string; link: TermLink }[] = [];
         for (const match of text.matchAll(PLACE_IN_TEXT)) {
@@ -897,7 +893,7 @@ export class TerminalDeck {
       event.preventDefault();
       event.stopPropagation();
       const cell = this.cellAt(pane, event);
-      this.openMenu(pane, event.clientX, event.clientY, cell ? logicalLine(term, cell.row + 1).text : "");
+      this.openMenu(pane, event.clientX, event.clientY, cell ? logicalLine(term.buffer.active, cell.row + 1).text : "");
     });
     mount.addEventListener("mousedown", (event) => {
       if (!event.shiftKey || event.button !== 0 || resending) return;
@@ -969,10 +965,12 @@ export class TerminalDeck {
       // The banner is not decoration. Without a line saying where the old ends, restored output
       // reads as live output — and the first thing you do is answer a question the agent asked
       // you yesterday. \x1b[2m is faint; \x1b[0m hands the colours back to whatever runs next.
-      const when = new Date(restore.savedAt * 1000).toLocaleString();
-      pane.term.write(
-        `\x1b[2m── restored from ${when} · everything above is last session ──\x1b[0m\r\n`,
-      );
+      if (restore.savedAt) {
+        const when = new Date(restore.savedAt * 1000).toLocaleString();
+        pane.term.write(
+          `\x1b[2m── restored from ${when} · everything above is last session ──\x1b[0m\r\n`,
+        );
+      }
     }
     // Restored asleep: there is no PTY under it and no closing chunk will ever come to say so.
     if (restore?.asleep) {

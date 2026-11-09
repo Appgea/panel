@@ -4151,36 +4151,47 @@ function onEvent(event: ProjectEvent): void {
 
 /* ------------------------------------------------------------------- boot */
 
+type Wall = {
+  savedAt: number;
+  sessions: Array<{ session: Session; screen: string; asleep: boolean }>;
+};
+
 /**
- * Put last session's terminals back.
+ * Put the terminals back. First what already runs: a page reloaded under a live Panel (its web
+ * view died and came back) gets every live pane back as it is. Live goes first, so a pane that
+ * restore_wall forks next is never adopted twice.
  *
- * Rust forks each one again in the folder it had and hands back the screen it was showing; here
- * they rejoin their projects and get that screen painted into them. Ids are preserved across the
- * restart, which is what lets the wall put each terminal back in its own tab and under the name
- * you gave it — both of those are filed by session id.
+ * Then last session's terminals. Rust forks each one again in the folder it had and hands back
+ * the screen it was showing; here they rejoin their projects and get that screen painted into
+ * them. Ids are preserved across the restart, which is what lets the wall put each terminal back
+ * in its own tab and under the name you gave it — both of those are filed by session id.
  *
- * The processes did not survive. Agents that can resume were launched resuming, so the
+ * Those processes did not survive. Agents that can resume were launched resuming, so the
  * conversation is there; a build that was running is not. The banner in each pane says so.
  */
 async function restoreWall(): Promise<void> {
-  type RestoredWall = {
-    savedAt: number;
-    sessions: Array<{ session: Session; screen: string; asleep: boolean }>;
-  };
-  const wall = await invoke<RestoredWall>("restore_wall", { cols: 120, rows: 34 }).catch(
-    (error) => {
-      console.warn("[panel] the wall could not be restored", error);
-      return { savedAt: 0, sessions: [] } as RestoredWall;
-    },
-  );
-  if (!wall.sessions.length) return;
-  const savedAt = wall.savedAt;
+  const none: Wall = { savedAt: 0, sessions: [] };
+  deck.dropPending();
+  const live = await invoke<Wall>("live_wall").catch((error) => {
+    console.warn("[panel] the live sessions could not be read", error);
+    return none;
+  });
+  adoptWall(live, false);
+  const saved = await invoke<Wall>("restore_wall", { cols: 120, rows: 34 }).catch((error) => {
+    console.warn("[panel] the wall could not be restored", error);
+    return none;
+  });
+  adoptWall(saved, true);
+}
+
+function adoptWall(wall: Wall, forked: boolean): void {
   for (const { session, screen, asleep: slept } of wall.sessions) {
     const here = state(session.project);
-    // The project was removed from config while Panel was closed. Rust forked the terminal
-    // before it could know that, so close it rather than leaking a PTY with no owner.
     if (!here) {
-      void invoke("stop_session", { session: session.id }).catch(() => undefined);
+      // The project was removed from config while Panel was closed. Rust forked the terminal
+      // before it could know that, so close it rather than leaking a PTY with no owner. A live
+      // one is someone's running work: it stays, and the quit prompt still names it.
+      if (forked) void invoke("stop_session", { session: session.id }).catch(() => undefined);
       continue;
     }
     here.sessions.push(session);
@@ -4191,7 +4202,7 @@ async function restoreWall(): Promise<void> {
       exited.add(session.id);
     }
     here.running = here.sessions.some((s) => isAgentKind(s.kind) && !exited.has(s.id));
-    deck.add(session.id, session.terminal_id, { screen, savedAt, asleep: slept });
+    deck.add(session.id, session.terminal_id, { screen, savedAt: forked ? wall.savedAt : undefined, asleep: slept });
   }
 }
 
@@ -4978,6 +4989,10 @@ async function boot(): Promise<void> {
     }
     shutdownPromptOpen = false;
   });
+  // A quit asked of an earlier page (one that froze, or was reloaded mid-prompt) left Rust waiting
+  // for an answer that page can no longer give, and Rust swallowed every later ⌘Q. This page has
+  // no prompt open, so it says so. Without it the only way out was a force quit, which saves no wall.
+  void invoke("cancel_shutdown").catch(() => undefined);
 
   const context = await invoke<{ single_project: string | null }>("launch_context");
   document.body.classList.toggle("single-project", !!context.single_project);

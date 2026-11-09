@@ -5,7 +5,7 @@ import { transformWithOxc } from "vite";
 
 const source = await readFile(new URL("../src/deeplink.ts", import.meta.url), "utf8");
 const { code } = await transformWithOxc(source, "deeplink.ts");
-const { parsePlace, PLACE_IN_TEXT, parseAppLink, sessionLink, fileTarget, PATH_IN_TEXT, APP_LINK_IN_TEXT } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+const { parsePlace, PLACE_IN_TEXT, parseAppLink, sessionLink, fileTarget, PATH_IN_TEXT, APP_LINK_IN_TEXT, logicalLine } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 
 test("the four places parse, with or without the panel: prefix", () => {
   assert.deepEqual(parsePlace("panel:review"), { to: "review" });
@@ -81,4 +81,16 @@ test("a command an agent printed comes out ready for a shell", async () => {
   assert.equal(commandFrom("!important"), "!important");
   assert.equal(commandFrom("   \n "), "");
   assert.equal(commandFrom("a\nb\nc\nd"), "");
+});
+
+test("a scrollback that is one wrapped line still reads in bounded time", () => {
+  // Like xterm's full ring: getLine never runs out, it wraps to the oldest row.
+  const ring = (count, wrapped) => ({
+    length: count,
+    getLine: (y) => ({ isWrapped: wrapped(y % count), translateToString: () => `${y % count}|` }),
+  });
+  const all = logicalLine(ring(10_000, () => true), 5_000);
+  assert.ok(all.text.split("|").length < 200, "read only rows near the pointer");
+  const three = logicalLine(ring(100, (y) => y === 11 || y === 12), 12);
+  assert.deepEqual(three, { text: "10|11|12|", first: 10 });
 });

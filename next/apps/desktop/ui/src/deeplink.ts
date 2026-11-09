@@ -144,6 +144,34 @@ export function parseAppLink(url: string): AppLink | null {
  */
 export type FileTarget = { path: string; line?: number };
 
+/** The part of an xterm buffer that reading one line needs. */
+export type TermRows = {
+  length: number;
+  getLine(y: number): { isWrapped: boolean; translateToString(trimRight?: boolean): string } | undefined;
+};
+
+/** Rows a link may span, each way from the row under the pointer. */
+const LINK_ROWS = 64;
+
+/** The wrapped line through 1-based row `y`, and the 0-based row its text starts on.
+ *
+ *  Both walks are bounded. xterm's getLine does not stop at the last row: the buffer is a ring,
+ *  and the row after the last reads as the oldest. One huge printed line can fill the whole
+ *  scrollback with wrapped rows. Hovering it then walked the ring forever, and Panel froze on
+ *  2026-11-09 with seven agents open. */
+export function logicalLine(rows: TermRows, y: number): { text: string; first: number } {
+  const at = y - 1;
+  let first = at;
+  while (first > 0 && at - first < LINK_ROWS && rows.getLine(first)?.isWrapped) first -= 1;
+  let last = at;
+  while (last + 1 < rows.length && last - at < LINK_ROWS && rows.getLine(last + 1)?.isWrapped) last += 1;
+  let text = "";
+  for (let row = first; row <= last; row += 1) {
+    text += rows.getLine(row)?.translateToString(row === last) ?? "";
+  }
+  return { text, first };
+}
+
 /** Full paths in terminal text. Only roots a real path starts from, so `/compact` and `a/b`
  *  stay text. Spaces end a path, and so does trailing punctuation. */
 export const PATH_IN_TEXT =
