@@ -1,8 +1,9 @@
 /**
- * The cards the Inbox folds in from the screens it replaced: Reports, Review, Support and History.
+ * The cards the Inbox folds in from the screens it replaced: Review, Support and History.
  * Owner, 2026-11-05: "I don't think I need this many different stuff to look at. One screen."
- * Each source becomes cards of one kind, in the same queue and the same order as the board's
- * (live_cards.ts), so one list answers "what is mine to look at".
+ * Each source becomes cards of one kind, in the same feed as the board's (live_cards.ts), so one
+ * list answers "what is mine to look at". What an agent sent is not a card: each message stands
+ * in the feed whole (inbox_feed.ts).
  *
  * History is the simple form the owner asked for: one card per project with the sessions that
  * ended since he looked, and Resume. The full History screen is only behind links now.
@@ -10,15 +11,13 @@
  * Pure: the host reads the sources, this only shapes them.
  */
 
-import { KIND, type Act, type Card, type CardKind } from "./live_cards";
+import type { Act, Card, CardKind } from "./live_cards";
 
-export type ReportItem = { id: string; project: string; title: string; at: number };
 export type ReviewBatch = { project: string; items: { path: string; kind: "image" | "audio" | "video"; at: number }[] };
 export type SupportItem = { id: string; app: string; subject: string; email: string; form: string; fields: { q: string; a: string }[]; at: number };
 export type EndedItem = { id: string; project: string; agent: string; title: string; at: number; resumable: boolean };
 
 export type InboxSources = {
-  reports: ReportItem[];
   review: ReviewBatch[];
   support: SupportItem[];
   ended: EndedItem[];
@@ -26,8 +25,7 @@ export type InboxSources = {
   endedFloor: number;
 };
 
-/** With nothing seen yet, Report looks back one day, like Done. */
-const LOOKBACK_MS = 24 * 3600_000;
+const SUBJECT_MAX = 160;
 
 const clip = (text: string, n: number): string => (text.length > n ? `${text.slice(0, n - 1).trimEnd()}…` : text);
 
@@ -49,31 +47,14 @@ const fileName = (path: string): string => path.slice(path.lastIndexOf("/") + 1)
 
 export function inboxCards(
   src: InboxSources,
-  weight: (room: string) => number,
   roomName: (room: string) => string,
   picture: (project: string, path: string) => string,
   seen: Record<string, number>,
-  now: number,
 ): Card[] {
   const cards: Card[] = [];
-  const base = (kind: CardKind, room: string) => ({ kind, room, minutes: KIND[kind].minutes, stake: weight(room) * KIND[kind].weight, talk: null });
+  const base = (kind: CardKind, room: string) => ({ kind, room, talk: null });
+  // Review waits for a look, so it keeps a way to wave it off. The rest are read by being seen.
   const seenOpt = { label: "Seen", act: { do: "seen" } as Act };
-
-  for (const [room, list] of byProject(src.reports)) {
-    const fresh = list.filter((r) => r.at > (seen[`report:${room}`] ?? now - LOOKBACK_MS)).sort((a, b) => b.at - a.at);
-    if (!fresh.length) continue;
-    const one = fresh.length === 1;
-    cards.push({
-      ...base("report", room),
-      id: `report:${room}`,
-      title: one ? fresh[0].title : `${fresh.length} reports from ${roomName(room)}`,
-      lines: [],
-      items: one ? undefined : fresh.map((r) => clip(r.title, 120)),
-      options: [{ label: one ? "Read" : "Read Newest", act: { do: "report", post: fresh[0].id, last: one } }, seenOpt],
-      arrivedMs: fresh[fresh.length - 1].at,
-      seenKeys: [`report:${room}`],
-    });
-  }
 
   for (const batch of src.review) {
     const items = batch.items;
@@ -99,14 +80,13 @@ export function inboxCards(
     cards.push({
       ...base("support", room),
       id: `support:${m.id}`,
-      title: clip(m.subject, 160),
+      title: clip(m.subject, SUBJECT_MAX),
       lines: [[m.email, m.form].filter(Boolean).join(" · ")].filter(Boolean),
-      // The subject is already the title. A question that ends in its own mark needs no colon.
+      // A subject that fits is already the title. A question that ends in its own mark needs no colon.
       items: m.fields
-        .filter((f) => f.a.trim() && f.a.replace(/\s+/g, " ").trim() !== m.subject)
-        .map((f) => `${/[?:]$/.test(f.q.trim()) ? f.q.trim() : `${f.q.trim()}:`} ${clip(f.a, 140)}`),
+        .filter((f) => f.a.trim() && (m.subject.length > SUBJECT_MAX || f.a.replace(/\s+/g, " ").trim() !== m.subject))
+        .map((f) => `${/[?:]$/.test(f.q.trim()) ? f.q.trim() : `${f.q.trim()}:`} ${f.a.trim()}`),
       options: [
-        { label: "Read", act: { do: "seen" } },
         ...(m.email ? [{ label: "Reply by Email", act: { do: "url", url: `mailto:${m.email}?subject=${encodeURIComponent(`Re: your message about ${roomName(room)}`)}` } as Act }] : []),
         { label: "All Support", act: { do: "support" } },
       ],
@@ -126,7 +106,7 @@ export function inboxCards(
       title: fresh.length === 1 ? `${last.agent} finished: ${clip(last.title, 120)}` : `${fresh.length} sessions ended in ${roomName(room)}`,
       lines: [],
       items: fresh.length === 1 ? undefined : fresh.map((e) => `${e.agent} · ${clip(e.title, 110)}`),
-      options: [seenOpt, ...(last.resumable ? [{ label: "Resume Last", act: { do: "resume", session: last.id } as Act }] : [])],
+      options: last.resumable ? [{ label: "Resume Last", act: { do: "resume", session: last.id } }] : [],
       arrivedMs: fresh[fresh.length - 1].at,
       seenKeys: [`ended:${room}`],
     });

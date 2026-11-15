@@ -15,7 +15,7 @@
 import { projectImage } from "../project-assets";
 import type { ChangeStep } from "../types";
 import { showLightbox } from "../views/lightbox";
-import type { ChatPost } from "./chat";
+import type { InboxPost } from "./inbox_feed";
 import { mountRobotReplay } from "./robot_replay";
 
 export type PeekDeps = {
@@ -24,11 +24,11 @@ export type PeekDeps = {
   /** Current contents, for looking at a line nobody edited. */
   readFile(project: string, path: string): Promise<string>;
   /** The agent's own walkthrough, rendered by the view registry with its refs pointed back here. */
-  flow(post: ChatPost, openRef: (ref: string) => void): HTMLElement | null;
+  flow(post: InboxPost, openRef: (ref: string) => void): HTMLElement | null;
   /** The one door out: the real editor, in the real project. */
   openRef(project: string, ref: string): void;
   /** Oldest edit that belongs to this post's turn — anything earlier is a previous report's work. */
-  since(post: ChatPost): number;
+  since(post: InboxPost): number;
 };
 
 export type PeekHandle = {
@@ -79,7 +79,7 @@ const snippet = (text: string, line: number | null): HTMLElement => {
   return code;
 };
 
-export function buildPeek(post: ChatPost, deps: PeekDeps): PeekHandle {
+export function buildPeek(post: InboxPost, deps: PeekDeps): PeekHandle {
   const root = make("section", "inbox-peek");
   root.hidden = true;
   const doors = make("nav", "inbox-peek-doors");

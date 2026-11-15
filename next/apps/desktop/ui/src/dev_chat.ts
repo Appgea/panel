@@ -1,5 +1,5 @@
 /**
- * Dev harness for the chat rail and Home's activity strip. NOT part of the app build — index.html
+ * Dev harness for the Manager screen and Home's activity strip. NOT part of the app build — index.html
  * never loads this. It mounts the REAL modules (mountChat, mountHome) against fixture data and
  * stubbed events, so the shell's three-column layout, the rail at its true width and the strip can
  * be looked at without Tauri. No IO, no invoke, no live data.
@@ -8,21 +8,13 @@ import "./style.css";
 // Side-effect import: this is what fills the view registry. Without it every post renders as
 // the raw-payload fallback.
 import "./views";
-import { mountChat, type ChatPost } from "./features/chat";
+import { mountChat } from "./features/chat";
+import type { InboxPost } from "./features/inbox_feed";
 import { mountHome, type HomeActivity, type HomeProject } from "./features/home";
-import { renderView } from "./registry";
-import type { RenderCtx } from "./types";
-
-const CTX: RenderCtx = {
-  openRef: () => {},
-  openDocument: async () => {},
-  finishDocument: async () => "",
-  openPlace: () => {},
-};
 
 const ago = (minutes: number): number => Date.now() - minutes * 60_000;
 
-const POSTS: ChatPost[] = [
+const POSTS: InboxPost[] = [
   {
     id: "p1",
     project: "kelimelik",
@@ -116,48 +108,17 @@ const home = mountHome(document.getElementById("homeScreen")!, {
   openProject: () => {},
   isExited: () => false,
   projectGit: async () => ({ is_repo: true, branch: "main", dirty: 2 }) as never,
-  openPost: (id) => chat.reveal(id),
+  openPost: (id) => console.log("[chat harness] open post", id),
   openHistory: () => {},
   installed: () => false,
 });
 
 const chat = mountChat(document.getElementById("chatRail")!, {
-  render: (post, openRef) => renderView(post.view ?? "message", post.payload, { ...CTX, openRef }),
-  openRuns: () => {},
-  openSession: () => {},
-  isLiveSession: (session) => session === "s1" || session === "s2",
-  visibility: () => {
-    for (const [id, section] of [["chatButton", "reports"], ["cpoButton", "manager"]] as const) {
-      const button = document.getElementById(id)!;
-      const on = chat.currentSection() === section;
-      button.classList.toggle("is-on", on);
-      button.setAttribute("aria-pressed", String(on));
-    }
+  visibility: (shown) => {
+    const button = document.getElementById("cpoButton")!;
+    button.classList.toggle("is-on", shown);
+    button.setAttribute("aria-pressed", String(shown));
   },
-  unread: (total) => {
-    const badge = document.getElementById("chatBadge")!;
-    badge.textContent = String(total);
-    badge.hidden = total === 0;
-  },
-  unreadByProject: (counts) => home.unread(counts),
-  archive: (posts) =>
-    home.activity(
-      posts.map(
-        (post): HomeActivity => ({
-          id: post.id,
-          project: post.project,
-          projectName: post.projectName,
-          author: post.author,
-          agentKind: post.agentKind,
-          title: String(post.payload.title ?? "Report"),
-          at: post.at,
-        }),
-      ),
-    ),
-  changes: async () => [],
-  readFile: async () => "",
-  renderFlow: () => null,
-  openRef: () => {},
 }, {
   // No PTY without Tauri, so Manager stays on its start card. Everything else about the
   // pane — the preprompt editor, the engine picker — is real and can be looked at.
@@ -174,12 +135,22 @@ const chat = mountChat(document.getElementById("chatRail")!, {
 });
 
 home.open(HOME_PROJECTS);
-document.getElementById("chatButton")!.addEventListener("click", () => chat.show("reports"));
-document.getElementById("cpoButton")!.addEventListener("click", () => chat.showCpo());
-// Chat boots down in the app — a screen you did not ask for is a bad greeting. Here it IS the
-// harness, so it opens itself.
+home.activity(
+  POSTS.map(
+    (post): HomeActivity => ({
+      id: post.id,
+      project: post.project,
+      projectName: post.projectName,
+      author: post.author,
+      agentKind: post.agentKind,
+      title: String(post.payload.title ?? "Report"),
+      at: post.at,
+    }),
+  ),
+);
+document.getElementById("cpoButton")!.addEventListener("click", () => chat.toggle());
+// The Manager boots down in the app. Here it is the harness, so it opens itself.
 chat.show();
-for (const post of POSTS) chat.add(post);
 
 // Reach them from the console while poking at layout.
 Object.assign(window as unknown as Record<string, unknown>, { chat, home });

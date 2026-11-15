@@ -1,9 +1,8 @@
-//! Agent reports — filed to the appgea brain, not shouted into the Inbox.
+//! Agent reports — filed to the appgea brain, for the manager's read.
 //!
-//! An agent's written report is for the CTO read, not for the human's attention. It used to land
-//! in the Inbox as a full post, which made the Inbox a second transcript of a conversation that
-//! already happened in the terminal. Now the prose goes here, one append-only markdown log per
-//! project, and the Inbox keeps only the headline and the media.
+//! Each message an agent sends is appended here, one append-only markdown log per project. The
+//! human reads the same message whole in the Inbox. For two weeks the Inbox showed only its
+//! headline, and the owner could not find what agents told him (2026-11-15, `inbox.rs`).
 //!
 //! It sits beside [`crate::brain`] under `~/.appgea/brain/` for the same three reasons that
 //! module gives: outside every git tree, append-only, and read under a cap rather than written
@@ -74,7 +73,7 @@ fn paths(value: &Value, key: &str, field: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Append one report. Returns the log file so the Inbox headline can point at it.
+/// Append one report. Returns the log file so the Inbox message can point at it.
 ///
 /// Best-effort by design: a failed write must never break the agent's turn, so every error path
 /// returns `None` and the report simply is not filed.

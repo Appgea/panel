@@ -86,13 +86,13 @@ Stdio, newline-delimited JSON-RPC, MCP `2024-11-05`, no third-party deps. Reads 
 Fire-and-forget visual. `type` (required, free string → renderer key), `payload` (object). Use only for things hooks can't see (a phase, a plan, a result). Returns `emitted event <id>`.
 
 ### `send_to_user`
-A **report**, not a chat message: prose is filed to the brain. The Inbox shows the title and media; the text opens on a click.
+A **message to the human**. The Inbox shows it whole, in the project's channel: title, text, media and links, with no click. `blocked` and `needs_decision` also land under **Needs you**. The human can reply from the Inbox, and the reply is typed into the agent's terminal. Messages and copies of their media are kept 30 days. A media file over 25 MB is linked, not copied. The text is also filed to the brain.
 Sent as `/panel/emit` with `type:"message"`.
 
 | param | req | notes |
 |---|---|---|
 | `title` | ✔ | plain words, under 60 characters; no file names, ids, code or markdown |
-| `text` | ✔ | one plain sentence, under 30 words; code goes in `flow` |
+| `text` | ✔ | the whole answer. First line is the result in one plain sentence. Short paragraphs and `-` lists render. Aim for under 120 words. Code goes in `flow` |
 | `outcome` | ✔ | `progress` \| `done` \| `blocked` \| `needs_decision` |
 | `flow` | ✔ (≥1) | `[{ref, label, detail}]`; `ref` = `path:line`; 2–5 steps |
 | `images` | | strings or `{path, caption}`; **every screenshot, captioned** |

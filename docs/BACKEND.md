@@ -223,7 +223,8 @@ Agent launch (inside `start_session`): `kind_program()` maps `opencode-kimi-k3` 
 | `code_nav.rs` | Not an LSP. Import/path graph + type-use fallback (Swift), symbol table, project search. |
 | `made.rs` | FSEvents/notify watcher on projects with a session; announces finished media after a quiet period; skips build output. |
 | `pulse.rs` | Sidebar facts: `portfolio.yaml` standing + 2-week commit activity. |
-| `reports.rs` | Appends an agent's `message` prose to an append-only per-project Markdown log under `<user>/brain/reports/`; Inbox keeps headline + media only. |
+| `inbox.rs` | Keeps the messages the Inbox shows in `<user>/inbox/messages.jsonl`, so they survive a restart. Capped: 30 days and 500 messages. The same prune removes the kept media folders (`<user>/reports/<day>`) of days older than that. |
+| `reports.rs` | Appends an agent's `message` prose to an append-only per-project Markdown log under `<user>/brain/reports/`; the Inbox shows the same message whole. |
 | `sprints.rs` | Markdown sprint parser / line rewriter (no second store). |
 | `skills.rs`, `skill_sessions.rs` | Skill inventory/edits; per-session policy applied **at process launch only**. |
 | `project_desk.rs` | Release evidence + project docs without an agent. |

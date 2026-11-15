@@ -1,13 +1,11 @@
 /**
- * `message` — an agent report as it reaches the human.
+ * `message` — what an agent sent the human, whole.
  *
- * The prose is NOT here any more. Panel files the written report to the appgea brain the moment
- * it arrives, and the companion is who reads it. What survives in the Inbox is the part a log
- * cannot carry: a headline you can scan, and media you have to look at, hear or open.
- *
- * That is the whole rule. Talking to an agent happens in its terminal. The Inbox is a place you
- * LOOK, so a folded report is its title and its pictures. The agent's sentence, the doors and
- * the replay open when you click the title.
+ * Nothing is folded. Until 2026-11-15 a report was its title, with the words and the doors
+ * behind a click, and the Inbox put two more clicks in front of that. Owner: "I have to tap 5
+ * things to get the proper response, and I even don't see shit." So the title, the agent's
+ * words, the media and the doors all show as the message arrives. Only a very long text is cut,
+ * with one button for the rest. Panel also files the words to the brain (reports.rs).
  *
  * Media, in three deliberately different shapes:
  *   * images — a tile per shot, ratio taken from the picture itself, click for the lightbox.
@@ -18,10 +16,10 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { parsePlace, placeLabel } from "../deeplink";
-import { plainLines, plainText } from "../plain";
+import { plainText } from "../plain";
 import { projectAssetUrl, projectImage } from "../project-assets";
 import type { Payload, ViewRenderer } from "../types";
-import { arr, el, obj, str } from "./dom";
+import { arr, el, obj, richProse, str } from "./dom";
 import { showLightbox, type LightboxShot } from "./lightbox";
 
 const named = (value: unknown, fallbackKey: string): Payload => {
@@ -58,9 +56,9 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
   }
   root.append(head);
 
-  // Folded away until the title is clicked. The full report is in the brain.
-  const words = plainLines(str(payload.text, str(payload.report)));
-  if (words) root.append(el("p", "v-message-line", words));
+  heading.textContent = plainText(str(payload.title, "Message"));
+  const words = str(payload.text, str(payload.report)).trim();
+  if (words) root.append(...wholeText(words));
 
   /* ------------------------------------------------------------------ images */
 
@@ -216,18 +214,21 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
     root.append(rail);
   }
 
-  // The title is the fold when there is anything behind it: words, doors, or the replay the
-  // feed adds under a report with `flow`.
-  const title = plainText(str(payload.title, "Message"));
-  if (words || root.querySelector(".v-message-attachments") || arr(payload.flow).length) {
-    const toggle = el("button", "v-message-toggle", title) as HTMLButtonElement;
-    toggle.type = "button";
-    toggle.setAttribute("aria-expanded", "false");
-    toggle.addEventListener("click", () => {
-      toggle.setAttribute("aria-expanded", String(root.classList.toggle("is-open")));
-    });
-    heading.append(toggle);
-  } else heading.textContent = title;
-
   return root;
 };
+
+/** Past this a message is a document: it shows its start, and one button shows the rest. */
+const LONG_TEXT = 1600;
+const LONG_LINES = 24;
+
+function wholeText(words: string): HTMLElement[] {
+  const text = richProse(words, "v-message-text");
+  if (words.length <= LONG_TEXT && words.split("\n").length <= LONG_LINES) return [text];
+  text.classList.add("is-cut");
+  const more = el("button", "v-message-more", "Show all") as HTMLButtonElement;
+  more.type = "button";
+  more.addEventListener("click", () => {
+    more.textContent = text.classList.toggle("is-cut") ? "Show all" : "Show less";
+  });
+  return [text, more];
+}

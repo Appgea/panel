@@ -12,6 +12,7 @@ mod code_nav;
 mod debug;
 mod flags;
 mod history;
+mod inbox;
 mod launch;
 mod leases;
 mod live;
@@ -4237,8 +4238,8 @@ fn event_sink(app: &AppHandle) -> EventSink {
         } = &mut event.event
         {
             if view == "message" {
-                // The prose goes to the brain. The Inbox gets the headline and the media, plus
-                // the path to the filed note so the human can read the rest on purpose.
+                // The prose is also filed to the brain, for the manager. The Inbox shows the
+                // whole message, and gets the path to the filed note.
                 if let Some(note) = reports::file(&event.project, session_id, payload) {
                     if let Some(object) = payload.as_object_mut() {
                         object.insert(
@@ -4554,6 +4555,8 @@ fn main() {
             sprint_create,
             sprint_read,
             sprint_write,
+            inbox::inbox_messages,
+            inbox::inbox_keep,
             notebook::read_notebook,
             notebook::save_notebook,
             list_projects,

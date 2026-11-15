@@ -176,6 +176,9 @@ impl TerminalManager {
         command.cwd(&cwd);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
+        // Panel opens OSC 8 links, and nothing in TERM says so. With this, Claude Code prints a
+        // web link as a real link, which stays whole however many rows it is broken across.
+        command.env("FORCE_HYPERLINK", "1");
         #[cfg(windows)]
         command.env("PATH", &terminal_path);
         for (key, value) in env {

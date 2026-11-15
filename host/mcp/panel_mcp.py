@@ -4,7 +4,7 @@
 Two deliberately generic tools:
 
   panel_emit(type, payload)    fire-and-forget visual event (an "animation")
-  send_to_user(...)            durable-looking rich handoff: text, images, files and links
+  send_to_user(...)            a message to the human's Inbox: text, images, files and links
   ask_user(kind, prompt, ...)  a blocking question — the tool RESULT is the user's answer
 
 `type` and `kind` are free strings routed to a frontend renderer registry, so new animation
@@ -60,15 +60,18 @@ TOOLS = [
     {
         "name": "send_to_user",
         "description": (
-            "File a report to the appgea brain, for the CPO/CTO read. This is NOT a message to the "
-            "human: the text is written to the project's agent log, and the Inbox shows only the "
-            "title plus whatever media you attach. The text opens only when the human clicks the "
-            "title. Write both for a person skimming forty reports. Talk to the human in the "
-            "terminal; report here. Call it at REAL checkpoints only — work finished, work "
-            "blocked, a decision needed, or media worth looking at. Not every turn, not for "
-            "progress narration. "
-            "Attach `images` for anything visual, `audio` for a clip to hear, `video` for a file "
-            "or URL the human opens outside Panel. Fire-and-forget."
+            "Send the human a message. It lands in Panel's Inbox, a feed like a Slack channel with "
+            "one channel per project, and he reads it there WHOLE: title, text, pictures, sound and "
+            "links all show at once, with no click. So this is your answer to him, not a log line. "
+            "Send one when the work is finished, when you are blocked, when only he can decide, or "
+            "when there is something to look at or hear. Never for progress narration, and not "
+            "every turn: each message is one more thing he has to read. "
+            "He can reply from the Inbox, and the reply is typed into your terminal as a prompt. "
+            "`outcome` 'blocked' or 'needs_decision' puts the message under 'Needs you' and into "
+            "his badge until he has read it, so use them only when he must act. "
+            "The message and copies of its media are kept for 30 days, then deleted. A media file "
+            "over 25 MB is linked, not copied: leave it on disk for as long as he may open it. "
+            "The text is also filed to the project's agent log for the manager. Fire-and-forget."
         ),
         "inputSchema": {
             "type": "object",
@@ -77,14 +80,18 @@ TOOLS = [
                     "type": "string",
                     "description": (
                         "what happened, in plain everyday words, under 60 characters. It is the "
-                        "whole report until clicked. No file names, ids, code or markdown."
+                        "bold first line of the message. No file names, ids, code or markdown."
                     )
                 },
                 "text": {
                     "type": "string",
                     "description": (
-                        "one plain sentence, under 30 words: the result and why it matters. No "
-                        "markdown, paths or ids. The code goes in `flow`."
+                        "the whole answer, shown in full under the title. First line: the result "
+                        "in one plain sentence, with no markdown, paths or ids (it is also the "
+                        "Slack copy). Then only what he needs to act on: what changed, what you "
+                        "checked, what is left for him. Short paragraphs and `-` lists render. "
+                        "Aim for under 120 words. A text over about 24 lines is cut behind a "
+                        "'Show all' button. The code goes in `flow`, pictures in `images`."
                     )
                 },
                 "outcome": {
@@ -94,7 +101,7 @@ TOOLS = [
                         "where the work stands. 'progress' mid-task, 'done' when the turn's work "
                         "is finished, 'blocked' when you cannot continue without something, "
                         "'needs_decision' when only the human can choose. Set it on every report: "
-                        "it is what lets the CPO count the portfolio instead of re-reading it."
+                        "it sorts the Inbox and lets the manager count the portfolio."
                     )
                 },
                 "flow": {

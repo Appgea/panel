@@ -10,7 +10,11 @@
  * helpers in Pillow show a swarm.
  */
 import "./style.css";
+// Side-effect import: it fills the view registry, so an Inbox message draws as it does in the app.
+import "./views";
 import { mountForYou } from "./features/foryou";
+import type { InboxPost } from "./features/inbox_feed";
+import { renderView } from "./registry";
 import { mountLive, type LiveAgent, type LiveEmber, type LiveJob, type LiveWorld } from "./features/live";
 import type { BoardFeed } from "./features/live_cards";
 import type { Script } from "./features/live_script";
@@ -222,6 +226,29 @@ const sendToAgent = async (panel: string, text: string) => (console.log("[live h
 // ?foryou=1 shows the Inbox instead of the map, with one of each source it folds in.
 if (params.has("foryou")) {
   const ago = (min: number) => Date.now() - min * 60_000;
+  const post = (id: string, project: string, projectName: string, author: string, agentKind: string, min: number, payload: InboxPost["payload"], flowFiles: string[] = []): InboxPost => ({
+    id, project, projectName, author, agentKind, session: `s-${author}`, flowFiles, flowSteps: [], at: ago(min), payload,
+  });
+  const posts: InboxPost[] = [
+    post("p0", "tavla", "Tavla", "Karagöz", "claude", 26 * 60, { title: "Dice physics moved to a fixed timestep", text: "The roll no longer depends on the frame rate. Checked on the iPad at 60 and 120 Hz.", outcome: "done" }),
+    post("p1", "tavla", "Tavla", "Karagöz", "claude", 40, {
+      title: "Tavla 2.4 build passed and is on TestFlight",
+      text: "Build 2.4 (118) is on TestFlight.\n\n- The dice roll freeze on iPad is fixed. The cause was a tween that never ended when two doubles came in a row.\n- The new board theme is behind the `theme_v2` flag, off by default.\n- One test where the bug could come back: `dice_double_roll_test.dart`.\n\nNothing is left for you. The store release waits for your go on the board.",
+      outcome: "done",
+    }, ["lib/game/dice.dart", "test/dice_double_roll_test.dart"]),
+    post("p2", "tavla", "Tavla", "Karagöz", "claude", 38, { title: "Crash on cold start is gone too", text: "It was the same tween. No separate fix.", outcome: "done" }),
+    post("p3", "pillow", "Pillow", "Zenne", "codex", 22, {
+      title: "Blocked: the rain loop has no licence file",
+      text: "I cannot ship `rain_loop.m4a`. The folder has no licence note and the source URL is dead.\n\nTwo ways out:\n1. I render a new loop with the code engine. About ten minutes.\n2. You point me to the licence.\n\nI did the rest of the sound pass meanwhile.",
+      outcome: "blocked",
+    }),
+    post("p4", "panel", "Panel", "Hacivat", "claude", 6, {
+      title: "Inbox is a feed now",
+      text: "Every message shows whole. A project is a channel. Reading is seeing: no Seen tap.",
+      outcome: "done",
+      links: [{ url: "https://github.com/example/panel/pull/12", label: "The change" }],
+    }),
+  ];
   const fy = mountForYou(document.getElementById("forYouScreen")!, {
     world: readWorld,
     board: readBoard,
@@ -234,10 +261,14 @@ if (params.has("foryou")) {
     openUrl,
     openTerminal,
     sendToAgent,
-    reports: () => [
-      { id: "p1", project: "tavla", title: "Tavla 2.4 build passed and is on TestFlight", at: ago(40) },
-      { id: "p2", project: "tavla", title: "Fixed the dice roll freeze on iPad", at: ago(25) },
-    ],
+    posts: () => posts,
+    render: (p, openRef) => renderView(p.view ?? "message", p.payload, { openRef, openDocument: async () => {}, finishDocument: async () => "", openPlace: () => {} }),
+    renderFlow: () => null,
+    changes: async () => [],
+    readFile: async () => "",
+    openRef: (project, ref) => console.log("[live harness] ref", project, ref),
+    openSession: (project, session) => console.log("[live harness] session", project, session),
+    isLiveSession: (session) => session !== "s-Zenne",
     review: () => [{ project: "pillow", items: [{ path: "/tmp/pillow/room_night.png", kind: "image", at: ago(15) }, { path: "/tmp/pillow/rain_loop.m4a", kind: "audio", at: ago(14) }] }],
     support: async () => ({
       problem: "",
@@ -249,7 +280,6 @@ if (params.has("foryou")) {
     projectName: (id) => ({ tavla: "Tavla", pillow: "Pillow", panel: "Panel" })[id] ?? null,
     pictureSrc: () => "",
     openReview: async (project, paths) => (console.log("[live harness] review", project, paths), true),
-    openReport: (post) => console.log("[live harness] report", post),
     resume: async (session) => console.log("[live harness] resume", session),
     openSupport: () => console.log("[live harness] support"),
     seen: (card) => console.log("[live harness] seen", card.id),

@@ -43,8 +43,7 @@ How to use Appgea Panel day to day. Install and first-run steps are in the
 ```
 
 Portfolio-level screens (Home, Runs, Terminals, Inbox, Live, Board, Project desk, Notebook,
-Settings) **swap with** the project screen and hand it back when you leave (Esc on Reports and
-Settings). Only the tabs the project has enabled appear in its rail (Git, Release,
+Settings) **swap with** the project screen and hand it back when you leave (Esc on Settings). Only the tabs the project has enabled appear in its rail (Git, Release,
 RevenueCat, Analytics, Product Spine are optional — see §12).
 
 | Sidebar row | What it is |
@@ -52,13 +51,16 @@ RevenueCat, Analytics, Product Spine are optional — see §12).
 | **Home** | The portfolio's landing: a verdict and a card per app; where the whole estate stands. |
 | **Runs** | Tab of the Workspace: start/stop apps on devices (§8). |
 | **Terminals** | The **wall**: every live terminal across every project (§4). |
-| **Inbox** | Everything that waits for you, one card at a time, most valuable first: board calls, agents that wait, reports, files to look at, support mail, finished sessions. Chips narrow it to one kind. A card opens Reports (`⌘⇧C`), the review deck or Support only to read one thing whole. Support forms are pulled every 30 min and on Refresh. |
+| **Inbox** (`⌘⇧C`) | What agents sent you and what waits for you, as one feed like a Slack channel, newest last. The left list has **All**, **Needs you** and one channel per project, each with its unread count. Every message shows whole. Board calls, waiting agents, files to look at, support mail and finished sessions are messages in the same feed, with their buttons under them. A message is read once it was on screen. Support forms are pulled every 30 min and on Refresh. |
 | **Live** | Every agent on this Mac, as a map. |
 | **Board** | Who holds what, and the scouts. Kept apart from the Inbox on purpose. |
 
 Why one Inbox: owner, 2026-11-05, "I don't think I need this many different stuff to look at. One
 screen. Board must still keep separate." Reports, Review, Support and History lost their rows then,
 and the Manager row went too ("its no more needed"). Do not bring back a row per source.
+Why a feed: owner, 2026-11-15, "It should be just something like slack, extendable. I simply want
+to open Inbox and easily see what agents send me." It was one card at a time, with each report's
+text behind three more clicks. Do not bring back a queue, a Seen button or a folded message.
 | **Project desk** | Per-project release target, todos and notes (§9). |
 | **Notebook** `⌘⇧N / Ctrl+Shift+N` | Your private Markdown notes; never shared with agents. |
 | **Settings** `⌘, / Ctrl+,` | Preferences, shortcuts, extensions, servers. |
@@ -130,8 +132,8 @@ What you see isn't polled: file edits, git moments, turn boundaries and permissi
 
 ## 6. The Inbox group
 
-### Reports
-A flat, read-only feed (newest last) of everything agents reported via `send_to_user` / `panel_send.py`: headline, outcome chip (*in progress / done / blocked / needs you*), screenshots (click for lightbox), audio (inline player), video (a link — opens in your real player), attachments and links. A post with media gets a **Review** button first: it opens the deck on exactly that report's files. Agents can also point you at a place with a **Panel link** — `panel:review[:<path>]`, `panel:work:<path>:<line>` (the file in Work), `panel:git`, `panel:manager` — which shows as a button on the post and is clickable in its terminal; a link that goes nowhere is struck out ([PROTOCOL.md §4](PROTOCOL.md)). The **evidence box** opens under a post: the edit replay, a file at the cited line, a screenshot — without leaving. Answer an agent in *its terminal* (one click away on the post's byline). Full prose reports are filed to `~/.appgeapanel/brain/reports/<project>.md`.
+### Inbox
+One feed of everything agents sent via `send_to_user` / `panel_send.py`, with the full text, outcome chip (*in progress / blocked / needs you*), screenshots (click for lightbox), audio (inline player), video (a link that opens in your real player), attachments and links. It opens on the first message you have not read, under a **New** line. **Needs you** holds board calls, agents that wait, files to review, and messages sent as *blocked* or *needs decision*. **Reply** under a message types your words into that agent's terminal. A board call has its options as buttons. **What changed** opens the evidence box under a message: the edit replay, a file at the cited line, a screenshot. A message with media gets a **Review** button that opens the deck on exactly its files. Agents can also point you at a place with a **Panel link**: `panel:review[:<path>]`, `panel:work:<path>:<line>`, `panel:git`, `panel:manager` ([PROTOCOL.md §4](PROTOCOL.md)). Search looks through every kept message. Messages and their media copies are kept for 30 days, at most 500 messages. A media file over 25 MB is opened where the agent left it, not copied. The text is also filed to `~/.appgeapanel/brain/reports/<project>.md`.
 
 ### Manager
 An ordinary agent session rooted at your **ops tree**, running whichever CLI you start it with. It plans, keeps `ops/` current and briefs workers; it does not edit app code. It is tracked like any worker: its sidebar row shows **!** (waiting on you), **✓** (finished out of sight) or **…** (working), it counts toward ⌘⇧A and the dock badge, it sits on the Terminals wall as **Manager**, and it comes back after a restart. The page icon in its header opens its Dashboard, which lists what it changed in `ops/`. With Claude or Codex it gets three extra tools: `list_workers` (every live terminal and its status), `read_worker` (a worker's screen as text) and `brief_worker` (types a prompt into an idle worker, **only after you approve the exact text**). Its standing prompt is `ops/AGENTS.md` — **editable on the Manager screen, with a reset-to-shipped button**. See [CONFIGURATION.md §4](CONFIGURATION.md) for the ops tree.
@@ -276,7 +278,7 @@ Open **Skills** from the sidebar Desk group, a Claude/Codex terminal header, the
 | Terminals wall (toggle) | `⌘J` | `Ctrl+J` |
 | Runs (toggle) | `⌘K` | `Ctrl+K` |
 | Work / Git / Dashboard (current project) | `⌘⇧E` / `⌘⇧G` / `⌘⇧D` | `Ctrl+Shift+E/G/D` |
-| Reports / Manager *(hard-wired, not in the rebind table)* | `⌘⇧C` / `⌘⇧M` | `Ctrl+Alt+C` / unverified (source binds `Meta+Shift+M` only) |
+| Inbox / Manager *(hard-wired, not in the rebind table)* | `⌘⇧C` / `⌘⇧M` | `Ctrl+Alt+C` / unverified (source binds `Meta+Shift+M` only) |
 | **`⌘1…⌘9` — the ladder** *(hard-wired, context-sensitive)* | On the wall: `⌘1` Runs, `⌘2` the first terminal tab, … (tabs layout: the second row of terminals takes the digits and the strip moves to `⌃⌘1…9`). On a project: Work's open-file slots. Home/Settings/Reports/Notebook own no digit. A digit past the last rung does nothing. `⌘J` walks between the two strips. | `Ctrl+1…9` (same rules; per source `Meta+Digit` is matched via `matchesShortcut`) |
 | Jump to project 1…9 | `⌃1…9` | `Alt+1…9` |
 | New terminal (＋ picker) / New shell here / New tab | `⌘N` / `⌘T` / `⌘⇧T` | `Ctrl+N` / `Ctrl+T` / `Ctrl+Shift+T` |

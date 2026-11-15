@@ -1,19 +1,22 @@
 /**
- * Live's queue: the business that reaches the owner, one card at a time, in one order.
+ * The cards of the Inbox: the business the board and the agents raise for the owner.
  *
  * Five kinds, each answering one need. Decide is a call only he can make (his board agenda).
  * Your Turn is a session he runs that waits for him. Done is what got finished since he last
  * looked. Decided is calls agents made in his place. Better is a step that keeps losing time.
- * Permission prompts never come here.
+ * Permission prompts never come here. The Inbox adds three more kinds from the screens it
+ * replaced: see inbox_cards.ts.
  *
- * The order is Smith's rule: value per minute of his time, highest first, and a waiting card
- * slowly rises so nothing starves. The card in front never changes under his hand.
+ * A card is one message in the Inbox's feed (inbox_feed.ts), beside what the agents sent. Until
+ * 2026-11-15 the cards were a queue, one at a time, ordered by value per minute. The owner found
+ * it unusable: "It should be just something like slack." So the order is time now, and `KIND`
+ * says which kinds wait for an answer.
  *
  * Pure: no DOM, no clock of its own. foryou.ts feeds it the board, the agents and what he has seen.
- * The Inbox adds four more kinds from the screens it replaced: see inbox_cards.ts.
+ * A new kind is one line in `KIND` and a builder that makes its cards.
  */
 
-export type CardKind = "decide" | "turn" | "done" | "decided" | "better" | "review" | "support" | "report" | "ended";
+export type CardKind = "decide" | "turn" | "done" | "decided" | "better" | "review" | "support" | "ended";
 
 export type Act =
   | { do: "answer"; number: number; pick: number }
@@ -22,9 +25,6 @@ export type Act =
   | { do: "url"; url: string }
   /** Look at what an agent made, in the review deck over the Inbox. */
   | { do: "review"; project: string; paths: string[] }
-  /** Read a report whole, with its evidence, in the Reports feed. `last`: no other unseen report
-   *  hides behind this card, so opening it is the read. */
-  | { do: "report"; post: string; last: boolean }
   /** Pick a finished conversation back up. */
   | { do: "resume"; session: string }
   /** The whole support log, with its setup when a form cannot be read. */
@@ -43,9 +43,6 @@ export type Card = {
   talk: Talk | null;
   /** When the card's reason began: the ask, the first unseen close, the end of a turn. */
   arrivedMs: number;
-  /** What answering it costs him, in minutes. */
-  minutes: number;
-  stake: number;
   /** Keys a Seen tap marks, so the same items never come back. */
   seenKeys: string[];
   number?: number;
@@ -100,42 +97,21 @@ export type CardAgent = {
   lastText: string | null;
 };
 
-export const KIND: Record<CardKind, { weight: number; minutes: number; label: string }> = {
-  decide: { weight: 3, minutes: 1, label: "Decide" },
-  better: { weight: 2, minutes: 1.5, label: "Better" },
-  turn: { weight: 2, minutes: 2, label: "Your Turn" },
-  decided: { weight: 1, minutes: 0.5, label: "Decided" },
-  done: { weight: 1, minutes: 1, label: "Done" },
-  review: { weight: 2, minutes: 1, label: "Review" },
-  support: { weight: 2, minutes: 2, label: "Support" },
-  report: { weight: 1, minutes: 0.5, label: "Report" },
-  ended: { weight: 1, minutes: 0.5, label: "Ended" },
+/** `needsYou`: the card waits for an answer or a look. The rest are read, and then gone. */
+export const KIND: Record<CardKind, { label: string; needsYou: boolean }> = {
+  decide: { label: "Decide", needsYou: true },
+  turn: { label: "Your Turn", needsYou: true },
+  review: { label: "Review", needsYou: true },
+  support: { label: "Support", needsYou: false },
+  better: { label: "Better", needsYou: false },
+  decided: { label: "Decided", needsYou: false },
+  done: { label: "Done", needsYou: false },
+  ended: { label: "Ended", needsYou: false },
 };
 
-/** A card older than this rises no further. An ask from last week is not 100 times more urgent. */
-const WAIT_CAP_MIN = 8 * 60;
 /** With nothing seen yet, Done looks back one day. */
 const DONE_LOOKBACK_MS = 24 * 3600_000;
 const BETTER_MAX = 3;
-
-export function priority(card: Card, now: number): number {
-  const wait = Math.min(WAIT_CAP_MIN, Math.max(0, (now - card.arrivedMs) / 60_000));
-  return (card.stake * (1 + wait / 60)) / card.minutes;
-}
-
-/**
- * Highest priority first. `front` stays first while it exists, so a new card lines up behind the
- * one he is reading. A card put off with Later goes to the back until its time is up.
- */
-export function order(cards: Card[], now: number, front: string | null, later: Record<string, number>): Card[] {
-  const put = (c: Card) => (later[c.id] ?? 0) > now;
-  const sorted = [...cards].sort(
-    (a, b) => Number(put(a)) - Number(put(b)) || priority(b, now) - priority(a, now) || a.id.localeCompare(b.id),
-  );
-  const at = front ? sorted.findIndex((c) => c.id === front && !put(c)) : -1;
-  if (at > 0) sorted.unshift(...sorted.splice(at, 1));
-  return sorted;
-}
 
 const ms = (iso: string | null | undefined, fallback: number): number => {
   const t = iso ? Date.parse(iso) : NaN;
@@ -144,20 +120,15 @@ const ms = (iso: string | null | undefined, fallback: number): number => {
 
 const clip = (text: string, n: number): string => (text.length > n ? `${text.slice(0, n - 1).trimEnd()}…` : text);
 
-/**
- * Every card the board and the agents give right now. `weight` is the room's stake (3 for an app
- * that earns, 2 in a store, 1 for the rest). `seen` maps a seen key to when he saw it.
- */
+/** Every card the board and the agents give right now. `seen` maps a seen key to when he saw it. */
 export function buildCards(
   board: BoardFeed | null,
   agents: CardAgent[],
-  weight: (room: string) => number,
   roomName: (room: string) => string,
   seen: Record<string, number>,
   now: number,
 ): Card[] {
   const cards: Card[] = [];
-  const stake = (room: string, kind: CardKind) => weight(room) * KIND[kind].weight;
   const roomOf = (i: BoardIssue) => i.apps[0] ?? "hq";
 
   for (const i of board?.you ?? []) {
@@ -169,12 +140,10 @@ export function buildCards(
       room,
       title: i.ask?.trim() || i.title,
       // The card's who line already names the issue number.
-      lines: [i.why ? clip(i.why, 220) : i.ask ? i.title : ""].filter(Boolean),
+      lines: [i.why ? clip(i.why, 600) : i.ask ? i.title : ""].filter(Boolean),
       options,
       talk: { to: "board", number: i.number },
       arrivedMs: ms(i.created_at, now),
-      minutes: KIND.decide.minutes,
-      stake: stake(room, "decide"),
       seenKeys: [],
       number: i.number,
       url: i.url,
@@ -191,12 +160,10 @@ export function buildCards(
       kind: "turn",
       room: a.room,
       title: `${a.name} waits for you`,
-      lines: a.lastText ? [`Said: ${clip(a.lastText, 220)}`] : [],
-      options: a.panel ? [{ label: "Open Terminal", act: { do: "terminal", panel: a.panel } }, { label: "Seen", act: { do: "seen" } }] : [{ label: "Seen", act: { do: "seen" } }],
+      lines: a.lastText ? [clip(a.lastText, 600)] : [],
+      options: a.panel ? [{ label: "Open Terminal", act: { do: "terminal", panel: a.panel } }, { label: "Dismiss", act: { do: "seen" } }] : [{ label: "Dismiss", act: { do: "seen" } }],
       talk: a.panel ? { to: "agent", panel: a.panel, name: a.name } : null,
       arrivedMs: a.stateMs ?? now,
-      minutes: KIND.turn.minutes,
-      stake: stake(a.room, "turn"),
       seenKeys: [key],
       agent: a.id,
     });
@@ -220,11 +187,9 @@ export function buildCards(
       title: `${list.length} done in ${roomName(room)}`,
       lines: [],
       items: newest.map((i) => `#${i.number} ${clip(i.title, 90)}`),
-      options: [{ label: "Seen", act: { do: "seen" } }, { label: "Open First", act: { do: "url", url: list[0].url } }],
+      options: [{ label: "Open First", act: { do: "url", url: list[0].url } }],
       talk: null,
       arrivedMs: first,
-      minutes: KIND.done.minutes,
-      stake: stake(room, "done"),
       seenKeys: [`done:${room}`],
     });
   }
@@ -242,14 +207,12 @@ export function buildCards(
       room,
       title: `${list.length === 1 ? "1 call" : `${list.length} calls`} made for you in ${roomName(room)}`,
       lines: [],
-      items: list.map((i) => `#${i.number} ${clip(i.decided!.trim(), 160)}`),
-      options: [{ label: list.length === 1 ? "Keep It" : "Keep All", act: { do: "seen" } }],
+      items: list.map((i) => `#${i.number} ${clip(i.decided!.trim(), 400)}`),
+      options: [{ label: "Open First", act: { do: "url", url: list[0].url } }],
       talk: null,
       // The board does not say when the call was made, and the issue's age overstates it: an
       // old issue's note would jump ahead of a decision agents wait on. So it never ages.
       arrivedMs: now,
-      minutes: KIND.decided.minutes,
-      stake: stake(room, "decided"),
       seenKeys: list.map((i) => `decided:${i.number}`),
     });
   }
@@ -265,31 +228,14 @@ export function buildCards(
       kind: "better",
       room,
       title: i.title,
-      lines: [i.problem ? clip(i.problem, 200) : "", i.direction ? `Proposal: ${clip(i.direction, 200)}` : ""].filter(Boolean),
-      options: [{ label: "Seen", act: { do: "seen" } }, { label: "Open Issue", act: { do: "url", url: i.url } }],
+      lines: [i.problem ? clip(i.problem, 400) : "", i.direction ? `Proposal: ${clip(i.direction, 400)}` : ""].filter(Boolean),
+      options: [{ label: "Open Issue", act: { do: "url", url: i.url } }],
       talk: null,
       arrivedMs: ms(i.created_at, now),
-      minutes: KIND.better.minutes,
-      stake: stake(room, "better"),
       seenKeys: [`better:${i.number}`],
       number: i.number,
       url: i.url,
     });
   }
   return cards;
-}
-
-/** Why a card is in front, in its own numbers: "Tavla ×3 · Decide ×3 · waited 40 min · about 1 min of you → 15.00". */
-export function scoreLine(card: Card, now: number, roomName: string): string {
-  const k = KIND[card.kind];
-  const wait = Math.max(0, (now - card.arrivedMs) / 60_000);
-  const waited = wait < 1 ? "under 1 min" : `${Math.round(wait)} min`;
-  return `${roomName} ×${card.stake / k.weight} · ${k.label} ×${k.weight} · waited ${waited} · about ${card.minutes} min of you → ${priority(card, now).toFixed(2)}`;
-}
-
-/** "6 cards · about 7 min". */
-export function queueLine(cards: Card[]): string {
-  if (!cards.length) return "Nothing needs you. You can leave.";
-  const minutes = Math.max(1, Math.round(cards.reduce((n, c) => n + c.minutes, 0)));
-  return `${cards.length} ${cards.length === 1 ? "card" : "cards"} · about ${minutes} min`;
 }

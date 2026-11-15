@@ -119,7 +119,7 @@ How the UI reacts to each event kind (`ui/src/main.ts` → `onEvent`):
 | `agent_status` | `thinking` begins a turn (clears the unseen-done flag); `waiting`/`asking` → "needs you" + OS attention; `idle/done/complete/error/failed` end the phase |
 | `activity` | label matching `test|check` / `build|compile` → workshop checkpoint |
 | `file_changed` | workshop station for the file; Work badge; refresh git; mark editor buffer dirty-from-agent (conflict flow) |
-| `visual_requested` | by `view`: `message` → Reports feed + stage; `showcase` → Reports + stage; `worklist` → Work list; `git-*` → workshop checkpoint + Git tab animation if visible; `sim` → Run screen; anything else → `renderView` onto the Dashboard stage |
+| `visual_requested` | by `view`: `message` → Inbox feed + stage; `showcase` → Inbox + stage; `worklist` → Work list; `git-*` → workshop checkpoint + Git tab animation if visible; `sim` → Run screen; anything else → `renderView` onto the Dashboard stage |
 | `ask_requested` | ask tray opens; status `asking`; OS notification (urgent) |
 | `ask_resolved` | tray card closes; status back to working if no other ask |
 | `turn_finished` | idle; if you're not looking at that project → "finished" attention + green dot until opened |

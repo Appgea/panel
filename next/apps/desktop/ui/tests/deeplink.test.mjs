@@ -5,7 +5,7 @@ import { transformWithOxc } from "vite";
 
 const source = await readFile(new URL("../src/deeplink.ts", import.meta.url), "utf8");
 const { code } = await transformWithOxc(source, "deeplink.ts");
-const { parsePlace, PLACE_IN_TEXT, parseAppLink, sessionLink, fileTarget, PATH_IN_TEXT, APP_LINK_IN_TEXT, logicalLine } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
+const { parsePlace, PLACE_IN_TEXT, parseAppLink, sessionLink, fileTarget, PATH_IN_TEXT, APP_LINK_IN_TEXT, logicalLine, linkLine, linkCell, WEB_IN_TEXT } = await import(`data:text/javascript;base64,${Buffer.from(code).toString("base64")}`);
 
 test("the four places parse, with or without the panel: prefix", () => {
   assert.deepEqual(parsePlace("panel:review"), { to: "review" });
@@ -81,6 +81,31 @@ test("a command an agent printed comes out ready for a shell", async () => {
   assert.equal(commandFrom("!important"), "!important");
   assert.equal(commandFrom("   \n "), "");
   assert.equal(commandFrom("a\nb\nc\nd"), "");
+});
+
+test("a link Claude broke across rows itself is one link", () => {
+  // Claude Code 2.1.325 at 80 columns, as captured: no row is marked wrapped.
+  const screen = [
+    "⏺ See https://github.com/Appgea/ops/issues/1234567890/abcdefghijklmnopqrstuvwxyz",
+    "  /abcdefghijklmnopqrstuvwxyz/0123456789/end?x=1 and the file",
+    "  /Users/appgea/Desktop/projects/appgea-apps/panel/next/apps/desktop/ui/src/feat",
+    "  ures/terminal.ts:763 now.",
+    "  Short https://example.com/docs/page and words after it that go past the edge.",
+    "  - a new item",
+  ];
+  const rows = { length: screen.length, getLine: (y) => ({ isWrapped: false, translateToString: () => screen[y] }) };
+  const url = "https://github.com/Appgea/ops/issues/1234567890/abcdefghijklmnopqrstuvwxyz/abcdefghijklmnopqrstuvwxyz/0123456789/end?x=1";
+  const path = "/Users/appgea/Desktop/projects/appgea-apps/panel/next/apps/desktop/ui/src/features/terminal.ts:763";
+  for (const y of [1, 2]) {
+    const line = linkLine(rows, y, 80);
+    assert.deepEqual(line.text.match(WEB_IN_TEXT), [url], `row ${y}`);
+    const at = line.text.indexOf(url);
+    assert.deepEqual(linkCell(line, at), { x: 7, y: 1 });
+    assert.deepEqual(linkCell(line, at + url.length - 1), { x: 48, y: 2 });
+  }
+  for (const y of [3, 4]) assert.deepEqual(linkLine(rows, y, 80).text.match(PATH_IN_TEXT), [path], `row ${y}`);
+  assert.deepEqual(linkLine(rows, 5, 80).text.match(WEB_IN_TEXT), ["https://example.com/docs/page"]);
+  assert.equal(linkLine(rows, 6, 80).text, "  - a new item");
 });
 
 test("a scrollback that is one wrapped line still reads in bounded time", () => {

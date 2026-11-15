@@ -54,7 +54,8 @@ import { mountLive, type LiveHandle, type LiveWorld } from "./features/live";
 import { mountForYou, type ForYouHandle } from "./features/foryou";
 import type { BoardFeed } from "./features/live_cards";
 import { agentName, fetchHistory, mountHistory, seenAt, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
-import type { ReportItem, SupportItem } from "./features/inbox_cards";
+import type { SupportItem } from "./features/inbox_cards";
+import type { InboxPost } from "./features/inbox_feed";
 import { moduleGet, modulePost } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
@@ -251,7 +252,7 @@ const attentionOf = (here: ProjectState): Attention =>
 const lookingAt = (id: string): boolean =>
   document.hasFocus() &&
   (id === CPO_ID
-    ? chatActive && chat.currentSection() === "manager"
+    ? chatActive
     : active === id && !offProject());
 
 type Alert = { title: string; body: string; urgent: boolean };
@@ -384,10 +385,12 @@ let chatActive = false;
 let chatFromWorkspace = false;
 let chatFromHome = false;
 let chatFromNotebook = false;
-/** A report opened from an Inbox card hands the glass back to the Inbox. */
+/** The Manager opened over the Inbox hands the glass back to the Inbox. */
 let chatFromForYou = false;
-/** Every agent report, for the Inbox's Report cards. The chat archive refills it. */
-let reportFeed: ReportItem[] = [];
+/** Every message agents sent, oldest first. The Inbox shows them. The backend keeps them for a
+ *  month (inbox.rs), so they are still here after a restart. */
+let inboxPosts: InboxPost[] = [];
+const POSTS_MAX = 500;
 /** Sessions History last read, so an Inbox card can resume one by id. */
 let endedSessions = new Map<string, HistorySession>();
 /** Which pinned tab of the workspace is up. Mirrors of terminals.pinnedAt(), kept here because
@@ -560,7 +563,7 @@ const ctx: RenderCtx = {
  */
 function openPlace(project: string | null, place: Place, alongside: string[] = []): void {
   if (place.to === "manager") {
-    chat.showCpo();
+    chat.show();
     return;
   }
   // The Manager and the main folder are not projects: no Review queue, Work tab or Git to open.
@@ -1701,7 +1704,7 @@ function dropLive(): void {
   el("liveScreen").hidden = true;
 }
 
-/** For you: the calls that wait for the owner, one card at a time. Live shows what runs. */
+/** Inbox: what agents sent and what waits for the owner, as one feed. Live shows what runs. */
 function showForYou(): void {
   dropSupport();
   dropReview();
@@ -1838,7 +1841,7 @@ function followAppLink(url: string): void {
       showLive();
       return;
     case "manager":
-      chat.showCpo();
+      chat.show();
       return;
     case "history":
       showHistory({ query: link.query, session: link.session });
@@ -1888,7 +1891,71 @@ function supportItem(m: SupportMessage): SupportItem {
   };
 }
 
-/** One count for everything that waits for you: the Inbox's cards. It replaced five badges. */
+/** A message from an agent: show it in the Inbox and keep it past a restart. */
+function addPost(post: InboxPost): void {
+  inboxPosts.push(post);
+  if (inboxPosts.length > POSTS_MAX) inboxPosts.shift();
+  void invoke("inbox_keep", { message: post }).catch((error: unknown) => console.warn("[panel] inbox keep", error));
+  postsChanged();
+}
+
+/** The messages changed: the Inbox, Home's activity list and the project rows all read them. */
+function postsChanged(): void {
+  const title = (post: InboxPost) => str(post.payload.title, str(post.payload.outcome, "Report"));
+  for (const post of inboxPosts) {
+    const known = lastReport.get(post.project);
+    if (!known || known.at < post.at) lastReport.set(post.project, { id: post.id, title: title(post), at: post.at });
+  }
+  forYou?.refresh();
+  paintProjectsSoon();
+  home?.activity(
+    inboxPosts.map((post) => ({
+      id: post.id,
+      project: post.project,
+      projectName: post.projectName,
+      author: post.author,
+      agentKind: post.agentKind,
+      title: title(post),
+      at: post.at,
+    })),
+  );
+}
+
+/** What the backend kept from earlier runs. It is JSON from disk, so each row is checked. */
+async function loadKeptPosts(): Promise<void> {
+  const kept = await invoke<Partial<InboxPost>[]>("inbox_messages");
+  const good = kept.flatMap((row): InboxPost[] =>
+    row && typeof row.id === "string" && typeof row.project === "string" && typeof row.at === "number" && row.payload && typeof row.payload === "object"
+      ? [
+          {
+            id: row.id,
+            project: row.project,
+            projectName: str(row.projectName, row.project),
+            author: str(row.author, "agent"),
+            agentKind: str(row.agentKind, "agent"),
+            session: typeof row.session === "string" ? row.session : null,
+            flowFiles: Array.isArray(row.flowFiles) ? row.flowFiles : [],
+            flowSteps: Array.isArray(row.flowSteps) ? row.flowSteps : [],
+            at: row.at,
+            view: row.view === "showcase" ? "showcase" : "message",
+            payload: row.payload,
+          },
+        ]
+      : [],
+  );
+  // A message that arrived while this read ran is already in the list, and newer.
+  const have = new Set(inboxPosts.map((post) => post.id));
+  inboxPosts = [...good.filter((post) => !have.has(post.id)), ...inboxPosts].sort((a, b) => a.at - b.at).slice(-POSTS_MAX);
+  postsChanged();
+}
+
+/** From Home or a project row: open the Inbox on one message. */
+function revealPost(postId: string): void {
+  showForYou();
+  forYou.reveal(postId);
+}
+
+/** One count for everything unread or waiting in the Inbox. It replaced five badges. */
 function paintInboxBadge(count: number): void {
   const badge = el("forYouBadge");
   badge.textContent = count > 99 ? "99+" : String(count);
@@ -2258,7 +2325,7 @@ function jumpToSession(projectId: string, sessionId: string): void {
   if (here) here.activeSession = sessionId;
   // The manager's home is its pane in Chat, not a project page around the ops tree.
   if (projectId === CPO_ID) {
-    chat.showCpo();
+    chat.show();
     return;
   }
   // The main folder has no project page: its terminals live on the wall.
@@ -2284,8 +2351,8 @@ function paintNav(): void {
   el("runButton").classList.toggle("is-on", runsUp);
   el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
   // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
-  // and only the row you are actually on carries the accent. Reports, Support, History and
-  // Review have no rows: a card opens them to read one thing, and the Inbox row stays lit.
+  // and only the row you are actually on carries the accent. Manager, Support, History and
+  // Review have no rows: the Inbox opens them for one thing, and the Inbox row stays lit.
   const readingFromInbox = chatActive || supportActive || reviewActive || historyActive;
   el("chatNav").classList.toggle("is-active", readingFromInbox || liveActive || forYouActive);
   el("forYouButton").classList.toggle("is-on", forYouActive || readingFromInbox);
@@ -2302,7 +2369,7 @@ function paintNav(): void {
 /** Looking at the manager's pane is looking at the manager: its finished turn has been seen.
  *  The Manager lost its row on 2026-11-05 ("its no more needed"); ⌘⇧M still opens it. */
 function paintChatNav(): void {
-  if (chat.currentSection() === "manager") markSeen(CPO_ID);
+  if (chat.isVisible()) markSeen(CPO_ID);
 }
 
 /** Terminal shortcuts only act on a visible project terminal. */
@@ -2424,7 +2491,7 @@ let quietOpen = localStorage.getItem("panel-rail-quiet") === "1";
 /** Folded platform rows: guest id → host id, and host id → every member, host first. */
 const hostOf = new Map<string, string>();
 let membersOf = new Map<string, string[]>();
-/** Each project's newest agent report, from the chat archive. */
+/** Each project's newest agent message. */
 const lastReport = new Map<string, { id: string; title: string; at: number }>();
 /** Unseen review batches per project. */
 let reviewCounts = new Map<string, number>();
@@ -2961,7 +3028,7 @@ function cardModel(here: ProjectState): CardModel {
     notes: standing?.notes ?? "",
     move: move.short || move.door ? { title: move.title, detail: move.detail } : null,
     report: report
-      ? { title: report.title, age: age(report.at), open: () => chat.reveal(report.id) }
+      ? { title: report.title, age: age(report.at), open: () => revealPost(report.id) }
       : null,
     git: git?.is_repo ? [git.branch, chip?.title || "clean"].filter(Boolean).join(" · ") : "",
     activity: activity ? { spark: sparkSvg(activity), caption: `${commits} commits in 14 days · ${last}` } : null,
@@ -4026,7 +4093,7 @@ function onEvent(event: ProjectEvent): void {
                 typeof (step as Payload).ref === "string",
             )
           : [];
-        chat.add({
+        addPost({
           id: `${Date.now()}-${++chatSequence}`,
           project: id,
           projectName: here?.project.name ?? id,
@@ -4042,18 +4109,18 @@ function onEvent(event: ProjectEvent): void {
           at: Date.now(),
           payload: event.payload,
         });
-        // Keep the project-local echo as useful context; the rail is where you answer it, while
-        // Dashboard answers "what did this project's agent just send?"
+        // Keep the project-local echo as useful context; the Inbox is where you read and answer
+        // it, while Dashboard answers "what did this project's agent just send?"
         placeOnStage(id, renderView(event.view, event.payload, projectCtx(id)));
         break;
       }
       // A showcase is a notification too. Keep the terminals completely unobstructed and put
-      // the real projector in chat, where its previews remain available after arrival.
+      // the real projector in the Inbox, where its previews remain available after arrival.
       if (event.view === "showcase") {
         const here = state(id);
         const source = here?.sessions.find((session) => session.id === event.session_id);
         placeOnStage(id, renderView(event.view, event.payload, projectCtx(id)));
-        chat.add({
+        addPost({
           id: `${Date.now()}-${++chatSequence}`,
           project: id,
           projectName: here?.project.name ?? id,
@@ -4331,7 +4398,23 @@ async function boot(): Promise<void> {
     sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
     // The Inbox mounts before Review, and reads it only once the agents answer.
     review: () => review?.fresh() ?? [],
-    reports: () => reportFeed,
+    posts: () => inboxPosts,
+    // The same message view as on the Stage, but its refs open in the post's own evidence box.
+    render: (post, openRef) =>
+      renderView(post.view ?? "message", post.payload, { ...projectCtx(post.project), openRef }),
+    renderFlow: (post, openRef) =>
+      post.flowSteps.length
+        ? renderView(
+            "trace",
+            { title: String(post.payload.title ?? "Agent flow"), steps: post.flowSteps },
+            { ...projectCtx(post.project), openRef },
+          )
+        : null,
+    changes: (project, path) => invoke<ChangeStep[]>("file_changes", { project, path }),
+    readFile: (project, path) => invoke<string>("read_file", { project, path }),
+    openRef: (project, ref) => projectCtx(project).openRef(ref),
+    openSession: (project, session) => jumpToSession(project, session),
+    isLiveSession: (session) => !exited.has(session) && sessionById(session) !== null,
     support(fresh) {
       if (!moduleInstalled("support")) return Promise.resolve(null);
       // Pulling walks every app's Google Form, so it runs on Refresh or every half hour, not
@@ -4375,7 +4458,6 @@ async function boot(): Promise<void> {
     projectName: (id) => state(id)?.project.name ?? null,
     pictureSrc: (project, path) => projectAssetUrl(project, path),
     openReview: (project, paths) => review.openFiles(project, paths),
-    openReport: (post) => chat.reveal(post),
     async resume(id) {
       const session = endedSessions.get(id);
       if (!session) throw new Error("History no longer lists that session");
@@ -4387,7 +4469,11 @@ async function boot(): Promise<void> {
         void modulePost("/m/support/read", { ids: card.refs }).catch((error: unknown) => console.warn("[panel] support read", error));
       }
     },
-    count: paintInboxBadge,
+    // One number in one place: the Inbox row. Home totals the same counts per project.
+    count: (total, byProject) => {
+      paintInboxBadge(total);
+      home?.unread(byProject);
+    },
   });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
@@ -4429,9 +4515,8 @@ async function boot(): Promise<void> {
     isExited: (sessionId) => exited.has(sessionId),
     projectGit: (id) =>
       pulse.git(id).then((git) => git ?? Promise.reject(new Error("no git snapshot"))),
-    // Home lists what was said; Chat is where it is read and answered. Clicking a line opens
-    // Chat on that post — Esc brings Home straight back.
-    openPost: (postId) => chat.reveal(postId),
+    // Home lists what was said; the Inbox is where it is read and answered.
+    openPost: (postId) => revealPost(postId),
     openHistory: (sessionId) => showHistory(sessionId ? { session: sessionId } : undefined),
     installed: moduleInstalled,
   });
@@ -4448,73 +4533,12 @@ async function boot(): Promise<void> {
   });
 
   chat = mountChat(el("chatRail"), {
-    // Same message view as ever, but its refs resolve in the post's own evidence box. Only the
-    // explicit ↗ inside that box still travels — see inbox_peek.ts (the box kept its name).
-    render: (post, openRef) =>
-      renderView(post.view ?? "message", post.payload, { ...projectCtx(post.project), openRef }),
-    // A report is something you READ. The old project-page link turned every post into a
-    // one-way door out of the feed and into a work surface nobody asked for. The Runs screen
-    // is the one destination a handoff earns: go look at the thing running.
-    openRuns: (id) => {
-      showTerminals(TAB_RUNS);
-      runner.highlight(id);
-    },
-    openSession: (project, session) => jumpToSession(project, session),
-    isLiveSession: (session) => !exited.has(session) && sessionById(session) !== null,
-    changes: (project, path) => invoke<ChangeStep[]>("file_changes", { project, path }),
-    readFile: (project, path) => invoke<string>("read_file", { project, path }),
-    renderFlow: (post, openRef) =>
-      post.flowSteps.length
-        ? renderView(
-            "trace",
-            { title: String(post.payload.title ?? "Agent flow"), steps: post.flowSteps },
-            { ...projectCtx(post.project), openRef },
-          )
-        : null,
-    openRef: (project, ref) => projectCtx(project).openRef(ref),
-    // Chat decides whether it is up; the shell decides what that costs. Every path lands here —
-    // the sidebar row, ⌘⇧C, Esc, ⌘W, and Home clicking a report.
+    // The Manager decides whether it is up; the shell decides what that costs. Every path lands
+    // here: ⌘⇧M, Esc, ⌘W and the Project desk handing it a question.
     visibility: (shown) => {
       if (shown) showChat();
       else exitChat();
       paintChatNav();
-    },
-    // Reports reach you as Inbox cards, so the Inbox row carries their count.
-    unread: () => undefined,
-    // Unread is one number in one place. It was spread across every project row and Home card,
-    // and a badge on ten surfaces is ten things to clear for one thing to read. The Inbox row
-    // carries the count; Home still totals it above the activity list, because that list IS the
-    // inbox in miniature.
-    unreadByProject: (counts) => {
-      home.unread(counts);
-    },
-    archive: (posts) => {
-      for (const post of posts) {
-        const known = lastReport.get(post.project);
-        if (known && known.at >= post.at) continue;
-        lastReport.set(post.project, {
-          id: post.id,
-          title: str(post.payload.title, str(post.payload.outcome, "Report")),
-          at: post.at,
-        });
-      }
-      // The Manager's own posts are not news from the work.
-      reportFeed = posts
-        .filter((post) => post.project !== CPO_ID)
-        .map((post) => ({ id: post.id, project: post.project, title: str(post.payload.title, str(post.payload.outcome, "Report")), at: post.at }));
-      forYou.refresh();
-      paintProjectsSoon();
-      home.activity(
-        posts.map((post) => ({
-          id: post.id,
-          project: post.project,
-          projectName: post.projectName,
-          author: post.author,
-          agentKind: post.agentKind,
-          title: str(post.payload.title, str(post.payload.outcome, "Report")),
-          at: post.at,
-        })),
-      );
     },
   },
   {
@@ -4765,13 +4789,13 @@ async function boot(): Promise<void> {
       if (isRecording() || isLightboxOpen()) return;
       if (event.repeat) return;
       if (matchesShortcut(event, "Meta+Shift+KeyM")) {
-        chat.toggle("manager");
+        chat.toggle();
         event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
       if (!matchesShortcut(event, "Meta+Shift+KeyC", "Ctrl+Alt+KeyC")) return;
-      chat.toggle("reports");
+      showForYou();
       event.preventDefault();
       event.stopImmediatePropagation();
     },
@@ -5020,6 +5044,8 @@ async function boot(): Promise<void> {
     showHome();
   }
 
+  // Not awaited: a slow disk must not hold the window back. Home and the Inbox fill when it lands.
+  void loadKeptPosts().catch((error: unknown) => console.warn("[panel] inbox load", error));
   await listen<ProjectEvent>("panel-agent-event", ({ payload }) => onEvent(payload));
   await listen("panel-portfolio-changed", () => void refreshPortfolio());
   // The plan is written by agents in their own terminals. The screen follows the file rather

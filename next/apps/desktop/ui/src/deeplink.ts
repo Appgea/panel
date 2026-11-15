@@ -160,17 +160,68 @@ const LINK_ROWS = 64;
  *  scrollback with wrapped rows. Hovering it then walked the ring forever, and Panel froze on
  *  2026-11-09 with seven agents open. */
 export function logicalLine(rows: TermRows, y: number): { text: string; first: number } {
-  const at = y - 1;
-  let first = at;
-  while (first > 0 && at - first < LINK_ROWS && rows.getLine(first)?.isWrapped) first -= 1;
-  let last = at;
-  while (last + 1 < rows.length && last - at < LINK_ROWS && rows.getLine(last + 1)?.isWrapped) last += 1;
-  let text = "";
-  for (let row = first; row <= last; row += 1) {
-    text += rows.getLine(row)?.translateToString(row === last) ?? "";
-  }
-  return { text, first };
+  const line = linkLine(rows, y, Infinity);
+  return { text: line.text, first: line.pieces[0].row };
 }
+
+/** Text a link may run through, and where each row's part of it sits: 0-based row, the column
+ *  its text starts in, and its offset in `text`. */
+export type LinkLine = { text: string; pieces: { row: number; col: number; at: number }[] };
+
+const LINK_CHAR = /[\w/.~%?&=#:+@-]/;
+
+/** Claude and Codex break a long line themselves: they stop at the right edge and move the
+ *  cursor to an indented next row, so the terminal never marks that row as wrapped. Measured on
+ *  Claude Code 2.1.325: a reply fills the last column, the echoed prompt stops one short. A
+ *  bullet or a number starts a new item, not the rest of a link. */
+function programBroke(above: string, below: string, cols: number): boolean {
+  if (above.length < cols - 2) return false;
+  const rest = below.trimStart();
+  if (rest === below || /^(?:[-*+>]|\d+[.)])\s/.test(rest)) return false;
+  return LINK_CHAR.test(above[above.length - 1]) && LINK_CHAR.test(rest[0]);
+}
+
+/** The line through 1-based row `y` as a link sees it: rows the terminal wrapped, and rows the
+ *  program broke at the right edge, joined without the indent. Bounded like logicalLine. */
+export function linkLine(rows: TermRows, y: number, cols: number): LinkLine {
+  const at = y - 1;
+  const continues = (row: number): boolean => {
+    const line = rows.getLine(row);
+    if (!line) return false;
+    return line.isWrapped
+      || programBroke(rows.getLine(row - 1)?.translateToString(true) ?? "", line.translateToString(true), cols);
+  };
+  let first = at;
+  while (first > 0 && at - first < LINK_ROWS && continues(first)) first -= 1;
+  let last = at;
+  while (last + 1 < rows.length && last - at < LINK_ROWS && continues(last + 1)) last += 1;
+  const line: LinkLine = { text: "", pieces: [] };
+  for (let row = first; row <= last; row += 1) {
+    const wrapsOn = row < last && rows.getLine(row + 1)?.isWrapped === true;
+    let part = rows.getLine(row)?.translateToString(!wrapsOn) ?? "";
+    let col = 0;
+    if (row > first && !rows.getLine(row)?.isWrapped) {
+      col = part.length - part.trimStart().length;
+      part = part.slice(col);
+    }
+    line.pieces.push({ row, col, at: line.text.length });
+    line.text += part;
+  }
+  return line;
+}
+
+/** The 1-based cell of the character at `index` in a link line's text. */
+export function linkCell(line: LinkLine, index: number): { x: number; y: number } {
+  let piece = line.pieces[0];
+  for (const next of line.pieces) {
+    if (next.at > index) break;
+    piece = next;
+  }
+  return { x: piece.col + index - piece.at + 1, y: piece.row + 1 };
+}
+
+/** Web links in terminal text. xterm's own addon reads only rows the terminal wrapped. */
+export const WEB_IN_TEXT = /\bhttps?:\/\/[^\s"'!*(){}|\\^<>`]*[^\s"':,.!?{}|\\^~[\]`()<>]/gi;
 
 /** Full paths in terminal text. Only roots a real path starts from, so `/compact` and `a/b`
  *  stay text. Spaces end a path, and so does trailing punctuation. */

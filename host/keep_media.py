@@ -3,8 +3,12 @@
 Panel reads a report's images, audio, video and files by path, later, whenever the report is opened. An agent
 cleaning up its shots after sending left reports with dead images (2026-10-29). So each file is copied into
 ~/.appgeapanel/reports/<day>/<id>/ first. A copy, not a hard link: a shot tool rewrites the same path in place,
-which would change an old report's picture. Folders stay as they are. Nothing is pruned by age: a report opened
-later must still find its pictures. A file that cannot be copied keeps its own path: a report is never lost to its copy.
+which would change an old report's picture. Folders stay as they are. A file that cannot be copied keeps its
+own path: a report is never lost to its copy.
+
+The copies must not bloat the disk. They were 3.2 GB after 17 days, nearly all of it video (one clip 772 MB).
+Owner, 2026-11-15: "memory must not bloat". So a file over MAX_COPY is not copied: it keeps its own path, and the
+Inbox opens it where it lies. Panel drops each day folder a month on, with the messages (src-tauri inbox.rs).
 """
 
 import datetime
@@ -13,6 +17,7 @@ import shutil
 import uuid
 
 ROOT = os.path.expanduser("~/.appgeapanel/reports")
+MAX_COPY = 25 * 1024 * 1024
 
 
 def _keep_one(path, into, seen):
@@ -26,6 +31,8 @@ def _keep_one(path, into, seen):
 
 def _copy(path, into):
     try:
+        if os.path.getsize(path) > MAX_COPY:
+            return path
         os.makedirs(into, exist_ok=True)
     except OSError:
         return path

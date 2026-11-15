@@ -1,156 +1,514 @@
-/* Inbox: the front card large, the cards behind it in a column. The card's own styles are in
-   live_queue.css and read Live's --l-* tokens. Here they map onto Panel's tokens, so this screen
-   follows the light and dark theme like every other section. Only Live is always dark.
-   The header and the body share one centred column, so their left edges line up. */
+/* Inbox: a channel list on the left, one feed on the right, like Slack. foryou.ts says why.
+   The message row (`.msg`), the day rule and the evidence box came from the old Reports screen.
+   Everything follows Panel's tokens, so the screen follows the light and dark theme. */
 
 .foryou[hidden] { display: none; }
 
 .foryou {
-  --l-bg: var(--bg);
-  --l-deck: var(--bg-sunken);
-  --l-wall: var(--bg-sunken);
-  --l-raise: var(--bg-raised);
-  --l-line: var(--line-soft);
-  --l-line-2: var(--line);
-  --l-ink: var(--ink);
-  --l-ink-2: var(--ink-dim);
-  --l-ink-3: var(--ink-faint);
-  --l-work: var(--accent);
-  --l-think: var(--accent);
-  --l-turn: var(--warn);
-  --l-idle: var(--ink-faint);
-  --l-stuck: var(--risk);
-  --l-done: var(--ok);
-  /* A real family: `inherit` is not allowed inside the `font` shorthand. */
-  --l-sans: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --l-mono: var(--font-mono);
   position: relative;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: 216px minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   background: var(--bg);
   color: var(--ink);
 }
 
-.fy-wrap { width: 100%; max-width: 1040px; margin: 0 auto; box-sizing: border-box; padding: 0 28px; }
+/* ---------------------------------------------------------------- channels */
 
-.fy-top { padding: 22px 0 14px; border-bottom: 1px solid var(--line-soft); }
-.fy-bar { display: flex; align-items: center; gap: 16px; }
-.fy-heading { flex: 1; min-width: 0; }
-.fy-heading h1 { margin: 0; color: var(--ink); font-size: var(--text-2xl); font-weight: 700; letter-spacing: -0.015em; }
-.fy-heading p { margin: 2px 0 0; color: var(--ink-dim); font-size: var(--text-md); }
-.fy-problem { margin: 10px auto 0; color: var(--risk); font-size: var(--text-sm); }
-.fy-problem[hidden] { display: none; }
-.fy-link { padding: 0; border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; }
-.fy-link:hover { text-decoration: underline; }
-.fy-btn {
-  padding: 6px 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--bg-raised);
-  color: var(--ink);
-  font-size: var(--text-md);
-  font-weight: 550;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.fy-btn:hover { background: var(--hover); }
-.fy-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-
-.fy-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
-.fy-chips[hidden] { display: none; }
-.fy-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border: 1px solid var(--line-soft);
-  border-radius: 999px;
-  background: none;
-  color: var(--ink-dim);
-  font-size: var(--text-md);
-  font-weight: 550;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.fy-chip:hover { color: var(--ink); background: var(--hover); }
-.fy-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.fy-chip.is-on { border-color: var(--ink); background: var(--ink); color: var(--bg); }
-.fy-chip.is-on .fy-n { color: inherit; opacity: 0.7; }
-.fy-n { color: var(--ink-faint); font: 500 11px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
-
-.fy-body { overflow-y: auto; padding: 24px 0 40px; }
-.fy-cols {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
-  align-items: start;
-  gap: 28px;
-}
-@media (max-width: 900px) { .fy-cols { grid-template-columns: minmax(0, 1fr); } }
-.fy-main { position: sticky; top: 0; min-width: 0; }
-@media (max-width: 900px) { .fy-main { position: static; } }
-
-.fy-next { min-width: 0; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--bg-sunken); overflow: hidden; }
-.fy-next[hidden] { display: none; }
-.fy-head {
+.ib-side {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  padding: 12px 14px 10px;
-  border-bottom: 1px solid var(--line-soft);
-  color: var(--ink-dim);
+  flex-direction: column;
+  min-height: 0;
+  padding: 18px 10px;
+  overflow-y: auto;
+  background: var(--bg-sunken);
+  border-right: 1px solid var(--line-soft);
+}
+.ib-side h1 { margin: 0 8px 12px; font-size: var(--text-xl); font-weight: 700; letter-spacing: -0.01em; }
+.ib-chans { display: flex; flex-direction: column; gap: 1px; }
+.ib-chans-label {
+  margin: 16px 8px 4px;
+  color: var(--ink-faint);
   font-size: var(--text-xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: .06em;
   text-transform: uppercase;
 }
-.fy-list { display: grid; min-width: 0; }
-.fy-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "title age" "meta meta";
-  align-items: baseline;
-  column-gap: 10px;
-  row-gap: 3px;
-  width: 100%;
-  padding: 10px 14px;
-  border: 0;
-  border-bottom: 1px solid var(--line-soft);
+.ib-chan {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 8px;
+  color: var(--ink-dim);
   background: none;
-  color: var(--ink);
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
   font-size: var(--text-md);
   text-align: left;
   cursor: pointer;
 }
-.fy-row:last-child { border-bottom: 0; }
-.fy-row:hover { background: var(--hover); }
-.fy-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.fy-row.is-later { opacity: 0.55; }
-.fy-title { grid-area: title; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; font-weight: 500; line-height: 1.4; }
-.fy-age { grid-area: age; color: var(--ink-faint); font-size: var(--text-xs); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.fy-meta { grid-area: meta; display: flex; gap: 6px; min-width: 0; overflow: hidden; white-space: nowrap; font-size: var(--text-xs); }
-.fy-kind { flex: none; display: inline-flex; align-items: center; gap: 5px; color: var(--c); font-weight: 650; }
-.fy-kind::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.fy-room { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); }
-.fy-room::before { content: "·"; margin-right: 6px; }
-.fy-more { padding: 10px 16px; color: var(--ink-faint); font-size: var(--text-xs); }
+.ib-chan:hover { color: var(--ink); background: var(--hover); transform: none; }
+.ib-chan:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ib-chan.is-on { color: var(--ink); background: color-mix(in oklab, var(--accent) 16%, transparent); font-weight: 650; }
+.ib-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A channel with something new reads bold, as in Slack. */
+.ib-chan:has(.ib-n) .ib-chan-name { color: var(--ink); font-weight: 650; }
+.ib-n {
+  flex: none;
+  min-width: 18px;
+  padding: 1px 6px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 800;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.ib-chan.is-needs .ib-n { color: var(--bg); background: var(--warn); }
 
-.fy-toast {
+/* -------------------------------------------------------------------- head */
+
+.ib-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ib-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 20px 12px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ib-heading { flex: 1; min-width: 0; }
+.ib-heading h2 { margin: 0; font-size: var(--text-lg); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-heading p { margin: 1px 0 0; color: var(--ink-dim); font-size: var(--text-sm); }
+.ib-search {
+  width: 200px;
+  height: 30px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.ib-search::placeholder { color: var(--ink-faint); }
+.ib-search:focus { outline: none; border-color: color-mix(in oklab, var(--accent) 55%, var(--line)); }
+.ib-btn {
+  height: 30px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ib-btn:hover { background: var(--hover); transform: none; }
+.ib-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ib-problem { flex: none; margin: 0; padding: 8px 20px 8px 16px; color: var(--risk); font-size: var(--text-sm); border-bottom: 1px solid var(--line-soft); }
+.ib-problem[hidden] { display: none; }
+.ib-link { padding: 0; color: var(--accent); background: none; border: 0; font: inherit; font-weight: 600; cursor: pointer; }
+.ib-link:hover { text-decoration: underline; transform: none; }
+
+/* -------------------------------------------------------------------- feed */
+
+/* Bottom-anchored like a chat: a half-empty channel rests its last message on the floor. */
+.ib-feed {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 0 18px;
+}
+.ib-feed > :first-child { margin-top: auto; }
+.ib-feed > .inbox-empty:first-child { margin: auto; }
+/* Rows hang from the left edge, capped so a wide window buys bigger pictures, not longer lines.
+   `max-width` only: a `margin` shorthand would reset the `margin-top: auto` that anchors the feed. */
+.ib-feed .msg,
+.ib-feed .msg-day { width: 100%; max-width: 980px; }
+.ib-earlier {
+  flex: none;
+  align-self: flex-start;
+  margin: 4px 0 8px 62px;
+  padding: 4px 12px;
+  color: var(--ink-dim);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+.ib-earlier:hover { color: var(--ink); background: var(--hover); transform: none; }
+
+/* A card is a message from Panel: same row, its kind as the avatar and a pill. */
+.msg.is-card .msg-avatar {
+  color: var(--c);
+  background: color-mix(in oklab, var(--c) 12%, transparent);
+  border-color: color-mix(in oklab, var(--c) 40%, var(--line));
+}
+/* What waits for an answer carries a bar and a tint, so it is found in a long feed. */
+.msg.is-needs { --c: var(--warn); }
+.msg.is-needs,
+.msg.is-needs:hover {
+  background: color-mix(in oklab, var(--c) 7%, transparent);
+  box-shadow: inset 3px 0 0 var(--c);
+}
+.ib-kind {
+  padding: 1px 7px;
+  color: var(--c);
+  background: color-mix(in oklab, var(--c) 14%, transparent);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.ib-src { color: var(--ink-faint); font-size: var(--text-xs); }
+.ib-title { max-width: var(--measure, 68ch); color: var(--ink); font-size: var(--text-md); font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.ib-line {
+  max-width: var(--measure, 68ch);
+  margin-top: 3px;
+  color: var(--ink-dim);
+  font-size: var(--text-md);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ib-list {
+  max-width: var(--measure, 68ch);
+  margin: 5px 0 0;
+  padding-left: 18px;
+  color: var(--ink-dim);
+  font-size: var(--text-md);
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ib-list .more { list-style: none; color: var(--ink-faint); }
+.ib-shots { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.ib-shot {
+  height: 150px;
+  max-width: 100%;
+  object-fit: cover;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+.ib-shot.is-big { height: auto; max-height: 70vh; cursor: zoom-out; }
+
+/* The buttons under a message: its answers, its doors, its reply. */
+.ib-acts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ib-act {
+  min-height: 28px;
+  padding: 0 12px;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+.ib-act:hover { background: var(--hover); transform: none; }
+.ib-act:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ib-act.is-primary { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+.ib-act.is-on { color: var(--accent); border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
+.ib-act:disabled { opacity: .5; cursor: default; }
+.ib-act[hidden] { display: none; }
+.ib-reply { display: flex; gap: 6px; max-width: var(--measure, 68ch); margin-top: 8px; }
+.ib-reply input {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 0 10px;
+  color: var(--ink);
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-md);
+}
+.ib-reply input:focus { outline: none; border-color: var(--accent); }
+
+/* The way back down, for when he has scrolled up to read. */
+.ib-jump {
   position: absolute;
-  z-index: 5;
-  top: 14px;
+  bottom: 16px;
   left: 50%;
   transform: translateX(-50%);
-  width: max-content;
-  max-width: min(460px, calc(100% - 24px));
-  padding: 9px 13px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--bg-raised);
-  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
-  color: var(--ink);
-  font-size: 13px;
+  min-height: 28px;
+  padding: 0 14px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .35);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 800;
+  cursor: pointer;
 }
-.fy-toast[hidden] { display: none; }
-.fy-toast.is-bad { border-color: var(--risk); }
+.ib-jump:hover { transform: translateX(-50%); }
+.ib-jump[hidden] { display: none; }
+.ib-toast {
+  position: absolute;
+  right: 20px;
+  bottom: 18px;
+  max-width: 420px;
+  padding: 8px 14px;
+  color: var(--ink);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .3);
+  font-size: var(--text-sm);
+}
+.ib-toast.is-bad { color: var(--risk); border-color: color-mix(in oklab, var(--risk) 45%, var(--line)); }
+.ib-toast[hidden] { display: none; }
+
+/* Arriving from Home's activity strip: the post he clicked, named for a second. */
+.msg.is-flash { animation: ib-flash 1.6s var(--ease); border-radius: 8px; }
+@keyframes ib-flash {
+  0%, 30% { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+  100% { background: transparent; }
+}
+/* A showcase is a filmstrip: one row, never wrapped into the conversation. */
+.ib-feed .v-showcase .v-sc-rail {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 3px;
+  scrollbar-width: thin;
+}
+.ib-feed .inbox-peek { max-width: none; }
+
+@media (max-width: 860px) {
+  .foryou { grid-template-columns: 168px minmax(0, 1fr); }
+  .ib-search { width: 120px; }
+}
+
+/* ---------------------------------------------------------------- messages */
+
+/* Full-bleed rows, not cards: a 36px gutter for the avatar and a body that owns the rest of the
+   width. An agent's message and a card from Panel line up on the same left edge. */
+.msg {
+  position: relative;
+  flex: none;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+  padding: 7px 18px 7px 16px;
+}
+.msg:hover { background: color-mix(in oklab, var(--ink) 4%, transparent); }
+/* Inside a burst the row loses its avatar and byline and tightens. */
+.msg.is-grouped { padding-top: 2px; padding-bottom: 2px; }
+.msg-rail { display: flex; justify-content: flex-end; padding-top: 2px; }
+.msg.is-grouped .msg-avatar,
+.msg.is-grouped .msg-head { display: none; }
+.msg-main { min-width: 0; }
+.msg-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.msg-head time { font-size: var(--text-xs); }
+.msg-author {
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+button.msg-author {
+  padding: 0;
+  background: none;
+  border: 0;
+  font-family: inherit;
+  font-size: var(--text-md);
+  font-weight: 800;
+  color: var(--ink);
+  cursor: pointer;
+}
+button.msg-author:hover { transform: none; text-decoration: underline; }
+.msg-avatar {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  flex: none;
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 11%, var(--bg-raised));
+  border: 1px solid color-mix(in oklab, var(--accent) 25%, var(--line));
+  border-radius: 9px;
+  font-size: var(--text-md);
+  font-weight: 800;
+}
+.msg-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.msg-avatar .ui-icon { width: 17px; height: 17px; }
+.msg-avatar[data-agent="claude"] { color: #d99a72; }
+.msg-avatar[data-agent="codex"] { color: #7de2bb; }
+.msg-avatar[data-agent="grok"] { color: #d7dbea; }
+.msg-avatar[data-agent="dshline"] { color: var(--k-dshline); }
+.msg-avatar[data-agent="kimi"] { color: #78a8ff; }
+.msg-avatar[data-agent="glm"] { color: #8bc5ff; }
+.msg-avatar[data-agent="opencode"] { color: #d4ee70; }
+.msg-main > .v { margin: 0; }
+/* Date separator: a hairline with the day sitting on it. */
+.msg-day {
+  position: relative;
+  flex: none;
+  display: flex;
+  justify-content: center;
+  margin: 16px 18px 10px;
+  border-top: 1px solid var(--line);
+}
+.msg-day span {
+  transform: translateY(-50%);
+  padding: 2px 12px;
+  color: var(--ink-dim);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+/* Where you left off. The badge said there were four; this says which four. */
+.msg-day.is-new { border-top-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+.msg-day.is-new span {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  letter-spacing: .8px;
+}
+.inbox-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  min-height: 55vh;
+  color: var(--ink-faint);
+  text-align: center;
+}
+.inbox-empty i { font-size: 34px; color: var(--accent); opacity: .65; }
+.inbox-empty b { margin-top: 10px; color: var(--ink-dim); font-size: var(--text-lg); }
+.inbox-empty p { margin: 5px 0; font-size: var(--text-xs); }
+/* The evidence box. It is part of the post, not a panel over it — the replay theater inside is
+   absolutely positioned, so the stage keeps a floor of its own. */
+.inbox-peek {
+  width: 100%;
+  max-width: 860px;
+  margin: 8px 0 0;
+  overflow: hidden;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.inbox-peek-doors {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-peek-door {
+  padding: 4px 9px;
+  color: var(--ink-dim);
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 650;
+  cursor: pointer;
+}
+.inbox-peek-door:hover { color: var(--ink); }
+.inbox-peek-door.is-on {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-raised));
+  border-color: color-mix(in oklab, var(--accent) 34%, var(--line));
+}
+.inbox-peek-door.is-out { margin-left: auto; }
+.inbox-peek-stage {
+  position: relative;
+  min-height: 360px;
+  max-height: 60vh;
+  overflow: auto;
+}
+/* The theater is sized for a window; in a post it gets the whole box. */
+.inbox-peek .rr-stage { margin: 8px; }
+.inbox-peek .rr-overlay { background: transparent; backdrop-filter: none; }
+.inbox-peek-note { margin: 0; padding: 18px; color: var(--ink-faint); font-size: var(--text-xs); }
+.inbox-peek-filehead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.inbox-peek-filehead b { color: var(--ink); font-size: var(--text-xs); }
+.inbox-peek-filehead small { color: var(--ink-faint); font-size: var(--text-xs); }
+.inbox-peek-code {
+  padding: 8px 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.inbox-peek-line { display: flex; gap: 12px; padding: 0 12px; white-space: pre; }
+.inbox-peek-line i { min-width: 34px; color: var(--ink-faint); font-style: normal; text-align: right; }
+.inbox-peek-line code { color: var(--ink-dim); }
+.inbox-peek-line.is-hit { background: color-mix(in oklab, var(--accent) 14%, transparent); }
+.inbox-peek-line.is-hit code { color: var(--ink); }
+.inbox-peek-image { margin: 0; padding: 12px; text-align: center; }
+.inbox-peek-image img { max-width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+.inbox-peek-image figcaption { margin-top: 7px; color: var(--ink-faint); font-size: var(--text-xs); }
+.inbox-peek .v { margin: 0; }
+/* ------------------------------------------------------- posts, de-chromed
+   The message renderer also draws on the project Stage, where a bordered card is right. In the
+   feed it is not: every post arriving as its own panel, with its own eyebrow and its own title
+   bar, is what made this screen feel like a dashboard instead of a channel. Here the post is
+   just text — the pictures and the outcome chip are the only things allowed to stand out. */
+.msg-main .v.in-feed {
+  padding: 0;
+  gap: 8px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+}
+.msg-main .v.in-feed > .v-head { gap: 8px; }
+/* "agent report" on an agent's post in the agent inbox. */
+.msg-main .v.in-feed .v-eyebrow { display: none; }
+.msg-main .v.in-feed .v-title { font-size: var(--text-md); font-weight: 700; }
+.msg-main .v.in-feed .v-message-text { margin-bottom: 2px; }
+.msg-main .v.in-feed .v-message-gallery { margin-bottom: 2px; }
+.msg-main .v-prose { font-size: var(--text-md); line-height: 1.55; }
+/* The outcome chip is `margin-left: auto`, which on a full-bleed row parked "DONE" most of a
+   screen away from the title it belongs to. Same measure as the prose, so they stay one unit. */
+.msg-main .v.in-feed > .v-head { max-width: var(--measure, 68ch); }
+.msg-main .v.in-feed .v-message-attachments { margin-top: 9px; }
+.msg-main .v.in-feed .v-message-attachments + * { margin-top: 6px; }
+
+/* One feed for every project means the project is the headline, and the door to its channel. */
+.msg-where {
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.msg-where:hover { text-decoration: underline; }

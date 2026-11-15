@@ -19,7 +19,6 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
-import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
 import { IS_MAC, matches, matchesShortcut, label as chordLabel } from "./keymap";
 import { projectIconUrl } from "../project-assets";
@@ -27,8 +26,11 @@ import {
   APP_LINK_IN_TEXT,
   PATH_IN_TEXT,
   PLACE_IN_TEXT,
+  WEB_IN_TEXT,
   commandFrom,
   fileTarget,
+  linkCell,
+  linkLine,
   logicalLine,
   parsePlace,
   type FileTarget,
@@ -217,8 +219,6 @@ function linkHint(link: TermLink): string {
   if (link.kind === "file") return `Click to open · ${MAC ? "⌥⌘" : "Ctrl-Alt-"}click to show in ${MAC ? "Finder" : "folder"}`;
   return "Click to open in Panel";
 }
-
-/** A row and the rows it wraps into, as one string. Long paths wrap; a link must survive it. */
 
 /** What the on-terminal close prompt needs to name itself: the session, and the app it belongs
  *  to (id for the icon, name for the letter that stands in until it loads). */
@@ -738,31 +738,19 @@ export class TerminalDeck {
     const search = new SearchAddon();
     term.loadAddon(fit);
     term.loadAddon(search);
-    // Agents print PR, CI and docs URLs constantly. A click opens one; see follow() for why a
-    // drag across one still only selects.
-    const web = (url: string): TermLink => ({ kind: "web", url });
-    term.loadAddon(
-      new WebLinksAddon(
-        (event, uri) => this.follow(sessionId, web(uri), event),
-        {
-          hover: (_event, uri) => {
-            pane.hovered = web(uri);
-            mount.title = linkHint(pane.hovered);
-          },
-          leave: () => {
-            pane.hovered = null;
-            mount.title = "";
-          },
-        },
-      ),
-    );
-    // Typed text that is a place: `panel:review:…`, `appgeapanel://…`, or a full path. Paths are
-    // what every agent prints, so this is the part that needs no cooperation from any of them.
+    // Printed text that is a link: a web URL, `panel:review:…`, `appgeapanel://…`, or a full path.
+    // These are what every agent prints, so this part needs no cooperation from any of them. A
+    // click opens one; see follow() for why a drag across one still only selects. Web URLs are
+    // read here and not by xterm's web-links addon: Claude and Codex break a long link across
+    // rows themselves, and the addon then opened only the first row's half of it.
     term.registerLinkProvider({
       provideLinks: (y, callback) => {
-        const { text, first } = logicalLine(term.buffer.active, y);
-        const cols = term.cols;
+        const line = linkLine(term.buffer.active, y, term.cols);
+        const text = line.text;
         const found: { index: number; text: string; link: TermLink }[] = [];
+        for (const match of text.matchAll(WEB_IN_TEXT)) {
+          if (URL.canParse(match[0])) found.push({ index: match.index, text: match[0], link: { kind: "web", url: match[0] } });
+        }
         for (const match of text.matchAll(PLACE_IN_TEXT)) {
           const place = parsePlace(match[0]);
           if (place) found.push({ index: match.index, text: match[0], link: { kind: "place", text: match[0], place } });
@@ -775,8 +763,8 @@ export class TerminalDeck {
           if (target) found.push({ index: match.index, text: match[0], link: { kind: "file", text: match[0], target } });
         }
         const links = found.flatMap(({ index, text: shown, link }) => {
-          const start = { x: (index % cols) + 1, y: first + Math.floor(index / cols) + 1 };
-          const end = { x: ((index + shown.length - 1) % cols) + 1, y: first + Math.floor((index + shown.length - 1) / cols) + 1 };
+          const start = linkCell(line, index);
+          const end = linkCell(line, index + shown.length - 1);
           if (start.y > y || end.y < y) return [];
           return [{
             range: { start, end },
