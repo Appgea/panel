@@ -5,7 +5,7 @@ import { transformWithOxc } from "vite";
 
 const source = await readFile(new URL("../src/features/review_queue.ts", import.meta.url), "utf8");
 const { code } = await transformWithOxc(source, "review_queue.ts");
-const { arrive, batches, readQueue, see, sent, writeQueue, BATCH_GAP } = await import(
+const { arrive, batches, readQueue, see, sent, writeQueue, BATCH_GAP, BULK } = await import(
   `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`
 );
 
@@ -50,6 +50,23 @@ test("a seen file the cap took off the list does not come back as new", () => {
   writeQueue(queue);
   assert.equal(queue.items.size, 400);
   assert.equal(arrive(queue, made("f0.png"), 1000), null);
+});
+
+test("a folder that floods with generated files leaves the list, and stays out", () => {
+  const queue = empty();
+  see(arrive(queue, made("tiles/seen.png"), 1));
+  arrive(queue, made("shots/home.png"), 1);
+  for (let at = 0; at < BULK; at++) assert.ok(arrive(queue, made(`tiles/${at}.png`), 10 + at));
+  assert.equal(arrive(queue, made("tiles/tipping.png"), 100), null);
+  assert.deepEqual([...queue.items.keys()].sort(), ["/p/app/shots/home.png", "/p/app/tiles/seen.png"]);
+  assert.equal(arrive(queue, made("tiles/later.png"), 200), null, "the busy folder stays out");
+  const asked = queue.items.get("/p/app/tiles/seen.png");
+  asked.note = "darker";
+  sent(queue, [asked], 220);
+  assert.ok(arrive(queue, made("tiles/seen.png", 2), 230), "a redo you asked for still comes in");
+  const saved = writeQueue(queue);
+  const flooded = { items: [...saved.items, ...Array.from({ length: BULK + 1 }, (_, i) => made(`frames/${i}.png`))] };
+  assert.equal(readQueue(flooded, 300).items.size, 2, "a flood saved before the rule is dropped on read");
 });
 
 test("a sent note waits for the redo, which carries what you asked", () => {

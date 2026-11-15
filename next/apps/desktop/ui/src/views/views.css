@@ -1086,6 +1086,20 @@
    screenshot instead of scanning a set. */
 .v-message-image.is-tall img { max-height: 340px; }
 .v-message-image:hover img { opacity: .86; }
+/* The tile after the twelfth: the rest of a big set, one click into the lightbox. */
+.v-message-more {
+  align-self: stretch;
+  min-height: 96px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  cursor: pointer;
+}
+.v-message-more:hover { color: var(--ink); border-style: solid; }
 /* The caption is what makes a thumbnail readable. Two lines, not one clipped one — a shot
    captioned "the empty state, after" is understood; "shot-3.png" never is. */
 .v-message-image figcaption {

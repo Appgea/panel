@@ -18,6 +18,9 @@ import uuid
 
 ROOT = os.path.expanduser("~/.appgeapanel/reports")
 MAX_COPY = 25 * 1024 * 1024
+# A report can carry a whole render run: 2000 images on 2026-11-16. The Inbox shows the first dozen,
+# so only the first files get a copy. The rest keep their own path.
+MAX_FILES = 48
 
 
 def _keep_one(path, into, seen):
@@ -25,6 +28,8 @@ def _keep_one(path, into, seen):
         return path
     if path in seen:
         return seen[path]
+    if len(seen) >= MAX_FILES:
+        return path
     seen[path] = kept = _copy(path, into)
     return kept
 

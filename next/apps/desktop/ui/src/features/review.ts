@@ -68,6 +68,7 @@ export type ReviewHandle = {
 const STORE = "panel-review";
 const ASKED = "panel-review-asked";
 const FORGOTTEN = "panel-review-forgotten";
+const BULK_KEY = "panel-review-bulk";
 /** Tiles a batch shows before the rest fold into one "+N more" tile. Twelve fills 2, 3, 4 or 6 columns. */
 const SHOWN = 12;
 /** A folder that wrote this many files in one batch is a pipeline step: one tile for all of it. */
@@ -116,7 +117,10 @@ function stored(key: string): unknown {
 }
 
 export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHandle {
-  const queue = readQueue({ items: stored(STORE), asked: stored(ASKED), forgotten: stored(FORGOTTEN) }, Date.now());
+  const queue = readQueue(
+    { items: stored(STORE), asked: stored(ASKED), forgotten: stored(FORGOTTEN), bulk: stored(BULK_KEY) },
+    Date.now(),
+  );
   let openState = false;
   /** The Review screen's narrowing to one project, for this run. Empty is everything. */
   let only = "";
@@ -131,6 +135,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
       localStorage.setItem(STORE, JSON.stringify(saved.items));
       localStorage.setItem(ASKED, JSON.stringify(saved.asked));
       localStorage.setItem(FORGOTTEN, JSON.stringify(saved.forgotten));
+      localStorage.setItem(BULK_KEY, JSON.stringify(saved.bulk));
     } catch {
       // Storage full or blocked: the list still works for this run.
     }
@@ -164,12 +169,17 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   };
 
   void listen<Made>("panel-made", ({ payload }) => {
-    if (!arrive(queue, payload, Date.now())) return;
+    const listed = queue.items.size;
+    const item = arrive(queue, payload, Date.now());
+    // Null and a shorter list: a folder of generated output just left it.
+    if (!item && queue.items.size === listed) return;
     save();
     announce();
     if (openState) paint();
-    else peek(payload.project);
+    else if (item) peek(payload.project);
   });
+  // Reading the list may have dropped a flood saved before the bulk rule.
+  save();
   announce();
   void pruneBefore(keptVersions());
 

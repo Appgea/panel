@@ -27,6 +27,9 @@ const named = (value: unknown, fallbackKey: string): Payload => {
   return obj(value);
 };
 
+/** Tiles one message shows. Twelve fills 2, 3, 4 or 6 columns, like Review's batches. */
+const GALLERY_MAX = 12;
+
 const basename = (path: string): string => path.replaceAll("\\", "/").split("/").pop() || path;
 
 /** The typed half of a report. Done is what a report usually says, so it gets no chip: only
@@ -68,7 +71,9 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
       .map((image) => ({ project, path: str(image.path), caption: str(image.caption) }))
       .filter((shot) => shot.path);
     const gallery = el("div", "v-message-gallery");
-    shots.forEach((shot, index) => {
+    // A report can carry a whole render run. Each tile loads its picture at once, so a report of
+    // hundreds stuck the feed. The rest wait behind one tile that opens the lightbox there.
+    shots.slice(0, GALLERY_MAX).forEach((shot, index) => {
       const figure = el("figure", "v-message-image");
       const preview = projectImage(project, shot.path, shot.caption || basename(shot.path));
       preview.classList.add("is-expandable");
@@ -88,6 +93,12 @@ export const messageView: ViewRenderer = (payload, ctx): HTMLElement => {
       figure.append(el("figcaption", undefined, shot.caption || basename(shot.path)));
       gallery.append(figure);
     });
+    if (shots.length > GALLERY_MAX) {
+      const more = el("button", "v-message-more", `+${shots.length - GALLERY_MAX} more`);
+      more.type = "button";
+      more.addEventListener("click", () => showLightbox(shots, GALLERY_MAX));
+      gallery.append(more);
+    }
     if (gallery.childElementCount) root.append(gallery);
   }
 
