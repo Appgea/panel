@@ -47,7 +47,10 @@ export type FeedItem = {
   unread: boolean;
   /** It waits for an answer or a look, not only a read. */
   needsYou: boolean;
+  /** The newest message of its thread. */
   post?: InboxPost;
+  /** The thread's older messages, oldest first. They fold under the newest. */
+  earlier?: InboxPost[];
   card?: Card;
 };
 
@@ -76,12 +79,43 @@ export const postKey = (room: string): string => `report:${room}`;
 const STUCK = new Set(["blocked", "needs_decision"]);
 export const isStuck = (post: InboxPost): boolean => STUCK.has(String(post.payload.outcome));
 
+/**
+ * One agent's messages this close together are one thread: take 5, take 6, "now the folder".
+ * Owner, 2026-11-16: "Fix the system so it doesnt spam to the inbox". 703 messages had come from
+ * 220 sessions, and 452 of them followed the same session's last one within two hours. So a
+ * thread is one item: its newest message whole, the rest folded under it, one unread.
+ */
+export const THREAD_GAP = 3 * 3600_000;
+
+/** Oldest first in, oldest-first threads out. Without a session, the author in one project is the agent. */
+export function threads(posts: InboxPost[]): InboxPost[][] {
+  const open = new Map<string, InboxPost[]>();
+  const out: InboxPost[][] = [];
+  for (const post of [...posts].sort((a, b) => a.at - b.at)) {
+    const key = `${post.project}|${post.session ?? `author:${post.author}`}`;
+    const thread = open.get(key);
+    if (thread && post.at - thread[thread.length - 1].at <= THREAD_GAP) {
+      thread.push(post);
+      continue;
+    }
+    const started = [post];
+    open.set(key, started);
+    out.push(started);
+  }
+  return out;
+}
+
+/** The item that shows this message, whether it is the newest of its thread or folded under it. */
+export const holds = (item: FeedItem, postId: string): boolean =>
+  item.post?.id === postId || Boolean(item.earlier?.some((post) => post.id === postId));
+
 /** `viewed` is the cards that were on screen this visit: they stand until he leaves, but as read. */
 export function buildFeed(posts: InboxPost[], cards: Card[], seen: Record<string, number>, now: number, viewed: ReadonlySet<string> = new Set()): Feed {
   const items: FeedItem[] = [];
-  for (const post of posts) {
+  for (const thread of threads(posts)) {
+    const post = thread[thread.length - 1];
     const unread = post.at > (seen[postKey(post.project)] ?? now - LOOKBACK_MS);
-    items.push({ id: `post:${post.id}`, room: post.project, at: post.at, unread, needsYou: unread && isStuck(post), post });
+    items.push({ id: `post:${post.id}`, room: post.project, at: post.at, unread, needsYou: unread && isStuck(post), post, earlier: thread.slice(0, -1) });
   }
   for (const card of cards) {
     items.push({ id: card.id, room: card.room, at: card.arrivedMs, unread: !viewed.has(card.id), needsYou: KIND[card.kind].needsYou, card });

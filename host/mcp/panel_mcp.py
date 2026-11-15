@@ -136,11 +136,11 @@ TOOLS = [
                         ]
                     },
                     "description": (
-                        "every screenshot/render this turn produced, one entry per shot. Paths may "
-                        "be project-relative or absolute — Panel resolves both. REQUIRED for any "
-                        "visual work: the human opens the Inbox to look at what you made, and a "
-                        "report about a screen with no picture of it is a report they cannot use. "
-                        "Caption each one — a shot with no caption is a shot they have to decode."
+                        "the few shots the human must look at, one entry per shot: the result, not "
+                        "every render or frame. Paths may be project-relative or absolute — Panel "
+                        "resolves both. REQUIRED for any visual work: a report about a screen with "
+                        "no picture of it is a report they cannot use. Caption each one. Panel "
+                        "shrinks each picture, and turns more than 6 into captioned contact sheets."
                     )
                 },
                 "audio": {
@@ -156,7 +156,8 @@ TOOLS = [
                     },
                     "description": (
                         "audio clips the human should hear — a generated voice line, a mixed sound "
-                        "effect. Plays inline in the Inbox, so keep it short."
+                        "effect. Plays inline in the Inbox, so keep it short. Panel merges several "
+                        "clips into one track, in order, and shrinks lossless audio."
                     )
                 },
                 "video": {

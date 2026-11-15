@@ -23,7 +23,7 @@ import { errorText } from "../errors";
 import { icon, type IconName } from "../icons";
 import type { ChangeStep } from "../types";
 import { inboxCards, type EndedItem, type ReviewBatch, type SupportItem } from "./inbox_cards";
-import { ALL, NEEDS, buildFeed, inChannel, isStuck, postKey, type Feed, type FeedItem, type InboxPost } from "./inbox_feed";
+import { ALL, NEEDS, buildFeed, holds, inChannel, isStuck, postKey, type Feed, type FeedItem, type InboxPost } from "./inbox_feed";
 import { buildPeek, type PeekHandle } from "./inbox_peek";
 import { buildCards, KIND, type Act, type BoardFeed, type Card, type CardKind } from "./live_cards";
 import { facts } from "./live_facts";
@@ -385,7 +385,28 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
     return b;
   }
 
-  function postRow(post: InboxPost, live: boolean): HTMLElement {
+  /** A thread's older messages, folded. Drawn on first open: a long thread costs nothing until then. */
+  function earlierFold(earlier: InboxPost[]): HTMLElement {
+    const fold = document.createElement("details");
+    fold.className = "ib-earlier";
+    const summary = document.createElement("summary");
+    summary.textContent = `${earlier.length} earlier ${earlier.length === 1 ? "message" : "messages"}`;
+    fold.append(summary);
+    fold.addEventListener("toggle", () => {
+      if (!fold.open || fold.childElementCount > 1) return;
+      for (const older of [...earlier].reverse()) {
+        const entry = div("ib-earlier-one");
+        entry.append(Object.assign(document.createElement("time"), { textContent: hhmm(older.at) }));
+        const body = events.render(older, (ref) => events.openRef(older.project, ref));
+        body.classList.add("in-feed");
+        entry.append(body);
+        fold.append(entry);
+      }
+    });
+    return fold;
+  }
+
+  function postRow(post: InboxPost, live: boolean, earlier: InboxPost[]): HTMLElement {
     const session = post.session;
     const { article, head, main } = shell(agentGlyph(post.agentKind), "");
     article.querySelector<HTMLElement>(".msg-avatar")!.dataset.agent = post.agentKind;
@@ -435,6 +456,7 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
       );
     }
     if (actions.childElementCount) main.append(actions);
+    if (earlier.length) main.append(earlierFold(earlier));
     const peek = peeks.get(post.id);
     if (peek) main.append(peek.root);
     return article;
@@ -555,7 +577,7 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
 
   /** What a row is built from. A changed signature rebuilds the row. */
   function signature(item: FeedItem): string {
-    if (item.post) return String(Boolean(item.post.session && events.isLiveSession(item.post.session)));
+    if (item.post) return `${Boolean(item.post.session && events.isLiveSession(item.post.session))}|${item.earlier?.length ?? 0}`;
     const c = item.card!;
     return JSON.stringify([c.title, c.lines, c.items, c.options.map((o) => o.label), c.pictureSrc, c.pictures, roomName(c.room)]);
   }
@@ -565,7 +587,7 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
     const known = rows.get(item.id);
     if (known && known.sig === sig) return known.el;
     if (known) observer.unobserve(known.el);
-    const el = item.post ? postRow(item.post, sig === "true") : cardRow(item.card!);
+    const el = item.post ? postRow(item.post, sig.startsWith("true"), item.earlier ?? []) : cardRow(item.card!);
     el.dataset.id = item.id;
     rows.set(item.id, { el, sig });
     observer.observe(el);
@@ -581,7 +603,7 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
     if (text === undefined) {
       const p = item.post;
       const c = item.card;
-      text = (p ? `${p.author} ${p.projectName} ${JSON.stringify(p.payload)}` : `${roomName(c!.room)} ${c!.title} ${c!.lines.join(" ")} ${(c!.items ?? []).join(" ")}`).toLowerCase();
+      text = (p ? `${p.author} ${p.projectName} ${JSON.stringify([p.payload, ...(item.earlier ?? []).map((e) => e.payload)])}` :`${roomName(c!.room)} ${c!.title} ${c!.lines.join(" ")} ${(c!.items ?? []).join(" ")}`).toLowerCase();
       // A card's words change under one id, so only a post's are worth keeping.
       if (p) haystack.set(item.id, text);
     }
@@ -823,7 +845,8 @@ export function mountForYou(root: HTMLElement, events: ForYouEvents): ForYouHand
     },
     refresh: paint,
     reveal(postId) {
-      const id = `post:${postId}`;
+      // A message folded under a newer one opens on its thread.
+      const id = feed.items.find((item) => holds(item, postId))?.id ?? `post:${postId}`;
       channel = ALL;
       query = "";
       searchEl.value = "";

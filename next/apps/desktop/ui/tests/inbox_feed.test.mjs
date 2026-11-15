@@ -2,12 +2,26 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { src } from "./load.mjs";
 
-const { buildFeed, inChannel, postKey, ALL, NEEDS } = await src("features/inbox_feed.ts");
+const { buildFeed, holds, inChannel, postKey, ALL, NEEDS } = await src("features/inbox_feed.ts");
 
 const now = Date.parse("2026-11-15T18:00:00Z");
 const ago = (min) => now - min * 60_000;
-const post = (id, project, min, outcome = "done") => ({ id, project, at: ago(min), payload: { outcome } });
+// Each post its own session unless a test says otherwise: one session's posts fold into one thread.
+const post = (id, project, min, outcome = "done", session = id) => ({ id, project, session, at: ago(min), payload: { outcome } });
 const card = (id, kind, room, min) => ({ id, kind, room, arrivedMs: ago(min) });
+
+test("one session's messages within a few hours are one item, its newest, one unread", () => {
+  const posts = [post("take5", "tavla", 90, "done", "s1"), post("other", "tavla", 80, "done", "s2"), post("take6", "tavla", 60, "done", "s1"), post("folder", "tavla", 58, "blocked", "s1"), post("next-day", "tavla", 60 + 5 * 60, "done", "s1")];
+  const feed = buildFeed(posts, [], {}, now);
+  assert.deepEqual(feed.items.map((i) => [i.id, (i.earlier ?? []).map((p) => p.id)]), [
+    ["post:next-day", []],
+    ["post:other", []],
+    ["post:folder", ["take5", "take6"]],
+  ]);
+  assert.equal(feed.waiting, 3, "five messages, three threads, three unread");
+  assert.equal(feed.needsYou, 1, "the newest message decides: it is blocked");
+  assert.ok(holds(feed.items[2], "take5"));
+});
 
 // The feed is one timeline. A read mark per project says which posts are new, and the count is
 // everything unread or waiting.
