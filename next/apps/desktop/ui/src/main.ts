@@ -1064,6 +1064,30 @@ async function sessionBusy(sessionId: string): Promise<boolean> {
   return invoke<boolean>("session_busy", { session: sessionId }).catch(() => true);
 }
 
+/** Take a session whose PTY is already gone off every screen. Closing one ends here, and so does
+ *  a script's tab that Rust closed by itself (`panel-tab-closed`): nobody is asked about those. */
+function forgetSession(sessionId: string): void {
+  const here = [...states.values()].find((candidate) => candidate.sessions.some((s) => s.id === sessionId));
+  if (!here) return;
+  here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
+  exited.delete(sessionId);
+  asleep.delete(sessionId);
+  memory.delete(sessionId);
+  touched.delete(sessionId);
+  refused.delete(sessionId);
+  working.delete(sessionId);
+  setPhase(sessionId, null);
+  here.workBySession.delete(sessionId);
+  deck.remove(sessionId);
+  // Closed from the wall or its project page, the manager's pane must stop showing it too.
+  chat.noteExit(sessionId);
+  here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
+  if (active === here.project.id) showSessions();
+  if (!here.running) setStatus(here.project.id, "idle", "no agent running");
+  paintProjects();
+  void refreshProject(here.project.id);
+}
+
 /** Close one session for good: confirm a live process, kill the PTY, drop the screen, forget it.
  *  Owner is found by lookup — the Terminals wall closes sessions of projects you are not in. */
 async function closeSession(sessionId: string): Promise<void> {
@@ -1112,23 +1136,7 @@ async function closeSession(sessionId: string): Promise<void> {
   closing.add(sessionId);
   try {
     await invoke("stop_session", { session: sessionId }).catch(() => undefined);
-    here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
-    exited.delete(sessionId);
-    asleep.delete(sessionId);
-    memory.delete(sessionId);
-    touched.delete(sessionId);
-    refused.delete(sessionId);
-    working.delete(sessionId);
-    setPhase(sessionId, null);
-    here.workBySession.delete(sessionId);
-    deck.remove(sessionId);
-    // Closed from the wall or its project page, the manager's pane must stop showing it too.
-    chat.noteExit(sessionId);
-    here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
-    if (active === here.project.id) showSessions();
-    if (!here.running) setStatus(here.project.id, "idle", "no agent running");
-    paintProjects();
-    void refreshProject(here.project.id);
+    forgetSession(sessionId);
   } finally {
     closing.delete(sessionId);
   }
@@ -5056,6 +5064,15 @@ async function boot(): Promise<void> {
   // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.
   await listen("panel-link", takeAppLinks);
   takeAppLinks();
+  // A script's tab (`/panel/tab/open`, the fleet's builders) is forked by Rust with nobody
+  // clicking, and closes itself when its command ends. The wall follows both.
+  await listen<Wall["sessions"][number]>("panel-tab-opened", ({ payload }) => {
+    if (sessionById(payload.session.id)) return;
+    adoptWall({ savedAt: 0, sessions: [payload] }, false);
+    if (active === payload.session.project) showSessions();
+    paintProjects();
+  });
+  await listen<string>("panel-tab-closed", ({ payload }) => forgetSession(payload));
   refreshHistorySignals();
   // Transcripts grow without telling anyone; a rescan after the first is milliseconds.
   window.setInterval(refreshHistorySignals, 3 * 60_000);

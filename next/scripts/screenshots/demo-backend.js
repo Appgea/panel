@@ -493,6 +493,7 @@ only after I approve the exact prompt. Never ship, spend or change a price on yo
     list_projects: () => PROJECTS,
     manager_project: () => MANAGER,
     cpo_preprompt: () => PREPROMPT,
+    live_wall: () => ({ savedAt: 0, sessions: [] }),
     restore_wall: () => ({
       savedAt: 0,
       sessions: [...SESSIONS, MANAGER_SESSION].map((s) => ({ session: s, screen: "" })),

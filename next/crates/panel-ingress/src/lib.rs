@@ -216,6 +216,12 @@ pub type LinkSink = Arc<dyn Fn(String) + Send + Sync>;
 /// runs either.
 pub type ClearSink = Arc<dyn Fn(String, u32, String) -> bool + Send + Sync>;
 
+/// A session tab a local script owns, over `/panel/tab/<op>`: `open` one that runs a command
+/// line under a title, read its `screen`, `type` a line into it, `close` it. Args: the op and
+/// the checked body. The reply goes back to the script as it is. `fleet` in the ops tree runs
+/// each of its builders in one, so the owner watches them in Panel and never closes a window.
+pub type TabSink = Arc<dyn Fn(&str, &Value) -> Value + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Ingress {
     port: u16,
@@ -228,6 +234,7 @@ pub struct Ingress {
     conversations: Arc<Mutex<HashMap<String, String>>>,
     links: Arc<Mutex<Option<LinkSink>>>,
     clears: Arc<Mutex<Option<ClearSink>>>,
+    tabs: Arc<Mutex<Option<TabSink>>>,
     sink: EventSink,
 }
 
@@ -255,6 +262,7 @@ impl Ingress {
             conversations: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(None)),
             clears: Arc::new(Mutex::new(None)),
+            tabs: Arc::new(Mutex::new(None)),
             sink,
         };
 
@@ -359,6 +367,11 @@ impl Ingress {
         *self.clears.lock().unwrap() = Some(sink);
     }
 
+    /// Receive `/panel/tab/<op>` from a local script that runs its work in session tabs.
+    pub fn on_tab(&self, sink: TabSink) {
+        *self.tabs.lock().unwrap() = Some(sink);
+    }
+
     fn handle(&self, mut request: Request) {
         let url = request.url().to_string();
         let json_body = request.headers().iter().any(|header| {
@@ -370,6 +383,8 @@ impl Ingress {
 
         let reply = if let Some(event) = url.strip_prefix("/hook/") {
             self.on_hook(event, &body)
+        } else if let Some(op) = url.strip_prefix("/panel/tab/") {
+            self.on_tab_request(op, &body, json_body)
         } else {
             match url.as_str() {
                 "/panel/emit" => self.on_emit(&body),
@@ -424,6 +439,32 @@ impl Ingress {
             return json!({"error": "no live terminal runs that instance or pid"});
         }
         json!({"ok": true})
+    }
+
+    /// JSON only, like links and clears. `command` and `text` end up in a shell and a TUI, so
+    /// each is one line with no control chars. The desktop shell checks that `id` is a tab a
+    /// script opened: this route never reaches a terminal the human started.
+    fn on_tab_request(&self, op: &str, body: &Value, json_body: bool) -> Value {
+        if !json_body {
+            return json!({"error": "content type must be application/json"});
+        }
+        let line = |key: &str, max: usize| {
+            let text = body[key].as_str().unwrap_or_default();
+            !text.trim().is_empty() && text.len() <= max && !text.chars().any(char::is_control)
+        };
+        let well_formed = match op {
+            "open" => line("command", 4000) && line("title", 80),
+            "type" => line("id", 64) && line("text", 4000),
+            "screen" | "close" => line("id", 64),
+            _ => return json!({"error": "unknown endpoint"}),
+        };
+        if !well_formed {
+            return json!({"error": "open needs a one-line command and title, the rest a tab id, type a one-line text"});
+        }
+        let Some(sink) = self.tabs.lock().unwrap().clone() else {
+            return json!({"error": "Panel is still starting"});
+        };
+        sink(op, body)
     }
 
     /// Claude session hooks -> deterministic panel events.
@@ -1095,6 +1136,40 @@ mod tests {
             assert!(ingress.on_clear_request(&body, json_body)["error"].is_string(), "{body}");
         }
         assert_eq!(got.lock().unwrap().len(), 3, "only the three well-formed asks reach the shell");
+    }
+
+    /// A tab op reaches the shell only as JSON, with one-line fields, under a known op.
+    #[test]
+    fn a_tab_op_needs_json_a_known_op_and_one_line_fields() {
+        let (ingress, _rx) = ingress();
+        let open = json!({"command": "source /tmp/unit.sh", "title": "fleet terra ab12cd"});
+        assert!(ingress.on_tab_request("open", &open, true)["error"].is_string(),
+            "before a handler is set the script must hear that it failed");
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let seen = got.clone();
+        ingress.on_tab(Arc::new(move |op, _body| {
+            seen.lock().unwrap().push(op.to_string());
+            json!({"ok": true})
+        }));
+        for (op, body) in [
+            ("open", open.clone()),
+            ("type", json!({"id": "t1", "text": "Fleet check: carry on."})),
+            ("screen", json!({"id": "t1"})),
+            ("close", json!({"id": "t1"})),
+        ] {
+            assert_eq!(ingress.on_tab_request(op, &body, true)["ok"], true, "{op} {body}");
+        }
+        for (op, body, json_body) in [
+            ("open", open.clone(), false),
+            ("open", json!({"command": "ls\nrm -rf ~", "title": "x"}), true),
+            ("open", json!({"command": "ls"}), true),
+            ("type", json!({"id": "t1", "text": "go\rrm -rf ~"}), true),
+            ("close", json!({}), true),
+            ("erase", json!({"id": "t1"}), true),
+        ] {
+            assert!(ingress.on_tab_request(op, &body, json_body)["error"].is_string(), "{op} {body}");
+        }
+        assert_eq!(*got.lock().unwrap(), ["open", "type", "screen", "close"], "only the well-formed four reach the shell");
     }
 
     /// History must know which conversation a live terminal holds, so it never resumes it twice.

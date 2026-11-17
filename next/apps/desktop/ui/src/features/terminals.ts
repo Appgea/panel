@@ -479,6 +479,8 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
   const ttabBase = (p: TerminalsProject, session: Session): string => {
     const named = names.get(session.id);
     if (named) return named;
+    // A script's tab was opened under a title that says which of its runs this is.
+    if (session.transient) return session.title;
     // Lowercase, like the project screen's own strip: "claude", "shell", "kimi k3".
     const engine = (ENGINES.find((entry) => entry.kind === session.kind)?.name ?? session.title).toLowerCase();
     const folder = folders.get(session.id) ?? "";
