@@ -44,6 +44,7 @@ import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
 import type { BoardData, BoardHandle, Scout } from "./features/board";
+import type { FleetHandle, FleetView } from "./features/fleet";
 import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
@@ -346,6 +347,9 @@ let opsMapActive = false;
 let board: BoardHandle | null = null;
 let boardLoading: Promise<BoardHandle> | null = null;
 let boardActive = false;
+let fleet: FleetHandle | null = null;
+let fleetLoading: Promise<FleetHandle> | null = null;
+let fleetActive = false;
 let settingsFromOpsMap = false;
 let chatFromOpsMap = false;
 /** The support queue. Lazy for the same reason as the plan: it is a screen you go to, not one
@@ -744,6 +748,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1064,30 +1069,6 @@ async function sessionBusy(sessionId: string): Promise<boolean> {
   return invoke<boolean>("session_busy", { session: sessionId }).catch(() => true);
 }
 
-/** Take a session whose PTY is already gone off every screen. Closing one ends here, and so does
- *  a script's tab that Rust closed by itself (`panel-tab-closed`): nobody is asked about those. */
-function forgetSession(sessionId: string): void {
-  const here = [...states.values()].find((candidate) => candidate.sessions.some((s) => s.id === sessionId));
-  if (!here) return;
-  here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
-  exited.delete(sessionId);
-  asleep.delete(sessionId);
-  memory.delete(sessionId);
-  touched.delete(sessionId);
-  refused.delete(sessionId);
-  working.delete(sessionId);
-  setPhase(sessionId, null);
-  here.workBySession.delete(sessionId);
-  deck.remove(sessionId);
-  // Closed from the wall or its project page, the manager's pane must stop showing it too.
-  chat.noteExit(sessionId);
-  here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
-  if (active === here.project.id) showSessions();
-  if (!here.running) setStatus(here.project.id, "idle", "no agent running");
-  paintProjects();
-  void refreshProject(here.project.id);
-}
-
 /** Close one session for good: confirm a live process, kill the PTY, drop the screen, forget it.
  *  Owner is found by lookup — the Terminals wall closes sessions of projects you are not in. */
 async function closeSession(sessionId: string): Promise<void> {
@@ -1136,7 +1117,23 @@ async function closeSession(sessionId: string): Promise<void> {
   closing.add(sessionId);
   try {
     await invoke("stop_session", { session: sessionId }).catch(() => undefined);
-    forgetSession(sessionId);
+    here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
+    exited.delete(sessionId);
+    asleep.delete(sessionId);
+    memory.delete(sessionId);
+    touched.delete(sessionId);
+    refused.delete(sessionId);
+    working.delete(sessionId);
+    setPhase(sessionId, null);
+    here.workBySession.delete(sessionId);
+    deck.remove(sessionId);
+    // Closed from the wall or its project page, the manager's pane must stop showing it too.
+    chat.noteExit(sessionId);
+    here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
+    if (active === here.project.id) showSessions();
+    if (!here.running) setStatus(here.project.id, "idle", "no agent running");
+    paintProjects();
+    void refreshProject(here.project.id);
   } finally {
     closing.delete(sessionId);
   }
@@ -1219,6 +1216,7 @@ function showSettings(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1269,6 +1267,7 @@ function showTerminals(at?: number): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1298,6 +1297,7 @@ function showHome(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1335,6 +1335,7 @@ function showNotebook(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -1386,6 +1387,7 @@ function showSprint(): void {
   dropHome();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   if (sprintActive) return;
   sprintActive = true;
   mainZone().hidden = true;
@@ -1421,6 +1423,7 @@ function dropSprint(): void {
 /** The ops tree as a network: what finished lately, what is stuck. See features/ops_map.ts. */
 function showOpsMap(): void {
   dropBoard();
+  dropFleet();
   dropHistory();
   dropSettings();
   dropChat();
@@ -1472,6 +1475,7 @@ function dropOpsMap(): void {
 /** Who holds what, what waits on you, and the scouts. Portfolio-wide. See features/board.ts. */
 function showBoard(): void {
   if (!board) return;
+  dropFleet();
   dropHistory();
   dropSettings();
   dropChat();
@@ -1496,6 +1500,55 @@ function dropBoard(): void {
   if (!boardActive) return;
   board?.clear();
   boardActive = false;
+}
+
+/** The fleet's running units and what they closed today. Portfolio-wide. See features/fleet.ts.
+ *  It loads on the first open, so an `appgeapanel://fleet` link that launched Panel lands here
+ *  before the module list has answered. */
+function showFleet(): void {
+  dropBoard();
+  dropHistory();
+  dropSettings();
+  dropChat();
+  dropNotebook();
+  dropSprint();
+  dropSupport();
+  dropReview();
+  dropLive();
+  dropForYou();
+  dropOpsMap();
+  if (terminalsActive) exitTerminals();
+  dropHome();
+  if (fleetActive) return;
+  fleetActive = true;
+  mainZone().hidden = true;
+  const screen = el("fleetScreen");
+  screen.hidden = false;
+  if (!fleet) screen.textContent = "Reading the fleet…";
+  const loading = fleetLoading ?? import("./features/fleet").then(({ mountFleet }) => {
+    fleet = mountFleet(screen, { view: () => moduleGet<FleetView>("/m/fleet/view") });
+    return fleet;
+  });
+  fleetLoading = loading;
+  void loading
+    .then((handle) => {
+      if (fleetActive) handle.open();
+    })
+    .catch((error: unknown) => {
+      fleetLoading = null;
+      if (fleetActive) {
+        screen.replaceChildren(errorNote("AI fleet could not open.", error, () => { dropFleet(); showFleet(); }));
+      }
+    });
+  paintNav();
+  paintProjects();
+}
+
+function dropFleet(): void {
+  if (!fleetActive) return;
+  fleet?.clear();
+  fleetActive = false;
+  el("fleetScreen").hidden = true;
 }
 
 /** The Board and its strip come with the scout extension and leave with it. */
@@ -1615,6 +1668,7 @@ function showSupport(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (supportActive) return;
@@ -1664,6 +1718,7 @@ function showReview(projectId?: string): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
   if (reviewActive) return;
@@ -1693,6 +1748,7 @@ function showLive(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropForYou();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1723,6 +1779,7 @@ function showForYou(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropLive();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1755,6 +1812,7 @@ function showHistory(focus?: { query?: string; session?: string }): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
   historyActive = true;
@@ -1847,6 +1905,9 @@ function followAppLink(url: string): void {
       return;
     case "live":
       showLive();
+      return;
+    case "fleet":
+      showFleet();
       return;
     case "manager":
       chat.show();
@@ -1998,6 +2059,7 @@ function showChat(): void {
   dropSprint();
   dropOpsMap();
   dropBoard();
+  dropFleet();
   dropSupport();
   dropHistory();
   dropReview();
@@ -2072,6 +2134,7 @@ const offProject = (): boolean =>
   sprintActive ||
   opsMapActive ||
   boardActive ||
+  fleetActive ||
   supportActive ||
   reviewActive ||
   liveActive ||
@@ -2365,7 +2428,8 @@ function paintNav(): void {
   el("chatNav").classList.toggle("is-active", readingFromInbox || liveActive || forYouActive);
   el("forYouButton").classList.toggle("is-on", forYouActive || readingFromInbox);
   el("liveButton").classList.toggle("is-on", liveActive);
-  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive);
+  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive || fleetActive);
+  el("fleetButton").classList.toggle("is-on", fleetActive);
   el("sprintButton").classList.toggle("is-on", sprintActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
   el("boardButton").classList.toggle("is-on", boardActive);
@@ -3608,6 +3672,8 @@ async function refreshProjectSurfaces(): Promise<void> {
   const modules = await invoke<PanelModule[]>("list_modules").catch(() => []);
   registerProjectSurfaces(modules);
   setupBoard(modules.some((module) => module.name === "scout"));
+  // The AI fleet row comes with the fleet extension. Its screen loads on the first open.
+  el("fleetButton").hidden = !modules.some((module) => module.name === "fleet");
   // Support's messages reach you as Inbox cards. Without the module there is nothing to open.
   if (!modules.some((module) => module.name === "support")) dropSupport();
   const here = active ? state(active) : undefined;
@@ -4674,6 +4740,7 @@ async function boot(): Promise<void> {
   el("opsMapButton").addEventListener("click", () => showOpsMap());
   el("skillsButton").addEventListener("click", () => showSkills());
   el("boardButton").addEventListener("click", () => showBoard());
+  el("fleetButton").addEventListener("click", () => showFleet());
   el("liveButton").addEventListener("click", () => showLive());
   el("forYouButton").addEventListener("click", () => showForYou());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
@@ -5064,15 +5131,6 @@ async function boot(): Promise<void> {
   // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.
   await listen("panel-link", takeAppLinks);
   takeAppLinks();
-  // A script's tab (`/panel/tab/open`, the fleet's builders) is forked by Rust with nobody
-  // clicking, and closes itself when its command ends. The wall follows both.
-  await listen<Wall["sessions"][number]>("panel-tab-opened", ({ payload }) => {
-    if (sessionById(payload.session.id)) return;
-    adoptWall({ savedAt: 0, sessions: [payload] }, false);
-    if (active === payload.session.project) showSessions();
-    paintProjects();
-  });
-  await listen<string>("panel-tab-closed", ({ payload }) => forgetSession(payload));
   refreshHistorySignals();
   // Transcripts grow without telling anyone; a rescan after the first is milliseconds.
   window.setInterval(refreshHistorySignals, 3 * 60_000);

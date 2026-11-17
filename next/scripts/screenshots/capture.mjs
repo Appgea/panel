@@ -21,7 +21,8 @@ import { asset, icon } from "./mock-media.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..", "..");
 const ui = join(repo, "next", "apps", "desktop", "ui");
-const out = join(repo, "docs", "screenshots");
+// PANEL_SHOTS_OUT sends a check shot somewhere else, so it never lands among the README's.
+const out = process.env.PANEL_SHOTS_OUT ?? join(repo, "docs", "screenshots");
 const PORT = 1488;
 
 /** Start the UI's own Vite on a port nothing else uses, and wait until it serves. */
@@ -160,6 +161,17 @@ const SHOTS = [
     },
   },
   {
+    // The AI fleet screen of the private fleet extension. Not a README shot: it runs only when
+    // named, and `demo` asks demo-backend.js to list that extension and answer its view.
+    name: "fleet",
+    dark: true,
+    onlyNamed: true,
+    demo: { fleet: true },
+    async prepare(page) {
+      await page.click("#fleetButton");
+    },
+  },
+  {
     // The README's top image. A static page, not the app, and it shows hero.png, so it runs last.
     name: "banner",
     page: "banner.html",
@@ -168,7 +180,7 @@ const SHOTS = [
 ];
 
 const wanted = process.argv.slice(2);
-const shots = wanted.length ? SHOTS.filter((shot) => wanted.includes(shot.name)) : SHOTS;
+const shots = wanted.length ? SHOTS.filter((shot) => wanted.includes(shot.name)) : SHOTS.filter((shot) => !shot.onlyNamed);
 if (!shots.length) throw new Error(`No shot named ${wanted.join(", ")}. Known: ${SHOTS.map((s) => s.name).join(", ")}`);
 
 const vite = process.env.PANEL_UI_URL ? null : await startVite();
@@ -191,6 +203,7 @@ try {
       await page.goto(pathToFileURL(join(here, shot.page)).href, { waitUntil: "load" });
     } else {
       await serveMockMedia(page);
+      if (shot.demo) await page.addInitScript((flags) => { window.__panelDemoFlags = flags; }, shot.demo);
       await page.addInitScript({ path: join(here, "demo-backend.js") });
       await page.goto(url);
       await page.waitForSelector("#panelBoot", { state: "detached", timeout: 15_000 }).catch(() => undefined);

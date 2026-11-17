@@ -20,7 +20,7 @@ UI / agent ──► module_request("/m/<name>/<route>", method, body)   (Tauri 
    killed after PANEL_MODULE_TIMEOUT_SECONDS (default 60)
 ```
 - Requests under `/m/<name>/assets/…` are served straight from `<module>/assets/` (no process), with a path-climb guard.
-- Each call costs an interpreter start. The UI therefore never polls modules on a timer.
+- Each call costs an interpreter start. The UI therefore never polls modules on a timer. One exception: the AI fleet screen reads `fleet` every 5 seconds, only while it is the screen shown, because it shows live terminals.
 - Python is `python3` (macOS/Linux) or `python` (Windows). `.py` runs with `-B`.
 - `module.json` `args` may contain `{root}` (the module folder).
 - Old name `decision-map` is served as `product-spine`.
@@ -108,6 +108,9 @@ Reads every app's Google Form responses into one inbox (Support screen). Read-on
 
 ### scout (public; needs `python3`, `gh`)
 Recurring checks and the work board. Drives the **Board** screen, which stays hidden without it. There is no strip on other screens. Scouts are `<ops>/scouts/*.md` (files starting `_` are not scouts): frontmatter `title`, `every` (`daily`, `sunday`, `manual`, `<N>h`), `after` (hour), and one of `run` (a shell command, no AI; `FOUND <title> | <body>` lines are filed once through `board.py file`) or `agent` (a session kind; `board next` hands it to a work session, the Run button opens it as a visible terminal), plus optional `model` and `needs`. Routes: `GET /scouts /board[?fresh=1] /prompt?id=`, `POST /run /start /record`. CLI: `bin/host.py record <id> --found N --note TEXT`, which the scout's prompt tells the agent to run. State `$PANEL_STATE_DIR/runs.json`; board cache 60 s. The UI never starts a scout on its own; `board next` runs due ones. It never polls: reads happen on focus, session exit, reports, and a timer set to the next due scout, so it reads as due. Tests: `test_host.py`.
+
+### fleet (private; needs `python3`, `tmux`)
+Drives the **AI fleet** screen, which stays hidden without it: each running fleet unit with the last lines of its terminal, and the runs that ended today. Read-only. The units run in tmux outside Panel, so Panel holds no terminal for them and quitting Panel ends nothing. One route: `GET /view`, which prints what `<ops>/runbooks/fleet.py view` prints. `appgeapanel://fleet` opens the screen.
 
 ### Product Spine (not in this checkout)
 Deterministic product-ownership layer: Flutter-first extractor, one-shot host; per the overview it

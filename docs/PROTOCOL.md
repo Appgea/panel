@@ -118,7 +118,7 @@ the furthest it goes is putting a Resume button in front of you.
 
 | link | opens |
 |---|---|
-| `appgeapanel://home` · `appgeapanel://review` · `appgeapanel://manager` | that screen |
+| `appgeapanel://home` · `appgeapanel://review` · `appgeapanel://manager` · `appgeapanel://fleet` | that screen |
 | `appgeapanel://history[?q=<words>]` | History, searching if asked |
 | `appgeapanel://session/<agent-session-id>` | History, on that session (any agent) |
 | `appgeapanel://project/<id>[/git\|/review[/<path>]\|/work/<path>[:<line>]]` | the project, or one of its places |

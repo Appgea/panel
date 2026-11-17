@@ -17,6 +17,81 @@
   const OPS = "/Users/dev/.appgeapanel/ops";
   const now = Date.now();
   const MIN = 60_000;
+  /** What one shot asks for beyond the README demo (capture.mjs `demo`). */
+  const DEMO_FLAGS = window.__panelDemoFlags ?? {};
+
+  /* ------------------------------------------------------------- the fleet */
+
+  const term = (lines) => lines.join("\n");
+  const FLEET_VIEW = {
+    supervisor: true,
+    hold: false,
+    spec: "terra:2,flash:1 --app tidepool",
+    units: [
+      {
+        id: "5a347f", kind: "terra", app: "tidepool", minutes: 6, budget: 36, tokens: "2.4M", quiet: 0, flags: [],
+        issues: [{ number: 412, title: "Feeding log: the evening reminder fires twice after a time zone change" }],
+        screen: term([
+          "• Ran rg -n \"scheduleReminder\" lib/tank",
+          "  └ lib/tank/feeding.dart:88:  Future<void> scheduleReminder(Tank tank) async {",
+          "    lib/tank/feeding.dart:131:    await scheduleReminder(tank);",
+          "",
+          "• The reminder is keyed by wall time, so a zone change schedules a second one.",
+          "  I will key it by tank id and slot, then cancel the old id first.",
+          "",
+          "• Edited lib/tank/feeding.dart (+9 -4)",
+          "    88  Future<void> scheduleReminder(Tank tank) async {",
+          "    89 -  final id = tank.nextFeed.millisecondsSinceEpoch ~/ 1000;",
+          "    89 +  final id = reminderId(tank.id, tank.slot);",
+          "    90 +  await notifications.cancel(id);",
+          "",
+          "• Ran testlock flutter test test/tank/feeding_test.dart",
+          "  └ 00:03 +14: All tests passed!",
+          "",
+          "› Ask Codex to do anything",
+          "",
+          "  GPT-6.1 Terra medium · ~/projects/tidepool · Run fleet builder 5a347f",
+        ]),
+      },
+      {
+        id: "bf2feb", kind: "terra", app: "tidepool", minutes: 31, budget: 30, tokens: "12.8M", quiet: 11, flags: ["OVER", "STUCK"],
+        issues: [
+          { number: 398, title: "Water test chart: weekly view" },
+          { number: 401, title: "Water test chart: export the readings as CSV from the share sheet, with the units in the header row" },
+        ],
+        screen: term([
+          "• Ran board review 398",
+          "  └ review: 1 finding. The weekly bucket starts on Sunday for every locale.",
+          "",
+          "• Fixing the week start with MaterialLocalizations.firstDayOfWeekIndex.",
+          "",
+          "• Edited lib/water/chart.dart (+6 -2)",
+          "",
+          "• Ran board review 398",
+          "  └ review: passed.",
+          "",
+          "Fleet check: you are past your 30 minutes. Finish #398, release #401 with what is left.",
+          "",
+          "• Working (11m 02s • esc to interrupt)",
+        ]),
+      },
+      {
+        id: "06aa1b", kind: "flash", app: "tidepool", minutes: 2, budget: 30, tokens: "0.1M", quiet: 0, flags: [],
+        issues: [],
+        screen: term([
+          "$ fleet hello 06aa1b",
+          "Unit 06aa1b. Your claim name is opencode-7c1d22e0.",
+          "$ board next --app tidepool",
+        ]),
+      },
+    ],
+    today: [
+      { time: "11:45", unit: "382d3d", kind: "terra", app: "tidepool", closed: [388, 391], minutes: 14, tokens: "6.1M", result: "said bye" },
+      { time: "11:42", unit: "0c41aa", kind: "flash", app: "tidepool", closed: [385], minutes: 9, tokens: "0.4M", result: "said bye" },
+      { time: "11:35", unit: "77b750", kind: "terra", app: "tidepool", closed: [], minutes: 26, tokens: "3.0M", result: "quiet for 25 minutes, handed on" },
+      { time: "11:12", unit: "e7f068", kind: "sonnet", app: "-", closed: [377], minutes: 2, tokens: "0.6M", result: "said bye" },
+    ],
+  };
 
   /* ------------------------------------------------------------- portfolio */
 
@@ -485,15 +560,16 @@ only after I approve the exact prompt. Never ship, spend or change a price on yo
 
   const COMMANDS = {
     launch_context: () => ({ single_project: null }),
+    live_wall: () => ({ savedAt: 0, sessions: [] }),
     list_modules: () => [
       { name: "git-manager", title: "Git", icon: "⎇", project_surfaces: [] },
       { name: "support", title: "Support", icon: "✉", project_surfaces: [] },
+      ...(DEMO_FLAGS.fleet ? [{ name: "fleet", title: "AI fleet", icon: "⛭", project_surfaces: [] }] : []),
     ],
     list_groups: () => [],
     list_projects: () => PROJECTS,
     manager_project: () => MANAGER,
     cpo_preprompt: () => PREPROMPT,
-    live_wall: () => ({ savedAt: 0, sessions: [] }),
     restore_wall: () => ({
       savedAt: 0,
       sessions: [...SESSIONS, MANAGER_SESSION].map((s) => ({ session: s, screen: "" })),
@@ -544,6 +620,7 @@ only after I approve the exact prompt. Never ship, spend or change a price on yo
     debug_set_breakpoints: () => null,
     module_request: ({ path }) => {
       if (path.startsWith("/m/support/inbox")) return { unread: 2, items: [] };
+      if (DEMO_FLAGS.fleet && path.startsWith("/m/fleet/view")) return FLEET_VIEW;
       const name = path.split("/")[2];
       // The real host answers a module that is not installed with a 404, and the UI handles that.
       if (!["git-manager", "support"].includes(name)) throw new Error(`unknown module: ${name}`);

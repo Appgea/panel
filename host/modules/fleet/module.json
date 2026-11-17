@@ -1,0 +1,1 @@
+{"name":"fleet","title":"AI fleet","visibility":"private","summary":"The fleet's units, what each one is typing, and what closed today.","icon":"⛭","protocol":"cgi-argv","exec":"bin/host.py","args":[],"requires":["python3","tmux"]}

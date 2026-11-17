@@ -334,6 +334,11 @@
           <button id="boardButton" class="nav-row" type="button" title="Board: who holds what, what needs you, the scouts" hidden>
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v6h-4z"/></svg></span> Board
           </button>
+          <!-- The fleet's units, what each is typing, and what closed today. Shown only with the
+               fleet extension installed, like Board. -->
+          <button id="fleetButton" class="nav-row" type="button" title="AI fleet: the units that run now and what they closed today" hidden>
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1"/><rect x="13" y="4" width="8" height="6" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><path d="M14 15h6"/><path d="M14 19h4"/></svg></span> AI fleet
+          </button>
           <button id="sprintButton" class="nav-row" type="button" title="Project desk">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h6"/><path d="m14 16 2.5 2.5L21 14"/></svg></span> Project desk
           </button>
@@ -420,6 +425,9 @@
       <section id="opsMapScreen" class="ops-map" hidden tabindex="-1"></section>
       <!-- BOARD: the issue board and the scouts. Portfolio-wide, like Home. -->
       <section id="boardScreen" class="board" hidden tabindex="-1"></section>
+      <!-- AI FLEET: the fleet's running units and what they closed today. Read-only: the units
+           run in tmux outside Panel, so this screen holds no terminal. -->
+      <section id="fleetScreen" class="fleet" hidden tabindex="-1"></section>
 
       <!-- SUPPORT: every app's support form, read into one queue. Portfolio-wide like Home —
            the queue is one queue, and splitting it per project would make eleven of it. -->

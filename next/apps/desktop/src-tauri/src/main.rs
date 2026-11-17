@@ -93,9 +93,6 @@ struct Session {
     /// restore, a resume from History.
     #[serde(skip)]
     resumed: Option<String>,
-    /// A tab a local script opened over `/panel/tab/open`. It closes itself when its command
-    /// ends, and it is never written to the wall: its script, not a restart, decides if it runs.
-    transient: bool,
 }
 
 struct DesktopState {
@@ -1286,7 +1283,7 @@ async fn skills_session_restart(app: AppHandle, state: State<'_, DesktopState>,
         cols, rows, Some(found.cwd.to_string_lossy().into_owned()), Reopen {
             id: Some(session.clone()), title: Some(found.title.clone()),
             resume: vec![if found.kind == "claude" { "--resume" } else { "resume" }.into()],
-            ..Reopen::default()
+            conversation: None,
         }).await;
     if result.is_err() {
         // Keep the ended seat addressable so the user can retry the launch.
@@ -1526,9 +1523,6 @@ struct Reopen {
     title: Option<String>,
     /// The conversation `resume` reopens, when it names one.
     conversation: Option<String>,
-    /// One command line for a `shell` session to run in place of a prompt. The session is then
-    /// a script's tab (`tab_request`): it ends with the command and closes itself.
-    run: Option<String>,
 }
 
 const OPENCODE_DEEPSEEK: &str = "opencode/deepseek-v4.1-flash-free";
@@ -1574,6 +1568,11 @@ async fn open_session(
         .map(PathBuf::from)
         .filter(|path| path.is_dir())
         .unwrap_or_else(|| found.path.clone());
+    let event_app = app.clone();
+    let sink: TerminalSink = Arc::new(move |chunk: TerminalChunk| {
+        let _ = event_app.emit(TERMINAL_EVENT, chunk);
+    });
+
     // Every coding agent receives a routable Panel identity. Providers differ only in how the
     // "send this to the human" behavior is injected: Claude uses its settings/MCP flags, Codex
     // gets per-process config overrides, and Grok gets a session rule plus the local sender.
@@ -1587,24 +1586,6 @@ async fn open_session(
     let (program, model_args) = kind_program(&kind);
     let session_id = reopen.id.clone().unwrap_or_else(|| {
         if instance.is_empty() { uuid_v4() } else { instance.clone() }
-    });
-    let transient = kind == "shell" && reopen.run.is_some();
-    if let Some(line) = reopen.run.as_deref().filter(|_| transient) {
-        // Interactive and login, so the line gets the PATH a typed one has. The shell ends with it.
-        spec = if cfg!(windows) {
-            spec.run("powershell.exe", vec!["-NoLogo".into(), "-Command".into(), line.into()])
-        } else {
-            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-            spec.run(shell, vec!["-lic".into(), line.into()])
-        };
-    }
-    let (event_app, tab) = (app.clone(), transient.then(|| session_id.clone()));
-    let sink: TerminalSink = Arc::new(move |chunk: TerminalChunk| {
-        let closed = chunk.closed;
-        let _ = event_app.emit(TERMINAL_EVENT, chunk);
-        if let Some(id) = tab.clone().filter(|_| closed) {
-            tauri::async_runtime::spawn(close_tab(event_app.clone(), id));
-        }
     });
 
     if kind != "shell" {
@@ -1695,7 +1676,6 @@ async fn open_session(
         instance,
         launched_ms: history::now_ms(),
         resumed: reopen.conversation,
-        transient,
     };
     state
         .sessions
@@ -1759,7 +1739,7 @@ struct SavedWall {
 }
 
 /// A restored terminal, handed to the UI: the live session plus the screen to paint into it.
-#[derive(Clone, serde::Serialize)]
+#[derive(serde::Serialize)]
 struct RestoredSession {
     session: Session,
     screen: String,
@@ -1816,7 +1796,7 @@ fn save_wall(app: &AppHandle, state: &DesktopState) {
         let terminals = state.terminals.lock().unwrap();
         sessions
             .into_iter()
-            .filter(|session| session.kind != "sim" && session.kind != "task" && !session.transient)
+            .filter(|session| session.kind != "sim" && session.kind != "task")
             .filter(|session| session.cwd.is_dir())
             .map(|session| {
                 let screen = terminals.screen(&session.terminal_id).unwrap_or_default();
@@ -1948,7 +1928,6 @@ async fn restore_wall(
                     instance: saved.id,
                     launched_ms: history::now_ms(),
                     resumed: Some(conversation.clone()),
-                    transient: false,
                 };
                 state.sleeping.lock().unwrap().insert(
                     session.id.clone(),
@@ -1978,7 +1957,6 @@ async fn restore_wall(
             resume,
             title: Some(saved.title.clone()),
             conversation,
-            run: None,
         };
         match open_session(
             app.clone(),
@@ -2465,7 +2443,6 @@ async fn wake_session(
             resume,
             title: Some(slept.title),
             conversation: Some(sleeper_conversation),
-            run: None,
         },
     )
     .await?;
@@ -2487,77 +2464,6 @@ fn write_terminal(
         .unwrap()
         .write(&terminal_id, &data)
         .map_err(|error| error.to_string())
-}
-
-const TAB_OPENED_EVENT: &str = "panel-tab-opened";
-const TAB_CLOSED_EVENT: &str = "panel-tab-closed";
-
-/// `/panel/tab/<op>`: a local script's own session tabs. `fleet` in the ops tree runs each
-/// builder in one. The ingress has checked the op and that every field is one clean line.
-/// `open` forks what `start_session` forks, running `command` in place of a prompt, and tells the
-/// UI, which never asked for it. The other ops take the session id `open` returned and refuse a
-/// session a script did not open: the human's terminals are not reachable from here.
-fn tab_request(app: &AppHandle, op: &str, body: &Value) -> Value {
-    let state = app.state::<DesktopState>();
-    let text = |key: &str| body[key].as_str().unwrap_or_default().to_string();
-    if op == "open" {
-        let project = Some(text("project")).filter(|id| !id.is_empty()).unwrap_or_else(|| MAIN_ID.into());
-        let cwd = Some(text("cwd")).filter(|path| !path.is_empty());
-        let reopen = Reopen { title: Some(text("title")), run: Some(text("command")), ..Reopen::default() };
-        let opened = tauri::async_runtime::block_on(open_session(
-            app.clone(), app.state::<DesktopState>(), project, "shell".into(), 120, 34, cwd, reopen));
-        let session = match opened {
-            Ok(session) => session,
-            Err(error) => return serde_json::json!({"error": error}),
-        };
-        let id = session.id.clone();
-        let _ = app.emit(TAB_OPENED_EVENT, RestoredSession { session, screen: String::new(), asleep: false });
-        return serde_json::json!({"ok": true, "id": id});
-    }
-    let found = state.sessions.lock().unwrap().get(&text("id")).filter(|session| session.transient).cloned();
-    let Some(found) = found else {
-        // Closing a tab that already closed itself is the state the caller wanted.
-        return if op == "close" { serde_json::json!({"ok": true}) } else { serde_json::json!({"error": "no such tab"}) };
-    };
-    match op {
-        "screen" => {
-            let mut terminals = state.terminals.lock().unwrap();
-            serde_json::json!({
-                "ok": true,
-                "running": terminals.is_running(&found.terminal_id),
-                "screen": terminals.screen(&found.terminal_id).unwrap_or_default(),
-            })
-        }
-        "type" => {
-            // Text, then Enter apart from it: a TUI reads text and \r in one chunk as a paste.
-            let (app, line) = (app.clone(), text("text"));
-            std::thread::spawn(move || {
-                let state = app.state::<DesktopState>();
-                for (keys, wait) in [(line.as_str(), 500), ("\r", 0)] {
-                    if state.terminals.lock().unwrap().write(&found.terminal_id, keys).is_err() {
-                        return;
-                    }
-                    std::thread::sleep(std::time::Duration::from_millis(wait));
-                }
-            });
-            serde_json::json!({"ok": true})
-        }
-        _ => {
-            tauri::async_runtime::block_on(close_tab(app.clone(), found.id));
-            serde_json::json!({"ok": true})
-        }
-    }
-}
-
-/// End a script's tab and take it off the wall. Runs when the script asks and when the tab's
-/// command ends by itself, so a second call finds nothing and does nothing.
-async fn close_tab(app: AppHandle, id: String) {
-    let state = app.state::<DesktopState>();
-    let found = state.sessions.lock().unwrap().remove(&id);
-    if let Some(found) = found {
-        let _ = end_session(&state, found).await;
-        let _ = app.emit(TAB_CLOSED_EVENT, id);
-    }
 }
 
 /// The ops hook `third-compact.py` asks for this after a session's 3rd compact: type `/clear`
@@ -3144,7 +3050,6 @@ async fn start_sim(
         instance: String::new(),
         launched_ms: history::now_ms(),
         resumed: None,
-        transient: false,
     };
     state
         .sessions
@@ -4595,8 +4500,6 @@ fn main() {
             ingress.on_link(Arc::new(move |url| queue_links(&links, [url])));
             let clears = app.handle().clone();
             ingress.on_clear(Arc::new(move |instance, pid, follow| clear_terminal(&clears, &instance, pid, follow)));
-            let tabs = app.handle().clone();
-            ingress.on_tab(Arc::new(move |op, body| tab_request(&tabs, op, body)));
             for project in all_projects().into_iter().filter(|project| project.exists) {
                 ingress.register_project(&project.id, &project.path);
             }

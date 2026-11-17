@@ -75,6 +75,7 @@ export function placeLabel(place: Place): { kind: string; name: string } {
  *   appgeapanel://project/<id>/review[/<path>]    its work waiting in Review
  *   appgeapanel://project/<id>/work/<path>[:line] the file in Work
  *   appgeapanel://review | appgeapanel://manager
+ *   appgeapanel://fleet                           the AI fleet screen: `fleet start` opens it
  *   appgeapanel://open/<full path>[:line]        any file or folder: Panel finds its project
  *
  * A link never starts anything on its own. The furthest one goes is to put a Resume button in
@@ -84,6 +85,7 @@ export type AppLink =
   | { to: "home" }
   | { to: "review" }
   | { to: "live" }
+  | { to: "fleet" }
   | { to: "manager" }
   | { to: "history"; query?: string; session?: string }
   | { to: "project"; project: string; place?: Place }
@@ -109,6 +111,7 @@ export function parseAppLink(url: string): AppLink | null {
     case "home":
     case "review":
     case "live":
+    case "fleet":
     case "manager":
       return id ? null : { to: verb };
     case "history": {

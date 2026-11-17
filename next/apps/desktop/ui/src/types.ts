@@ -114,8 +114,6 @@ export type Session = {
   kind: SessionKind | "sim" | "task";
   title: string;
   terminal_id: string;
-  /** A tab a local script opened (`/panel/tab/open`). It shows its title and closes itself. */
-  transient?: boolean;
 };
 
 /** One available iOS simulator, from `list_simulators`. */
