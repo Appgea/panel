@@ -17,6 +17,8 @@ Bound to `127.0.0.1:<ephemeral>`; the port is in `~/.appgeapanel/ingress-port` a
 | `POST /panel/emit` | `{instance?, cwd?, project?, type, payload}` | `{id, routed:bool}` | `panel_mcp.py` (`panel_emit`, `send_to_user`), `panel_send.py` |
 | `POST /panel/ask` | `{instance, spec, timeout?}` (timeout seconds, default **280**, min 1) | the answer object; `{"timeout":true}` on expiry; `{"error":"no project is bound to this agent"}` if unroutable (fails fast, no hang) | `panel_mcp.py` (`ask_user`) |
 | `POST /panel/answer` | `{qid, value}` | `{ok:bool}` | tooling/tests (the app itself uses the `answer_ask` Tauri command) |
+| `POST /panel/session/open` | `{kind?="claude", project?, cwd?, title?, prompt?, remote_control?}`, JSON only | `{ok, id, project, title, url?}` | `panel_session.py open` |
+| `POST /panel/session/rc` | `{instance?, pid?}`, JSON only | `{ok, url}`, `url` null when no link showed in 10 s | `panel_session.py rc` |
 
 **Routing** (`emit` / `hook`): exact `instance` → else deepest registered project root containing `cwd`.
 `/panel/emit` additionally accepts an explicit `project` id, honoured only if registered (no guessing from
@@ -146,6 +148,20 @@ JSON-encoded answer. HTTP client timeout = `timeout + 20`.
 
 `python3 panel_send.py --title T --text X --outcome {progress|done|blocked|needs_decision} --flow 'REF|LABEL|DETAIL' [--flow …] [--image P]… [--audio P]… [--video P]… [--file P]… [--folder P]… [--link U]…`
 Posts the same `message` payload to `/panel/emit` using `PANEL_PORT`/`PANEL_INSTANCE` (and `cwd` as a routing fallback). The path is injected into every agent as `PANEL_SEND`.
+
+### `panel_session.py` (any engine, no MCP)
+
+`python3 host/panel_session.py open [--kind claude] [--project ID] [--cwd DIR] [--title T] [--rc] [--prompt TEXT | --prompt-file F]`
+opens an agent session the way a click does: a normal tab, kept on the wall across a restart, wired
+like any agent. No `--project`: the deepest project holding `--cwd`, else the main folder. The prompt
+goes first in argv, so `--remote-control` cannot read it as its name. A prompt may span lines but not
+start with `-`. `--rc` starts claude with Remote Control on, named after the title, and waits up to
+30 s for the link.
+
+`python3 host/panel_session.py rc` types `/remote-control` into the claude above the script, found by
+`PANEL_INSTANCE` or, in a plain Panel shell, by its pid as the terminal's foreground job. Claude runs
+it at once, mid-turn too. When Remote Control is on already, claude opens a menu whose default is
+Continue, and Panel presses Enter to close it. Both print Panel's JSON reply and exit 1 on an error.
 
 ## 6. Ask kinds and answers
 

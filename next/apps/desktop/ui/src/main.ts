@@ -5122,6 +5122,13 @@ async function boot(): Promise<void> {
   // Not awaited: a slow disk must not hold the window back. Home and the Inbox fill when it lands.
   void loadKeptPosts().catch((error: unknown) => console.warn("[panel] inbox load", error));
   await listen<ProjectEvent>("panel-agent-event", ({ payload }) => onEvent(payload));
+  // An agent opened this session (`/panel/session/open`): Rust forked it with nobody clicking.
+  await listen<Wall["sessions"][number]>("panel-session-opened", ({ payload }) => {
+    if (sessionById(payload.session.id)) return;
+    adoptWall({ savedAt: 0, sessions: [payload] }, false);
+    if (active === payload.session.project) showSessions();
+    paintProjects();
+  });
   await listen("panel-portfolio-changed", () => void refreshPortfolio());
   // The plan is written by agents in their own terminals. The screen follows the file rather
   // than waiting to be told, so an agent's plan lands without anyone pressing refresh.

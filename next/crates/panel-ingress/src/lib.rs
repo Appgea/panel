@@ -216,6 +216,11 @@ pub type LinkSink = Arc<dyn Fn(String) + Send + Sync>;
 /// runs either.
 pub type ClearSink = Arc<dyn Fn(String, u32, String) -> bool + Send + Sync>;
 
+/// An agent's own asks about sessions, over `/panel/session/<op>`: `open` a new agent session the
+/// way the owner's click opens one, or `rc`, Claude's Remote Control in the caller's own terminal.
+/// Args: the op and the checked body. The reply goes back to the caller as it is.
+pub type SessionSink = Arc<dyn Fn(&str, &Value) -> Value + Send + Sync>;
+
 #[derive(Clone)]
 pub struct Ingress {
     port: u16,
@@ -228,6 +233,7 @@ pub struct Ingress {
     conversations: Arc<Mutex<HashMap<String, String>>>,
     links: Arc<Mutex<Option<LinkSink>>>,
     clears: Arc<Mutex<Option<ClearSink>>>,
+    sessions: Arc<Mutex<Option<SessionSink>>>,
     sink: EventSink,
 }
 
@@ -255,6 +261,7 @@ impl Ingress {
             conversations: Arc::new(Mutex::new(HashMap::new())),
             links: Arc::new(Mutex::new(None)),
             clears: Arc::new(Mutex::new(None)),
+            sessions: Arc::new(Mutex::new(None)),
             sink,
         };
 
@@ -359,6 +366,11 @@ impl Ingress {
         *self.clears.lock().unwrap() = Some(sink);
     }
 
+    /// Receive `/panel/session/<op>` from an agent that opens a session or turns on Remote Control.
+    pub fn on_session(&self, sink: SessionSink) {
+        *self.sessions.lock().unwrap() = Some(sink);
+    }
+
     fn handle(&self, mut request: Request) {
         let url = request.url().to_string();
         let json_body = request.headers().iter().any(|header| {
@@ -370,6 +382,8 @@ impl Ingress {
 
         let reply = if let Some(event) = url.strip_prefix("/hook/") {
             self.on_hook(event, &body)
+        } else if let Some(op) = url.strip_prefix("/panel/session/") {
+            self.on_session_request(op, &body, json_body)
         } else {
             match url.as_str() {
                 "/panel/emit" => self.on_emit(&body),
@@ -424,6 +438,49 @@ impl Ingress {
             return json!({"error": "no live terminal runs that instance or pid"});
         }
         json!({"ok": true})
+    }
+
+    /// JSON only, like links and clears. Every field but `prompt` is one clean line. `prompt` is
+    /// argv, never a shell line, so it may span lines, but a leading `-` would read as a flag.
+    fn on_session_request(&self, op: &str, body: &Value, json_body: bool) -> Value {
+        if !json_body {
+            return json!({"error": "content type must be application/json"});
+        }
+        let line = |key: &str, max: usize| match body.get(key) {
+            None | Some(Value::Null) => true,
+            Some(value) => value.as_str().is_some_and(|text| {
+                !text.trim().is_empty() && text.len() <= max && !text.chars().any(char::is_control)
+            }),
+        };
+        let well_formed = match op {
+            "open" => {
+                let kind = body["kind"].as_str().unwrap_or("claude");
+                let rc = body["remote_control"].as_bool().unwrap_or(false);
+                let prompt = match body.get("prompt") {
+                    None | Some(Value::Null) => true,
+                    Some(value) => value.as_str().is_some_and(|text| {
+                        !text.trim().is_empty() && text.len() <= 20_000 && !text.starts_with('-')
+                            && !text.chars().any(|c| c.is_control() && c != '\n' && c != '\t')
+                    }),
+                };
+                !kind.is_empty() && kind.len() <= 40 && kind != "shell"
+                    && kind.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                    && line("project", 120) && line("cwd", 4096) && line("title", 80)
+                    && prompt && (!rc || kind == "claude")
+            }
+            "rc" => {
+                let pid = body["pid"].as_u64().is_some_and(|pid| pid > 1 && pid <= u64::from(u32::MAX));
+                line("instance", 64) && (pid || body["instance"].as_str().is_some())
+            }
+            _ => return json!({"error": "unknown endpoint"}),
+        };
+        if !well_formed {
+            return json!({"error": "open needs an agent kind and one-line project, cwd and title, a prompt under 20000 chars that does not start with '-', and remote_control only for claude. rc needs an instance or pid"});
+        }
+        let Some(sink) = self.sessions.lock().unwrap().clone() else {
+            return json!({"error": "Panel is still starting"});
+        };
+        sink(op, body)
     }
 
     /// Claude session hooks -> deterministic panel events.
@@ -1095,6 +1152,39 @@ mod tests {
             assert!(ingress.on_clear_request(&body, json_body)["error"].is_string(), "{body}");
         }
         assert_eq!(got.lock().unwrap().len(), 3, "only the three well-formed asks reach the shell");
+    }
+
+    /// A session ask reaches the shell only as JSON, under a known op, with argv-safe fields.
+    #[test]
+    fn a_session_ask_needs_json_a_known_op_and_safe_fields() {
+        let (ingress, _rx) = ingress();
+        let open = json!({"kind": "claude", "title": "Fix login", "prompt": "Fix the login bug.\nThen land.", "remote_control": true});
+        assert!(ingress.on_session_request("open", &open, true)["error"].is_string(),
+            "before a handler is set the caller must hear that it failed");
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let seen = got.clone();
+        ingress.on_session(Arc::new(move |op, _body| {
+            seen.lock().unwrap().push(op.to_string());
+            json!({"ok": true})
+        }));
+        for (op, body) in [("open", open.clone()), ("open", json!({})), ("rc", json!({"pid": 4242})), ("rc", json!({"instance": "s1"}))] {
+            assert_eq!(ingress.on_session_request(op, &body, true)["ok"], true, "{op} {body}");
+        }
+        for (op, body, json_body) in [
+            ("open", open.clone(), false),
+            ("open", json!({"kind": "shell"}), true),
+            ("open", json!({"kind": "/bin/rm"}), true),
+            ("open", json!({"prompt": "--dangerously-skip-permissions"}), true),
+            ("open", json!({"prompt": "go\rrm -rf ~"}), true),
+            ("open", json!({"title": "a\nb"}), true),
+            ("open", json!({"kind": "codex", "remote_control": true}), true),
+            ("rc", json!({"pid": 1}), true),
+            ("rc", json!({}), true),
+            ("erase", json!({"pid": 4242}), true),
+        ] {
+            assert!(ingress.on_session_request(op, &body, json_body)["error"].is_string(), "{op} {body}");
+        }
+        assert_eq!(got.lock().unwrap().len(), 4, "only the four well-formed asks reach the shell");
     }
 
     /// History must know which conversation a live terminal holds, so it never resumes it twice.

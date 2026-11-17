@@ -1739,7 +1739,7 @@ struct SavedWall {
 }
 
 /// A restored terminal, handed to the UI: the live session plus the screen to paint into it.
-#[derive(serde::Serialize)]
+#[derive(Clone, serde::Serialize)]
 struct RestoredSession {
     session: Session,
     screen: String,
@@ -2474,21 +2474,7 @@ fn clear_terminal(app: &tauri::AppHandle, instance: &str, pid: u32, follow: Stri
     let Some(state) = app.try_state::<DesktopState>() else {
         return false;
     };
-    let launched = (!instance.is_empty())
-        .then(|| {
-            state
-                .sessions
-                .lock()
-                .unwrap()
-                .values()
-                .find(|session| session.instance == instance)
-                .map(|session| session.terminal_id.clone())
-        })
-        .flatten();
-    // On the pid route the PTY outlives claude. Keys must reach claude only, never the shell under it.
-    let guard = launched.is_none().then_some(pid);
-    let terminal_id = launched.or_else(|| (pid > 1).then(|| state.terminals.lock().unwrap().holding(pid)).flatten());
-    let Some(terminal_id) = terminal_id else {
+    let Some((terminal_id, guard, _)) = own_terminal(&state, instance, pid) else {
         return false;
     };
     let app = app.clone();
@@ -2513,6 +2499,138 @@ fn clear_terminal(app: &tauri::AppHandle, instance: &str, pid: u32, follow: Stri
         }
     });
     true
+}
+
+/// The terminal an agent's ask about itself means: its terminal id, a pid guard, and its kind.
+/// The instance finds a session Panel launched. The pid finds an agent typed into a plain Panel
+/// shell, as that terminal's foreground job, and its kind is unknown. On that route the PTY
+/// outlives the agent, so the pid comes back as a guard: keys reach the agent, never the shell.
+fn own_terminal(state: &DesktopState, instance: &str, pid: u32) -> Option<(String, Option<u32>, String)> {
+    let launched = (!instance.is_empty())
+        .then(|| {
+            state
+                .sessions
+                .lock()
+                .unwrap()
+                .values()
+                .find(|session| session.instance == instance)
+                .map(|session| (session.terminal_id.clone(), None, session.kind.clone()))
+        })
+        .flatten();
+    launched.or_else(|| {
+        let terminal_id = (pid > 1).then(|| state.terminals.lock().unwrap().holding(pid)).flatten()?;
+        Some((terminal_id, Some(pid), String::new()))
+    })
+}
+
+const SESSION_OPENED_EVENT: &str = "panel-session-opened";
+
+/// `/panel/session/<op>` from an agent. `open` forks what the owner's click forks and tells the
+/// UI, which never asked for it. `rc` turns on Remote Control in the caller's own terminal. The
+/// ingress has checked the op and every field.
+fn session_request(app: &AppHandle, op: &str, body: &Value) -> Value {
+    let text = |key: &str| Some(body[key].as_str().unwrap_or_default().trim().to_string()).filter(|text| !text.is_empty());
+    let state = app.state::<DesktopState>();
+    if op == "rc" {
+        let pid = body["pid"].as_u64().and_then(|pid| u32::try_from(pid).ok()).unwrap_or(0);
+        return remote_control(&state, &text("instance").unwrap_or_default(), pid);
+    }
+    let kind = text("kind").unwrap_or_else(|| "claude".into());
+    let cwd = text("cwd");
+    let project = text("project")
+        .or_else(|| cwd.as_deref().and_then(project_holding))
+        .unwrap_or_else(|| MAIN_ID.into());
+    let rc = body["remote_control"].as_bool().unwrap_or(false);
+    // The prompt goes first: `--remote-control` takes an optional name and would read a prompt
+    // behind it as that name. Remote Control is named after the tab, so the phone list matches it.
+    let mut lead: Vec<String> = body["prompt"].as_str().map(|prompt| vec![prompt.to_string()]).unwrap_or_default();
+    if rc {
+        lead.extend(["--remote-control".into(), text("title").unwrap_or_else(|| project.clone())]);
+    }
+    let reopen = Reopen { title: text("title"), resume: lead, ..Reopen::default() };
+    let opened = tauri::async_runtime::block_on(open_session(
+        app.clone(), app.state::<DesktopState>(), project, kind, 120, 34, cwd, reopen));
+    let session = match opened {
+        Ok(session) => session,
+        Err(error) => return serde_json::json!({"error": error}),
+    };
+    let mut reply = serde_json::json!({"ok": true, "id": session.id, "project": session.project, "title": session.title});
+    let terminal_id = session.terminal_id.clone();
+    let _ = app.emit(SESSION_OPENED_EVENT, RestoredSession { session, screen: String::new(), asleep: false });
+    if rc {
+        // Connecting at startup took 14 to 25 s on 2026-11-17, longer while the first prompt runs.
+        reply["url"] = serde_json::json!(rc_link(&state, &terminal_id, None, 30_000).0);
+    }
+    reply
+}
+
+/// The deepest project folder that holds `path`, so a session opened "here" lands on its project.
+fn project_holding(path: &str) -> Option<String> {
+    let path = Path::new(path);
+    all_projects()
+        .into_iter()
+        .filter(|project| project.exists && project.role != ProjectRole::Collection && path.starts_with(&project.path))
+        .max_by_key(|project| project.path.components().count())
+        .map(|project| project.id)
+}
+
+/// Type `/remote-control` into the caller's own claude and hand back the link it prints. Claude
+/// takes it at once, mid-turn too. When Remote Control is on already, claude shows a menu whose
+/// default is Continue, so one Enter closes it and changes nothing.
+fn remote_control(state: &DesktopState, instance: &str, pid: u32) -> Value {
+    let Some((terminal_id, guard, kind)) = own_terminal(state, instance, pid) else {
+        return serde_json::json!({"error": "no live Panel terminal runs that instance or pid"});
+    };
+    if !kind.is_empty() && kind != "claude" {
+        return serde_json::json!({"error": format!("Remote Control is a claude command, and this session runs {kind}")});
+    }
+    let write = |keys: &str| {
+        let mut terminals = state.terminals.lock().unwrap();
+        guard.is_none_or(|pid| terminals.foreground_pid(&terminal_id) == Some(pid))
+            && terminals.write(&terminal_id, keys).is_ok()
+    };
+    // Text, then Enter apart from it: a TUI reads text and \r in one chunk as a paste.
+    let typed = write("/remote-control") && {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        write("\r")
+    };
+    if !typed {
+        return serde_json::json!({"error": "the terminal stopped running claude"});
+    }
+    let (url, menu) = rc_link(state, &terminal_id, Some("remote-control"), 10_000);
+    if menu {
+        write("\r");
+    }
+    serde_json::json!({"ok": true, "url": url})
+}
+
+/// The Remote Control link claude printed after the last `since` on the screen, and whether its
+/// already-on menu is up. Waits up to `ms` for the link.
+fn rc_link(state: &DesktopState, terminal_id: &str, since: Option<&str>, ms: u64) -> (Option<String>, bool) {
+    const LINK: &str = "https://claude.ai/code/session_";
+    let read = || {
+        let screen = state.terminals.lock().unwrap().screen(terminal_id).unwrap_or_default();
+        match since.and_then(|marker| screen.rfind(marker)) {
+            Some(at) => screen[at..].to_string(),
+            None => screen,
+        }
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(ms);
+    loop {
+        let tail = read();
+        let id = tail.rfind(LINK).map(|at| {
+            tail[at + LINK.len()..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect::<String>()
+        });
+        if let Some(id) = id.filter(|id| !id.is_empty()) {
+            // The menu's lines can land a frame after the link.
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            return (Some(format!("{LINK}{id}")), read().contains("Esc to continue"));
+        }
+        if std::time::Instant::now() >= deadline {
+            return (None, false);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
 }
 
 /// A pasted file is not keystrokes. The webview hands us the clipboard bytes; we park them in
@@ -4500,6 +4618,8 @@ fn main() {
             ingress.on_link(Arc::new(move |url| queue_links(&links, [url])));
             let clears = app.handle().clone();
             ingress.on_clear(Arc::new(move |instance, pid, follow| clear_terminal(&clears, &instance, pid, follow)));
+            let sessions = app.handle().clone();
+            ingress.on_session(Arc::new(move |op, body| session_request(&sessions, op, body)));
             for project in all_projects().into_iter().filter(|project| project.exists) {
                 ingress.register_project(&project.id, &project.path);
             }
