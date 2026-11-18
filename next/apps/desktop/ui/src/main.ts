@@ -43,7 +43,7 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
-import type { BoardData, BoardHandle, RoutinesData, Scout } from "./features/board";
+import type { BoardData, BoardHandle, OverviewData, RoutinesData, Scout } from "./features/board";
 import type { FleetHandle, FleetView } from "./features/fleet";
 import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
@@ -1568,6 +1568,8 @@ function setupBoard(on: boolean): void {
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
         picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
         routines: () => moduleGet<RoutinesData>("/m/scout/routines"),
+        overview: (hours) => moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`),
+        fleet: () => moduleGet<FleetView>("/m/fleet/view"),
       },
       appIcon: (dir) => {
         const project = [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`));
@@ -1580,6 +1582,7 @@ function setupBoard(on: boolean): void {
       startRoutine: async (id) =>
         Boolean(await launchScout({ id, agent: "claude" } as Scout,
           `Run \`routine ${id}\` in the shell and do what it prints, to the end.`, async () => undefined)),
+      tellCommander: (words) => tellCommander(words),
     });
     return board;
   });
@@ -1588,6 +1591,20 @@ function setupBoard(on: boolean): void {
     boardLoading = null;
     console.warn("[panel] board", error);
   });
+}
+
+/** The fleet's commander: one Claude terminal on the main folder that takes his words from the Board's Overview.
+ *  Reused while it lives, so a second direction lands where the first one's context is. The fleet skill's
+ *  "When he steers" says what it does with them. */
+let commanderSession: string | null = null;
+async function tellCommander(words: string): Promise<boolean> {
+  const said = words.replace(/\s+/g, " ").trim();
+  const order = `The owner steers the fleet from Panel's Overview: "${said}"`;
+  if (commanderSession && (await deck.sendPrompt(commanderSession, order))) return true;
+  commanderSession = await launchScout({ id: "commander", agent: "claude" } as Scout,
+    `You are the fleet commander. Read ~/.appgeapanel/skills/fleet/SKILL.md, section "When he steers", and act on it. ${order}`,
+    async () => undefined);
+  return commanderSession !== null;
 }
 
 /** The swipe review (swipe.ts) over the whole window. Its verdicts go to GitHub through the scout

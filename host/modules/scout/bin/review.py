@@ -176,7 +176,7 @@ def card(issue):
         "summary": _plain(summary, 320), "why": _plain(_line(body, "Why"), 240), "ask": _plain(_line(body, "Ask"), 240),
         "points": [_plain(p, 200) for p in points[:4]], "minutes": int(took.group(1)) if took else None,
         "who": who.group(1) if who else "", "at": issue.get("closedAt") if closed else issue.get("createdAt"),
-        "pictures": pictures[:3],
+        "pictures": pictures[:3], "created": issue.get("createdAt"),
     }
 
 
@@ -187,6 +187,24 @@ def _order(c):
 
 def deck(state, hours=None):
     since, until = window(state, hours)
+    cards = _cards(since)
+    result = {"since": _iso(since), "until": _iso(until), "repo": REPO, "cards": cards, "profile": profile(state),
+              "moves": {kind: {move: label for move, (label, _) in moves.items()} for kind, moves in MOVES.items()}}
+    # `send` reads titles and priorities from here, so the brief names what he saw.
+    _write(state / "review/deck.json", {"cards": cards})
+    return result
+
+
+def overview(hours):
+    """The same cards for the Board's Overview, read only: deck.json stays the swipe's, so a look here
+    never changes what an open swipe sends. Owner, 2026-11-18: "I want to see what are filed ... or
+    understand things in bulks"."""
+    until = _now()
+    since = until - timedelta(hours=min(max(float(hours or DEFAULT_HOURS), 1), MAX_HOURS))
+    return {"since": _iso(since), "until": _iso(until), "repo": REPO, "cards": _cards(since)}
+
+
+def _cards(since):
     stamp = _iso(since)
     with ThreadPoolExecutor(2) as pool:
         closed = pool.submit(_gh, ["issue", "list", "-R", REPO, "--state", "closed", "--search", "closed:>=%s" % stamp,
@@ -194,12 +212,7 @@ def deck(state, hours=None):
         created = pool.submit(_gh, ["issue", "list", "-R", REPO, "--state", "open", "--search", "created:>=%s" % stamp,
                                     "--limit", str(LIMIT), "--json", FIELDS])
         issues = {i["number"]: i for i in json.loads(closed.result()) + json.loads(created.result())}
-    cards = sorted((card(issue) for issue in issues.values()), key=_order)
-    result = {"since": _iso(since), "until": _iso(until), "repo": REPO, "cards": cards, "profile": profile(state),
-              "moves": {kind: {move: label for move, (label, _) in moves.items()} for kind, moves in MOVES.items()}}
-    # `send` reads titles and priorities from here, so the brief names what he saw.
-    _write(state / "review/deck.json", {"cards": cards})
-    return result
+    return sorted((card(issue) for issue in issues.values()), key=_order)
 
 
 def _model():

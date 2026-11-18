@@ -17,6 +17,7 @@
 import { errorText } from "../errors";
 import { icon, type IconName } from "../icons";
 import { dayKey, days, engineOf, splitTitle } from "./board_score";
+import type { FleetView } from "./fleet";
 import "./board.css";
 
 /** Who a launched terminal is for. The swipe review opens its agent through main.ts `launchScout`. */
@@ -90,12 +91,20 @@ export type Routine = {
   start: string;
 };
 export type RoutinesData = { round_since?: string; routines?: Routine[]; manual?: { id: string; title: string }[]; error?: string };
+/** An issue that moved in the window, from the scout module's `/review/overview` (the swipe deck's cards, read only). */
+export type OverviewCard = {
+  number: number; title: string; url: string; kind: "done" | "new" | "dropped"; apps: string[]; priority: number;
+  who: string; at: string | null; created?: string | null;
+};
+export type OverviewData = { since?: string; until?: string; repo?: string; cards?: OverviewCard[]; error?: string };
 
 /** The extension's routes, behind one seam so the dev harness can stand in for it. */
 export type BoardApi = {
   board(fresh: boolean): Promise<BoardData>;
   picture(path: string): Promise<string>;
   routines(): Promise<RoutinesData>;
+  overview(hours: number): Promise<OverviewData>;
+  fleet(): Promise<FleetView>;
 };
 
 export type BoardEvents = {
@@ -106,6 +115,8 @@ export type BoardEvents = {
   openSwipe(): void;
   /** Open a terminal that runs routine ID. False when no terminal opened. */
   startRoutine(id: string): Promise<boolean>;
+  /** His words to the fleet's commander: one Claude terminal, reused while it lives. False when none took them. */
+  tellCommander(words: string): Promise<boolean>;
 };
 
 export type BoardHandle = { open(): void; clear(): void; refresh(fresh?: boolean): void; dispose(): void };
@@ -183,6 +194,11 @@ const LANES: { key: Lane; title: string; hint: string; tone: string; icon: IconN
   { key: "waiting", title: "Waiting", hint: "Back on a date, or after another issue", tone: "t-quiet", icon: "clock", empty: "Nothing is parked." },
 ];
 const NO_APP = "_ops";
+type View = "tasks" | "routines" | "overview";
+const VIEWS: [View, string][] = [["tasks", "Open tasks"], ["routines", "Routines"], ["overview", "Overview"]];
+/** Group rows shown before "more". Enough to see the theme, short enough to scan many groups. */
+const GROUP_ROWS = 4;
+const plainWord = (s: string): string => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 
 /** A problem that only repeats the title, as speed issues do, adds nothing under it. */
 const echoes = (problem: string, title: string): boolean => {
@@ -228,7 +244,19 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
   let filterHost: HTMLElement | null = null;
   /** Open tasks or routines: two kinds of work, one screen each. Owner, 2026-11-18: "Open tasks and routines are two
    *  different tasks ... I want to be involving in more, understand more what is going on so I can decide". */
-  let view: "tasks" | "routines" = remember("view") === "routines" ? "routines" : "tasks";
+  let view: View = (VIEWS.find(([key]) => key === remember("view"))?.[0]) ?? "tasks";
+  /** The Overview: what the fleet does now and what moved on the board, in groups. Owner, 2026-11-18: "I want to see
+   *  what are filed or what direction the fleet unit is going, so that I can guide it ... or understand things in bulks".
+   *  He steers in words, to the commander: "I just command to a commander agent and it parks the direction and moves on". */
+  let overview: OverviewData | null = null;
+  let fleetNow: FleetView | null = null;
+  let overviewBusy = false;
+  let overviewAgain = false;
+  let hours = remember("hours") === "72" ? 72 : 24;
+  const openGroup = new Set<string>();
+  let draft = "";
+  let told: { ok: boolean; words: string } | null = null;
+  let telling = false;
   let routines: RoutinesData | null = null;
   let routinesBusy = false;
   const openRoutine = new Set<string>();
@@ -265,10 +293,36 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     }
   }
 
+  /** The fleet and the window's cards, read together. A failed read keeps the last good one, with the error. */
+  async function readOverview(): Promise<void> {
+    if (overviewBusy) {
+      overviewAgain = true;
+      return;
+    }
+    overviewBusy = true;
+    const asked = hours;
+    try {
+      const fail = (error: unknown) => ({ error: errorText(error, "the extension did not answer") });
+      const [cards, units] = await Promise.all([api.overview(asked).catch(fail), api.fleet().catch(fail)]);
+      // A read for a window he has left since is dropped: the pass after it reads the one on screen.
+      if (asked === hours) overview = cards.error && overview?.cards && overview.since ? { ...overview, error: cards.error } : cards;
+      else overviewAgain = true;
+      fleetNow = units;
+    } finally {
+      overviewBusy = false;
+      if (overviewAgain) {
+        overviewAgain = false;
+        void readOverview();
+      }
+      if (view === "overview") paint();
+    }
+  }
+
   async function refresh(fresh = false): Promise<void> {
     // Only the open Board shows a read, so a hidden one costs no `gh` calls. open() reads.
     if (!visible) return;
     if (view === "routines") void readRoutines();
+    if (view === "overview") void readOverview();
     // One pass at a time. A trigger that lands mid-pass runs one more pass after it, never two.
     if (busy) {
       again = true;
@@ -830,7 +884,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     const group = h("div", "bq-views");
     group.setAttribute("role", "tablist");
     const owed = routines?.routines?.filter((r) => r.state === "owed").length;
-    for (const [key, label] of [["tasks", "Open tasks"], ["routines", "Routines"]] as const) {
+    for (const [key, label] of VIEWS) {
       const tab = button(`bq-view${view === key ? " is-on" : ""}`, label);
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(view === key));
@@ -840,6 +894,7 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
         view = key;
         remember("view", key);
         if (key === "routines") void readRoutines();
+        if (key === "overview") void readOverview();
         paint();
       });
       group.append(tab);
@@ -952,6 +1007,169 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
     return pane;
   }
 
+  /* ------------------------------------------------------------ overview */
+
+  /** The group a card reads under: its title's topic when that topic spans apps ("Splash: Memor gets…"),
+   *  else its app. One app's prefix ("Tavla iOS: …") is that app, not a topic. */
+  function groupOf(card: OverviewCard): string {
+    const prefix = /^([^:]{2,24}):\s/.exec(card.title)?.[1];
+    const apps = card.apps.map((a) => plainWord(appName(a))).concat(card.apps.map(plainWord));
+    if (prefix && !apps.some((a) => a && plainWord(prefix).includes(a))) return prefix;
+    return card.apps.length ? card.apps.map(appName).join(" + ") : "Ops";
+  }
+
+  function groups(cards: OverviewCard[]): [string, OverviewCard[]][] {
+    const by = new Map<string, OverviewCard[]>();
+    for (const card of cards) by.set(groupOf(card), [...(by.get(groupOf(card)) ?? []), card]);
+    return [...by.entries()].sort((a, b) => b[1].length - a[1].length || a[0].localeCompare(b[0]));
+  }
+
+  const STATE_TAG: Record<OverviewCard["kind"], string> = { new: "open", done: "done", dropped: "dropped" };
+
+  function groupBlock(section: string, name: string, cards: OverviewCard[]): HTMLElement {
+    const key = `${section}:${name}`;
+    const open = openGroup.has(key);
+    const block = h("section", "bq-o-group");
+    const head = h("div", "bq-o-ghead");
+    head.append(h("span", "bq-o-gname", name), h("span", "bq-o-gcount", String(cards.length)));
+    const otherApps = [...new Set(cards.flatMap((c) => c.apps))];
+    if (otherApps.length > 1 || (otherApps.length === 1 && name !== appName(otherApps[0]))) {
+      head.append(h("span", "bq-o-gapps", otherApps.map(appName).join(" · ")));
+    }
+    block.append(head);
+    const shown = open ? cards : cards.slice(0, GROUP_ROWS);
+    for (const card of shown) {
+      const row = button(`bq-o-issue k-${card.kind}`, "", card.title);
+      // In a topic group the topic is the heading, so "Splash: Memor gets…" reads "Memor gets…".
+      const text = card.title.startsWith(`${name}:`) ? card.title.slice(name.length + 1).trim() : card.title;
+      row.append(h("b", "", `#${card.number}`), h("span", "bq-o-ititle", text));
+      if (section === "filed" || card.kind === "dropped") row.append(h("small", "", STATE_TAG[card.kind]));
+      row.addEventListener("click", () => events.openUrl(card.url));
+      block.append(row);
+    }
+    if (cards.length > GROUP_ROWS) {
+      const more = button("bq-o-more", open ? "Show less" : `${cards.length - GROUP_ROWS} more`);
+      more.addEventListener("click", () => {
+        if (open) openGroup.delete(key);
+        else openGroup.add(key);
+        paint();
+      });
+      block.append(more);
+    }
+    return block;
+  }
+
+  function fleetBlock(): HTMLElement {
+    const block = h("section", "bq-o-fleet");
+    const units = fleetNow?.units ?? [];
+    const closed = (fleetNow?.today ?? []).reduce((n, run) => n + run.closed.length, 0);
+    const state = fleetNow?.error ? `The fleet could not be read: ${fleetNow.error}`
+      : !fleetNow ? "Reading the fleet…"
+      : !fleetNow.supervisor && !units.length ? "The fleet is not running."
+      : `${units.length} unit${units.length === 1 ? "" : "s"} working${fleetNow.hold ? ", no new starts" : ""}.`;
+    const head = h("h2", "bq-o-h", "Fleet now");
+    head.append(h("small", "", `${state} Closed ${closed} today.`));
+    block.append(head);
+    for (const unit of units) {
+      const row = h("div", `bq-o-unit${unit.flags.length ? " is-flagged" : ""}`);
+      const issue = unit.issues[0];
+      row.append(h("span", "bq-o-uname", unit.id),
+        h("span", "bq-o-uapp", unit.app ? appName(unit.app) : "Ops"),
+        h("span", "bq-o-udoing", issue ? `#${issue.number} ${issue.title}` : "Picking its next issue"),
+        h("span", "bq-o-utime", `${unit.minutes}/${unit.budget} min${unit.flags.length ? ` · ${unit.flags.join(" ")}` : ""}`));
+      if (issue) {
+        row.title = unit.issues.map((i) => `#${i.number} ${i.title}`).join("\n");
+        const repo = overview?.repo ?? board?.repo;
+        if (repo) row.addEventListener("click", () => events.openUrl(`https://github.com/${repo}/issues/${issue.number}`));
+      }
+      block.append(row);
+    }
+    return block;
+  }
+
+  function sayBlock(): HTMLElement {
+    const form = h("form", "bq-o-say");
+    const label = h("label", "bq-o-h", "Tell the commander");
+    label.append(h("small", "", "Say where the fleet should go. If you leave the how open, it picks what makes most sense."));
+    const box = h("textarea");
+    box.rows = 2;
+    box.placeholder = "e.g. Tavla crashes first, park the splash work";
+    box.value = draft;
+    box.addEventListener("input", () => (draft = box.value));
+    box.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) form.requestSubmit();
+    });
+    const send = button("bq-action is-swipe", telling ? "Sending…" : "Send");
+    send.type = "submit";
+    send.disabled = telling;
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const words = draft.trim();
+      if (!words || telling) return;
+      telling = true;
+      paint();
+      const ok = await events.tellCommander(words).catch(() => false);
+      telling = false;
+      told = { ok, words };
+      if (ok && draft.trim() === words) draft = "";
+      paint();
+    });
+    const row = h("div", "bq-o-sayrow");
+    row.append(box, send);
+    form.append(label, row);
+    if (told) {
+      form.append(h("p", told.ok ? "bq-o-told" : "bq-o-told is-fail",
+        told.ok ? `Sent: “${told.words}”. The commander's terminal shows what it does.` : "No commander terminal opened. Try again."));
+    }
+    return form;
+  }
+
+  function overviewPane(): HTMLElement {
+    const pane = h("div", "bq-overview");
+    const top = h("div", "bq-o-top");
+    top.append(fleetBlock(), sayBlock());
+    pane.append(top);
+    const bar = h("div", "bq-o-bar");
+    const span = h("div", "bq-views");
+    for (const [n, label] of [[24, "Last 24 h"], [72, "Last 3 days"]] as const) {
+      const chip = button(`bq-view${hours === n ? " is-on" : ""}`, label);
+      chip.addEventListener("click", () => {
+        if (hours === n) return;
+        hours = n;
+        remember("hours", String(n));
+        overview = null;
+        void readOverview();
+        paint();
+      });
+      span.append(chip);
+    }
+    bar.append(span);
+    pane.append(bar);
+    if (!overview) {
+      pane.append(h("p", "bq-loading", "Reading what moved…"));
+      return pane;
+    }
+    if (overview.error) pane.append(h("p", "bq-error", `The board could not be read: ${overview.error}`));
+    const since = overview.since ? new Date(overview.since).getTime() : 0;
+    const cards = overview.cards ?? [];
+    const filed = cards.filter((c) => c.created && new Date(c.created).getTime() >= since);
+    const shipped = cards.filter((c) => c.kind !== "new" && !filed.includes(c));
+    for (const [section, title, list, empty] of [
+      ["filed", "Filed", filed, "Nothing was filed in this window."],
+      ["shipped", "Closed, filed earlier", shipped, "Nothing older was closed."],
+    ] as const) {
+      const head = h("h2", "bq-o-h", title);
+      const open = list.filter((c) => c.kind === "new").length;
+      head.append(h("small", "", section === "filed" ? `${list.length} issues, ${open} still open` : `${list.length} issues`));
+      pane.append(head);
+      if (!list.length) pane.append(h("p", "bq-r-none", empty));
+      const grid = h("div", "bq-o-groups");
+      for (const [name, group] of groups(list)) grid.append(groupBlock(section, name, group));
+      pane.append(grid);
+    }
+    return pane;
+  }
+
   function header(): HTMLElement {
     const head = h("header", "bq-header");
     const left = h("div", "bq-heading");
@@ -990,9 +1208,11 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       return;
     }
     const parts: HTMLElement[] = [header()];
-    if (view === "routines") {
+    if (view !== "tasks") {
       lanesHost = filterHost = null;
-      screen.replaceChildren(...parts, routinesPane());
+      const focused = document.activeElement instanceof HTMLTextAreaElement && screen.contains(document.activeElement);
+      screen.replaceChildren(...parts, view === "routines" ? routinesPane() : overviewPane());
+      if (focused) screen.querySelector<HTMLTextAreaElement>(".bq-o-say textarea")?.focus();
       return;
     }
     const error = failure || board?.error;

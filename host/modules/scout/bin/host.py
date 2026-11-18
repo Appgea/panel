@@ -466,6 +466,8 @@ def main():
         try:
             if method == "GET" and path == "/review/deck":
                 return _respond(200, review.deck(state_path(), qs("hours") or None))
+            if method == "GET" and path == "/review/overview":
+                return _respond(200, review.overview(qs("hours") or None))
             if method == "GET" and path == "/review/history":
                 return _respond(200, review.history(state_path()))
             if method == "GET" and path == "/review/picture":

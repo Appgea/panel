@@ -135,6 +135,40 @@ const api: BoardApi = {
     ],
     manual: [{ id: "bets", title: "Bets" }, { id: "ideation", title: "Ideation" }],
   }),
+  overview: async (hours) => {
+    await wait(300);
+    const c = (number: number, title: string, apps: string[], kind: "done" | "new" | "dropped", createdAgo: number) =>
+      ({ number, title, url: url(number), kind, apps, priority: 2, who: "codex-6be67c", at: ago(30), created: ago(createdAgo) });
+    return {
+      since: ago(hours * 60), until: ago(0), repo: "Appgea/ops",
+      cards: [
+        c(1901, "Tavla iOS: NotificationService crash on 5 users", ["tavla"], "new", 60),
+        c(1903, "Tavla: dice roll sound plays twice after resume", ["tavla"], "done", 200),
+        c(1905, "Tavla: Game Center sign-in loops on iPad", ["tavla"], "new", 90),
+        c(1793, "Splash: Memor gets its own animation on the shared frame", ["memor"], "done", 300),
+        c(1797, "Splash: Fitstrail gets its own animation on the shared frame", ["fitstrail"], "done", 300),
+        c(1806, "Splash: Cardly fans its cards side by side with a bold scan line", ["cardly"], "done", 300),
+        c(1807, "Splash: Pisti deals one card under the logo", ["pisti"], "new", 300),
+        c(1808, "Splash: Wolf 2048 tiles slide into the logo", ["wolf2048"], "new", 300),
+        c(1818, "Speed: SwiftPM RevenueCat full mirror download", [], "new", 120),
+        c(1889, "Instagram and Facebook posts go only through Meta's Graph API", [], "done", 900),
+        c(1860, "ClearDay: restore on Android when Play says the plan is already owned", ["clearday"], "done", 3000),
+        c(1851, "Memor: retry a failed rewarded ad load so the continue offer comes back", ["memor"], "done", 4000),
+        c(1824, "Pisti: update the premium badge when RevenueCat answers late", ["pisti"], "dropped", 5000),
+      ],
+    };
+  },
+  fleet: async () => ({
+    supervisor: true, hold: false, spec: "terra:2,flash:1",
+    units: [
+      { id: "terra-1", kind: "terra", app: "tavla", issues: [{ number: 1901, title: "Tavla iOS: NotificationService crash on 5 users" }],
+        minutes: 12, budget: 30, tokens: "1.2M", quiet: 0, flags: [], screen: "" },
+      { id: "terra-2", kind: "terra", app: "pisti", issues: [{ number: 1807, title: "Splash: Pisti deals one card under the logo" }],
+        minutes: 34, budget: 30, tokens: "2.9M", quiet: 6, flags: ["OVER"], screen: "" },
+      { id: "flash-1", kind: "flash", app: null, issues: [], minutes: 1, budget: 20, tokens: "40k", quiet: 0, flags: [], screen: "" },
+    ],
+    today: [{ time: ago(100), unit: "terra-1", kind: "terra", app: "memor", closed: [1793, 1797], minutes: 22, tokens: "1M", result: "done" }],
+  }),
 };
 
 const screen = document.getElementById("boardScreen")!;
@@ -144,6 +178,7 @@ const handle = mountBoard(screen, {
   openUrl: (target) => console.log("open", target),
   openSwipe: () => void swipe(),
   startRoutine: async (id) => { console.log("routine", id); await wait(600); return true; },
+  tellCommander: async (words) => { console.log("commander", words); await wait(600); return true; },
 });
 handle.open();
 
