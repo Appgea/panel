@@ -173,12 +173,11 @@ def listing():
     for scout in items:
         scout.pop("run")
         last = records.get(scout["id"])
+        # An agent scout is a routine. It is due here, never filed on GitHub: a free session takes it from
+        # `board next`, and the Slack feed pings when one is missed. Owner, 2026-11-18: "Routines must not be filed
+        # though ... agents must ping me that we are missing out on that routine, or when I trigger a free session,
+        # agents must do them". Nothing starts a session by itself.
         scout["due"], scout["next_at"] = schedule(scout, last, current)
-        if scout["kind"] == "agent":
-            # An agent scout is a routine: `ops/runbooks/routines.py` files it as a GitHub issue when due, so every
-            # computer sees it and only a session the owner started takes it. Owner, 2026-11-04: "sessions must not
-            # start without me ... routines must be created as new tasks on github". Panel's Run button still works.
-            scout["due"] = False
         if last and last["status"] == "running":
             # A script cannot outlive Panel's 60 s call. An agent gets two hours.
             limit = 120 if scout["kind"] == "script" else 7200
