@@ -95,8 +95,10 @@ export type RoutinesData = { round_since?: string; routines?: Routine[]; manual?
 export type OverviewCard = {
   number: number; title: string; url: string; kind: "done" | "new" | "dropped"; apps: string[]; priority: number;
   who: string; at: string | null; created?: string | null;
+  /** The scout run that filed it, "legal@VideoKit", or empty. */
+  scout?: string;
 };
-export type OverviewData = { since?: string; until?: string; repo?: string; cards?: OverviewCard[]; error?: string };
+export type OverviewData = { since?: string; until?: string; repo?: string; cards?: OverviewCard[]; limit?: number; error?: string };
 
 /** The extension's routes, behind one seam so the dev harness can stand in for it. */
 export type BoardApi = {

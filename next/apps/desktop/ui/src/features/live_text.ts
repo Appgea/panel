@@ -4,7 +4,7 @@ import type { EmberOutcome, FleetTag, Harness, LiveAgent, State } from "./live_t
 
 export const HARNESS: Record<Harness, string> = { claude: "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode", gemini: "Gemini", kimi: "Kimi" };
 export const LETTER: Record<Harness, string> = { claude: "C", codex: "X", grok: "G", opencode: "O", gemini: "M", kimi: "K" };
-export const STATE_WORD: Record<State, string> = { work: "Working", think: "Planning", turn: "Waits for you", idle: "Idle", stuck: "Stuck" };
+export const STATE_WORD: Record<State, string> = { work: "Working", think: "Thinking", turn: "Waits for you", idle: "Idle", stuck: "Stuck" };
 export const STATE_RANK: Record<State, number> = { turn: 0, stuck: 1, work: 2, think: 3, idle: 4 };
 
 export function short(model: string | null): string {
@@ -130,7 +130,7 @@ export function who(a: WhoInput, parent: string | null = null): { title: string;
 export function taskLine(task: string | null): string | null {
   const t = task?.trim();
   if (!t || PROMPT_ROLES.some(([re]) => re.test(t))) return null;
-  return t;
+  return humane(t);
 }
 
 /** Board titles start with their app, "Tavla: …". The row already names the room. */
@@ -138,14 +138,29 @@ export function withoutRoom(title: string, room: string): string {
   return title.toLowerCase().startsWith(`${room.toLowerCase()}: `) ? title.slice(room.length + 2) : title;
 }
 
+/** An app key as people say it: "dream_commenter" is "Dream Commenter". A name stays as it is. */
+export function appName(key: string): string {
+  return /[_-]/.test(key) || key === key.toLowerCase() ? key.split(/[_-]+/).filter(Boolean).map(cap).join(" ") : key;
+}
+
+/** A scout's lens id in a line, "discrepancies@dream_commenter", as words. */
+export function humane(text: string): string {
+  return text.replace(/\b([a-z][a-z0-9-]*)@([A-Za-z][\w-]*)/g, (_, lens: string, app: string) => `${lensName(lens)} (${appName(app)})`);
+}
+
 /** What an agent is doing, in one line. */
 export function doing(a: LiveAgent): string {
+  return humane(doingRaw(a));
+}
+
+function doingRaw(a: LiveAgent): string {
   switch (a.state) {
-    // A bare "Working" says nothing. The last step or the last words say what it is on.
+    // A bare "Working" says nothing. The last step or the last words say what it is on. A step
+    // label is a past or plain verb ("Read x", "Ran tests"), so it goes first and the state after.
     case "work":
-      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `After ${lower(a.steps[0].label)}` : a.startedMs && Date.now() - a.startedMs < 120_000 ? "Starting up" : "Working. No steps read yet");
+      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `${a.steps[0].label} · working` : a.startedMs && Date.now() - a.startedMs < 120_000 ? "Starting up" : "Working. No steps read yet");
     case "think":
-      return a.steps[0] ? `Planning after ${lower(a.steps[0].label)}` : (a.lastText ?? "Planning");
+      return a.steps[0] ? `${a.steps[0].label} · thinking` : (a.lastText ?? "Thinking");
     case "turn":
       return a.lastText ?? "Waits for your answer";
     // Stuck means its step runs long with the process quiet (src-tauri/src/live/mod.rs). How

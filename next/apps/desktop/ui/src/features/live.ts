@@ -30,7 +30,7 @@ import { errorText } from "../errors";
 import type { BoardFeed } from "./live_cards";
 import { mountCatalog } from "./live_catalog";
 import { facts } from "./live_facts";
-import { hoursToday, newGame, update, type FeedItem } from "./live_game";
+import { hoursBack, newGame, update, type FeedItem } from "./live_game";
 import { mountHud } from "./live_hud";
 import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
@@ -38,7 +38,7 @@ import { direct, RESULT_MS, RESULTS, type EmberEnd, type Seen } from "./live_pla
 import { scene } from "./live_scene";
 import { COLOR, PLAIN, play, type FxOut, type Pt, type Script, type Stagehand } from "./live_script";
 import { mountSide } from "./live_side";
-import { button, doing } from "./live_text";
+import { appName, button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
 import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
 import { lay, route } from "./live_world";
@@ -136,6 +136,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   let boardAt = 0;
   let fleetAt = 0;
   let dayAt = 0;
+  /** The date whose two-day read was cut at its limit: the rest of that day reads today alone. */
+  let shortDay = "";
   let open = false;
   const played = new Map<string, number>();
   let lastSeen: Seen | null = null;
@@ -246,12 +248,20 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   async function readDay(): Promise<void> {
     dayAt = Date.now();
     try {
-      const d = await events.day(hoursToday(dayAt));
+      // Back to yesterday's midnight: yesterday up to this hour is the pace to beat. A read cut at
+      // its limit loses issues, so on such a day Live asks for today alone and drops the pace.
+      const short = shortDay === new Date(dayAt).toDateString();
+      const d = await events.day(hoursBack(dayAt, short ? 0 : 1));
       if (d && !d.error) s.day = d;
+      score();
+      if (s.game.score.partial && !short) {
+        shortDay = new Date(dayAt).toDateString();
+        dayAt = 0;
+      }
     } catch {
       // The score then counts the fleet's own closes.
+      score();
     }
-    score();
   }
 
   function score(): void {
@@ -260,7 +270,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       const i = [...(b?.now ?? []), ...(b?.ready ?? []), ...(b?.done ?? []), ...(b?.waiting ?? []), ...(b?.you ?? [])].find((x) => x.number === n);
       return i ? { title: i.title, url: i.url, room: i.apps[0] } : undefined;
     };
-    update(s.game, s.fleet, s.day, Date.now(), iss, ctx.roomName);
+    const scouts = new Map((s.world?.agents ?? []).flatMap((a) => (a.fleet?.scout ? [[a.fleet.scout.toLowerCase(), { unit: a.fleet.unit, kind: a.fleet.kind, since: a.fleet.startedMs }] as const] : [])));
+    const place = (key: string) => {
+      const n = ctx.roomName(key);
+      return n === key ? appName(key) : n;
+    };
+    update(s.game, { fleet: s.fleet, day: s.day, now: Date.now(), issue: iss, place, scouts });
     hud.play(s.game.fresh);
     celebrate(s.game.fresh);
     paint();
@@ -282,14 +297,22 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const fx = (...f: FxOut[]) => {
       if (!s.reduced) s.pendingFx.push(...f);
     };
+    // A lens names its app as people write it, "VillagesTown"; a district by its key, "villagestown".
+    const flat = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
     let n = 0;
     for (const it of items) {
       if (n >= MAX_CHEERS) break;
-      const d = it.room ? l.districts.find((x) => x.key === it.room) : undefined;
-      const at = dotOf(it.unit) ?? d;
+      const d = it.room ? l.districts.find((x) => x.key === it.room || flat(x.key) === flat(it.room!)) : undefined;
+      // A promotion is the commander's: it goes off where the squad answers to.
+      const at = it.kind === "rank" ? bossAt : (dotOf(it.unit) ?? d);
       if (!at) continue;
       n++;
-      if (it.kind === "close") {
+      if (it.kind === "rank") {
+        fx({ kind: "burst", x: at.x, y: at.y, color: GOLD, size: 60, count: 40 }, { kind: "ring", x: at.x, y: at.y, color: GOLD, size: 110, ms: 1800 }, { kind: "ring", x: at.x, y: at.y, color: GOLD, size: 70, ms: 1400, delay: 300 });
+      } else if ((it.kind === "scout" || it.kind === "end") && bossAt && (bossAt.x !== at.x || bossAt.y !== at.y)) {
+        // A unit coming home: one quiet orb from where it worked back to its commander.
+        fx({ kind: "orb", x: at.x, y: at.y, x2: bossAt.x, y2: bossAt.y, color: it.kind === "scout" ? COLOR.think : COLOR.idle, size: 4, ms: 1300 });
+      } else if (it.kind === "close") {
         fx({ kind: "burst", x: at.x, y: at.y, color: COLOR.done, size: 40, count: 26 }, { kind: "ring", x: at.x, y: at.y, color: COLOR.done, size: 70, ms: 1400 });
         if (bossAt && (bossAt.x !== at.x || bossAt.y !== at.y)) fx({ kind: "orb", x: at.x, y: at.y, x2: bossAt.x, y2: bossAt.y, color: GOLD, size: 5, ms: 1100, delay: 500 });
         if (it.xp) s.marks.push({ text: `+${it.xp} XP`, at: { x: at.x, y: at.y - 14 }, to: { x: at.x, y: at.y - 54 }, color: GOLD, ms: 1900, xp: true, id: ++markId, born: Date.now() });
@@ -657,7 +680,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintTools();
   }
 
-  const OVER = ".live-tools, button, input";
+  // The open feed scrolls and takes its own clicks: no drag or zoom starts on it.
+  const OVER = ".live-tools, button, input, .live-feed.is-open";
   let drag: { x: number; y: number; moved: boolean; id: number } | null = null;
   stage.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest(OVER)) return;
@@ -689,6 +713,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   stage.addEventListener(
     "wheel",
     (e) => {
+      if ((e.target as HTMLElement).closest(".live-feed.is-open")) return;
       e.preventDefault();
       const r = stage.getBoundingClientRect();
       const at = { x: e.clientX - r.left, y: e.clientY - r.top };

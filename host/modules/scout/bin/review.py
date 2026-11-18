@@ -177,6 +177,8 @@ def card(issue):
         "points": [_plain(p, 200) for p in points[:4]], "minutes": int(took.group(1)) if took else None,
         "who": who.group(1) if who else "", "at": issue.get("closedAt") if closed else issue.get("createdAt"),
         "pictures": pictures[:3], "created": issue.get("createdAt"),
+        # The scout run that filed it, `board file --scout` writes "Scout: legal@VideoKit": Live credits the unit.
+        "scout": _line(body, "Scout"),
     }
 
 
@@ -201,7 +203,8 @@ def overview(hours):
     understand things in bulks"."""
     until = _now()
     since = until - timedelta(hours=min(max(float(hours or DEFAULT_HOURS), 1), MAX_HOURS))
-    return {"since": _iso(since), "until": _iso(until), "repo": REPO, "cards": _cards(since)}
+    # `limit`: each of the two lists stops there, so a reader can tell a full window from a cut one.
+    return {"since": _iso(since), "until": _iso(until), "repo": REPO, "cards": _cards(since), "limit": LIMIT}
 
 
 def _cards(since):

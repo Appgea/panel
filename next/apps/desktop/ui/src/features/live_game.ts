@@ -4,18 +4,21 @@
  * (2026-11-04, "no XP, streaks, quests"). The game lives here, on the broadcast.
  *
  * Every number is something that already happened: the fleet's ledger (`fleet view`, today) and
- * the board's issues closed and filed today (the scout module's overview). Nothing is stored, so
- * a reload scores the same day the same way. A closed issue is worth 10 XP and a filed one 3: the
- * fleet's job is to close work, and a find only counts once someone can build it.
+ * the board's issues closed and filed since yesterday's midnight (the scout module's overview).
+ * Nothing is stored, so a reload scores the same day the same way. A closed issue is worth 10 XP
+ * and a filed one 3: the fleet's job is to close work, and a find only counts once someone can
+ * build it. A find names the scout run that filed it ("Scout: legal@VideoKit" in its body), so a
+ * scout unit earns its finds as a builder earns its closes. Yesterday up to this hour is the
+ * pace to beat.
  *
  * `update` turns each read into feed items. The first read of a session only primes the feed, so
  * opening Live replays no banners. Later items are `fresh`: live.ts plays their effects and the
  * banner (live_hud.ts) shows the biggest one.
  */
 
-import type { OverviewData } from "./board";
+import type { OverviewCard, OverviewData } from "./board";
 import type { FleetView } from "./fleet";
-import { cap, lensName, millions, unitName } from "./live_text";
+import { appName, cap, lensName, millions, unitName } from "./live_text";
 
 export const XP = { close: 10, found: 3 } as const;
 
@@ -67,14 +70,13 @@ export type FeedItem = {
   by?: string;
 };
 
-export type Score = {
-  xp: number;
+/** The day so far: today's and yesterday's up to the same hour. */
+export type Tally = { closed: number; found: number; xp: number };
+
+export type Score = Tally & {
   rank: Rank;
-  /** Issues closed today on the whole board, and by the fleet. */
-  closed: number;
+  /** Issues closed today by the fleet. */
   fleetClosed: number;
-  /** Issues filed today. */
-  found: number;
   /** Fleet runs that ended today. */
   runs: number;
   /** Millions of input tokens the fleet used today, ended runs and running units. */
@@ -82,6 +84,12 @@ export type Score = {
   units: number;
   /** Closes in the last half hour. Three or more is a streak. */
   streak: number;
+  /** Finds today by unit id, for the squad's table. */
+  foundBy: Map<string, number>;
+  /** Yesterday up to this hour. Unknown when the read does not reach back or was cut short. */
+  yesterday: Tally | null;
+  /** The board read stopped at its limit, so today's counts may be low. */
+  partial: boolean;
 };
 
 export type Game = {
@@ -104,39 +112,61 @@ const STREAK_MS = 30 * 60_000;
 export const STREAK = 3;
 /** The feed keeps a day, which is a few hundred lines on a wave day. */
 const KEEP = 400;
+/** A scout's ledger line is written as it ends. What it filed in its run, give or take this, is its. */
+const SLACK_MS = 2 * 60_000;
 
 export function newGame(): Game {
   return { items: [], fresh: [], score: emptyScore(), primed: false, dayPrimed: false, seen: new Set(), units: new Set(), flags: new Set(), level: 1 };
 }
 
 function emptyScore(): Score {
-  return { xp: 0, rank: rank(0), closed: 0, fleetClosed: 0, found: 0, runs: 0, tokens: 0, units: 0, streak: 0 };
+  return { xp: 0, rank: rank(0), closed: 0, fleetClosed: 0, found: 0, runs: 0, tokens: 0, units: 0, streak: 0, foundBy: new Map(), yesterday: null, partial: false };
 }
 
-/** Hours since midnight, at least one: the window today's board read asks for. */
-export function hoursToday(now: number): number {
+/** Hours back to a midnight, today's (0) or yesterday's (1): the window the day's board read asks for. */
+export function hoursBack(now: number, days: 0 | 1 = 1): number {
   const d = new Date(now);
-  return Math.max(1, Math.ceil((now - new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()) / 3_600_000));
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return Math.max(1, Math.ceil((now - d.getTime()) / 3_600_000));
 }
 
 type Issue = { title: string; url?: string; room?: string };
+type Scout = { unit: string; kind: string; since: number };
 
-/**
- * Reads the fleet and the day into the feed and the score. `issue` names an issue from the board
- * Live already holds, for ledger rows that carry only numbers. `place` names an app key the way
- * the map does: "solitaire_games" reads "Solitaire".
- */
-export function update(g: Game, fleet: FleetView | null, day: OverviewData | null, now: number, issue: (n: number) => Issue | undefined, place: (key: string) => string = (k) => k): void {
+/** One read of what Live knows. */
+export type Read = {
+  fleet: FleetView | null;
+  day: OverviewData | null;
+  now: number;
+  /** Names an issue from the board Live already holds, for ledger rows that carry only numbers. */
+  issue?: (n: number) => Issue | undefined;
+  /** Names an app key the way the map does: "solitaire_games" reads "Solitaire Games". */
+  place?: (key: string) => string;
+  /** Running scout units by lens, lower case: "legal@videokit". */
+  scouts?: Map<string, Scout>;
+};
+
+/** Reads the fleet and the day into the feed and the score. */
+export function update(g: Game, read: Read): void {
+  const { fleet, day, now } = read;
+  const place = read.place ?? appName;
   const all: FeedItem[] = [];
   const midnight = new Date(new Date(now).setHours(0, 0, 0, 0)).getTime();
+  const yDay = new Date(midnight);
+  yDay.setDate(yDay.getDate() - 1);
+  const yMid = yDay.getTime();
+  const yNow = now - (midnight - yMid);
   const cards = day?.cards ?? [];
   const card = new Map(cards.map((c) => [c.number, c]));
   const name = (n: number): Issue | undefined => {
     const c = card.get(n);
-    return c ? { title: c.title, url: c.url, room: c.apps[0] } : issue(n);
+    return c ? { title: c.title, url: c.url, room: c.apps[0] } : read.issue?.(n);
   };
   /** Each issue the fleet closed today, with the ledger line that says so. */
   const byFleet = new Map<number, string>();
+  /** Scout runs that ended today, with the time they ran, to credit what they filed. */
+  const scoutRuns: (Scout & { lens: string; until: number })[] = [];
   let tokens = 0;
   const runs = fleet?.today ?? [];
   for (const r of runs) {
@@ -152,36 +182,55 @@ export function update(g: Game, fleet: FleetView | null, day: OverviewData | nul
       const head = `#${r.closed[0]}${first ? ` ${first.title}` : ""}${more}`;
       all.push({ id, at, kind: "close", who, text: `closed ${head} in ${r.minutes} min`, head, by: `${who} · ${r.minutes} min`, number: r.closed[0], url: first?.url, unit: r.unit, room: first?.room ?? (r.app && r.app !== "-" ? r.app : undefined), xp: XP.close * r.closed.length });
     } else if (/^scout /.test(r.result)) {
-      const lens = r.result.replace(/^scout /, "").split(",")[0];
+      const lens = r.result.replace(/^scout /, "").split(",")[0].trim();
       const app = lens.split("@")[1];
-      all.push({ id, at, kind: "scout", who, text: `came back from ${lensName(lens)}${app ? ` in ${place(app)}` : ""}, ${r.minutes} min`, unit: r.unit });
+      scoutRuns.push({ lens: lens.toLowerCase(), unit: r.unit, kind: r.kind, since: at - r.minutes * 60_000 - SLACK_MS, until: at + SLACK_MS });
+      all.push({ id, at, kind: "scout", who, text: `came back from ${lensName(lens)}${app ? ` in ${place(app)}` : ""}, ${r.minutes} min`, unit: r.unit, room: app });
     } else {
       // "build 1924,1926, said bye" with nothing closed: it gave its issues back.
       const why = r.result.replace(/^build [\d,]+,?\s*/, "").replace(/,?\s*said bye$/, "").trim();
       all.push({ id, at, kind: "end", who, text: why ? `ended: ${why}` : `came back with nothing closed, ${r.minutes} min`, unit: r.unit });
     }
   }
+  /** The unit that filed a find: the scout run of its lens that ran then, ended or running. */
+  const credit = (c: OverviewCard, filed: number): Scout | undefined => {
+    const lens = c.scout?.toLowerCase();
+    if (!lens) return undefined;
+    const live = read.scouts?.get(lens);
+    return scoutRuns.find((s) => s.lens === lens && filed >= s.since && filed <= s.until) ?? (live && filed >= live.since - SLACK_MS ? live : undefined);
+  };
   // Two runs can list the same close: the ledger counts what closed while each ran.
   const fleetClosed = byFleet.size;
-  let closed = 0;
-  let found = 0;
+  const foundBy = new Map<string, number>();
+  const today: Tally = { closed: 0, found: 0, xp: 0 };
+  const before: Tally = { closed: 0, found: 0, xp: 0 };
   for (const c of cards) {
     const at = c.at ? Date.parse(c.at) : now;
-    if (at < midnight) continue;
-    // A find filed today and closed today is still today's find: it shows as done, with `created`.
-    const filed = c.kind === "new" ? (c.created ? Date.parse(c.created) : at) : c.kind === "done" && c.created ? Date.parse(c.created) : NaN;
+    // A find closed since is still a find: it shows as done, with `created`. A dropped one is not.
+    const filed = c.kind === "dropped" ? NaN : c.created ? Date.parse(c.created) : c.kind === "new" ? at : NaN;
+    if (filed >= yMid && filed < yNow) before.found++;
+    if (c.kind === "done" && at >= yMid && at < yNow) before.closed++;
     if (filed >= midnight) {
-      found++;
-      all.push({ id: `new:${c.number}`, at: filed, kind: "found", who: "Found", text: `#${c.number} ${c.title}`, number: c.number, url: c.url, room: c.apps[0], xp: XP.found });
+      today.found++;
+      const by = credit(c, filed);
+      if (by) foundBy.set(by.unit, (foundBy.get(by.unit) ?? 0) + 1);
+      const who = by ? unitName(by.kind, by.unit) : c.scout ? `${lensName(c.scout)} scout` : "Found";
+      all.push({ id: `new:${c.number}`, at: filed, kind: "found", who, text: who === "Found" ? `#${c.number} ${c.title}` : `found #${c.number} ${c.title}`, number: c.number, url: c.url, unit: by?.unit, room: c.apps[0], xp: XP.found });
     }
-    if (c.kind === "done") {
-      closed++;
+    if (c.kind === "done" && at >= midnight) {
+      today.closed++;
       // A close the fleet ledger already told is one line, not two.
       if (!byFleet.has(c.number)) all.push({ id: `done:${c.number}`, at, kind: "close", who: closer(c.who), text: `closed #${c.number} ${c.title}`, head: `#${c.number} ${c.title}`, number: c.number, url: c.url, room: c.apps[0], xp: XP.close });
     }
   }
   // Without the board's day, the fleet's own closes still score.
-  if (!day?.cards) closed = fleetClosed;
+  if (!day?.cards) today.closed = fleetClosed;
+  today.xp = today.closed * XP.close + today.found * XP.found;
+  before.xp = before.closed * XP.close + before.found * XP.found;
+  // Each of the read's two lists stops at `limit`, cut by when the issue was filed, not closed: a
+  // full one may have lost any of the window's issues, today's included.
+  const cut = day?.limit !== undefined && (cards.filter((c) => c.kind === "new").length >= day.limit || cards.filter((c) => c.kind !== "new").length >= day.limit);
+  const reaches = !!day?.since && Date.parse(day.since) <= yMid + 60_000;
 
   const units = fleet?.units ?? [];
   for (const u of units) {
@@ -198,14 +247,14 @@ export function update(g: Game, fleet: FleetView | null, day: OverviewData | nul
   }
   if (fleet?.units) g.units = new Set(units.map((u) => u.id));
 
-  const xp = closed * XP.close + found * XP.found;
-  const r = rank(xp);
-  if (g.primed && g.dayPrimed && r.level > g.level) all.push({ id: `rank:${r.level}`, at: now, kind: "rank", who: "Promoted", text: `to ${r.name}. Level ${r.level}`, xp });
+  const r = rank(today.xp);
+  if (g.primed && g.dayPrimed && r.level > g.level) all.push({ id: `rank:${r.level}`, at: now, kind: "rank", who: "Promoted", text: `to ${r.name}. Level ${r.level}`, xp: today.xp });
   g.level = r.level;
   const streak = all.filter((i) => i.kind === "close" && now - i.at < STREAK_MS).length;
-  g.score = { xp, rank: r, closed, fleetClosed, found, runs: runs.length, tokens, units: units.length, streak };
+  g.score = { ...today, rank: r, fleetClosed, runs: runs.length, tokens, units: units.length, streak, foundBy, yesterday: day?.cards && reaches && !cut ? before : null, partial: cut };
 
-  // Items made at `now`, a deployment or a flag, keep their first time across reads.
+  // A line keeps its first time across reads: a deployment or a flag is stamped when first seen.
+  // Its words follow the latest read, so a find names its scout once the ledger does.
   const had = new Map(g.items.map((i) => [i.id, i]));
   const merged = new Map(g.items.filter((i) => i.at >= midnight).map((i) => [i.id, i]));
   // The board can tell a close before the unit's ledger line does. Then the ledger's line wins.
@@ -214,7 +263,10 @@ export function update(g: Game, fleet: FleetView | null, day: OverviewData | nul
     // Its banner already played.
     if (g.seen.has(`done:${n}`)) g.seen.add(run);
   }
-  for (const i of all) merged.set(i.id, had.get(i.id) ?? i);
+  for (const i of all) {
+    const old = had.get(i.id);
+    merged.set(i.id, old ? { ...i, at: old.at } : i);
+  }
   const list = [...merged.values()];
   // The fleet and the day are read apart, so each primes its own items: the day's first read must
   // not replay this morning's closes as news.

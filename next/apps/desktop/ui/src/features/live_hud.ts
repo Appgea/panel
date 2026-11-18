@@ -5,15 +5,18 @@
  *
  * Usable first: every feed line opens its issue or finds its unit, and the banner never takes a
  * click from the map. The feed shows the newest five, so it reads at a glance and leaves the map.
+ * "All of today" opens the whole day as a list, filtered by kind, over the map's corner.
  */
 
-import { FEED_COLOUR, STREAK, type FeedItem, type FeedKind } from "./live_game";
+import { FEED_COLOUR, STREAK, rank, type FeedItem, type FeedKind, type Tally } from "./live_game";
 import { ago, button, div, plural, span } from "./live_text";
 import type { LiveCtx } from "./live_types";
 import "./live_hud.css";
 
-/** Feed lines on the stage. The rest of today is one hover away, in each line's tooltip. */
+/** Feed lines on the stage. The rest of today is one click away. */
 const FEED_ROWS = 5;
+/** Lines the open feed lists at first, and adds a click. A wave day has a few hundred. */
+const OPEN_ROWS = 150;
 const BANNER_MS = 3800;
 /** A line older than this is dimmed: the feed's eye goes to what just happened. */
 const FRESH_MS = 15 * 60_000;
@@ -21,6 +24,14 @@ const FRESH_MS = 15 * 60_000;
 const BANNER: Partial<Record<FeedKind, string>> = { close: "Mission complete", rank: "Promoted", alert: "Unit needs a look", deploy: "Unit deployed" };
 /** Which news a banner shows first, when one read brings several. */
 const WEIGHT: Partial<Record<FeedKind, number>> = { rank: 4, alert: 3, close: 2, deploy: 1 };
+
+type Filter = "all" | "close" | "found" | "fleet";
+const FILTERS: [Filter, string, (i: FeedItem) => boolean][] = [
+  ["all", "All", () => true],
+  ["close", "Closes", (i) => i.kind === "close"],
+  ["found", "Finds", (i) => i.kind === "found"],
+  ["fleet", "Fleet", (i) => !!i.unit],
+];
 
 export type Hud = { paint(): void; play(fresh: FeedItem[]): void; height(): number };
 
@@ -35,13 +46,14 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
   const rkCol = span("hud-rk");
   rkCol.append(rk, meter, xpText);
   rankEl.append(lv, rkCol);
-  const stat = (label: string) => {
+  const stat = (label: string, pace = false) => {
     const el = span("hud-stat");
     el.append(document.createElement("b"), span("", label));
+    if (pace) el.append(span("hud-delta"));
     return el;
   };
-  const closedEl = stat("closed");
-  const foundEl = stat("found");
+  const closedEl = stat("closed", true);
+  const foundEl = stat("found", true);
   const unitsEl = stat("units out");
   const tokensEl = stat("tokens");
   const streakEl = span("hud-streak");
@@ -50,10 +62,53 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
   stats.append(closedEl, foundEl, unitsEl, tokensEl, streakEl);
   bar.append(rankEl, stats, fleetEl);
 
+  const head = div("feed-head");
+  const chips = new Map<Filter, HTMLButtonElement>();
+  for (const [key, label] of FILTERS) {
+    const c = button("feed-chip", label, () => {
+      filter = key;
+      shown = OPEN_ROWS;
+      paintFeed();
+      list.scrollTop = 0;
+    });
+    chips.set(key, c);
+    head.append(c);
+  }
+  const less = button("feed-less", "Less", () => toggle(false));
+  less.title = "Back to the newest five. Esc does it too.";
+  head.append(less);
+  const list = div("feed-list");
+  const more = button("feed-more", "", () => toggle(true));
+  const older = button("feed-more feed-older", "", () => {
+    shown += OPEN_ROWS;
+    paintFeed();
+  });
+  feedEl.append(head, list, more);
+  feedEl.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && open) {
+      e.stopPropagation();
+      toggle(false);
+    }
+  });
+
   const rows = new Map<string, HTMLButtonElement>();
   const queue: FeedItem[] = [];
   let bannerUntil = 0;
   let bannerTimer = 0;
+  let open = false;
+  let filter: Filter = "all";
+  let shown = OPEN_ROWS;
+  /** The feed's height shut, which the camera keeps clear. The open list lies over the map. */
+  let shut = 0;
+
+  function toggle(on: boolean): void {
+    open = on;
+    filter = "all";
+    shown = OPEN_ROWS;
+    paintFeed();
+    if (on) list.scrollTop = 0;
+    (on ? chips.get("all") : more)?.focus({ preventScroll: true });
+  }
 
   function paint(): void {
     const g = ctx.s.game;
@@ -67,9 +122,15 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     const span_ = sc.rank.next ? sc.rank.next - sc.rank.floor : 1;
     fill.style.width = `${sc.rank.next ? Math.round(((sc.xp - sc.rank.floor) / span_) * 100) : 100}%`;
     set(xpText, sc.rank.next ? `${sc.xp} / ${sc.rank.next} XP` : `${sc.xp} XP`);
-    rankEl.title = `Today's rank. A closed issue is 10 XP, a filed one 3.\n${sc.closed} closed, ${sc.found} filed since midnight.`;
-    num(closedEl, String(sc.closed), sc.fleetClosed ? `${sc.closed} issues closed today, ${sc.fleetClosed} of them by the fleet` : `${sc.closed} issues closed today`);
-    num(foundEl, String(sc.found), `${sc.found} issues filed today`);
+    const y = sc.yesterday;
+    rankEl.title = `Today's rank. A closed issue is 10 XP, a filed one 3.\n${sc.closed} closed, ${sc.found} filed since midnight.${y ? `\nBy this hour yesterday: ${y.xp} XP, ${rank(y.xp).name}.` : ""}`;
+    // A cut read may have lost some of today's issues: the count says "at least".
+    const plus = sc.partial ? "+" : "";
+    const cut = sc.partial ? "\nThe board read stopped at its limit, so the real count may be higher." : "";
+    num(closedEl, `${sc.closed}${plus}`, `${sc.closed} issues closed today${sc.fleetClosed ? `, ${sc.fleetClosed} of them by the fleet` : ""}${y ? `\nBy this hour yesterday: ${y.closed}` : ""}${cut}`);
+    num(foundEl, `${sc.found}${plus}`, `${sc.found} issues filed today${sc.foundBy.size ? `, ${[...sc.foundBy.values()].reduce((a, b) => a + b, 0)} of them by fleet scouts` : ""}${y ? `\nBy this hour yesterday: ${y.found}` : ""}${cut}`);
+    pace(closedEl, sc.closed, y, "closed");
+    pace(foundEl, sc.found, y, "found");
     num(unitsEl, String(sc.units), `${sc.units} fleet ${plural(sc.units, "unit")} running, ${sc.runs} ${plural(sc.runs, "run")} ended today`);
     num(tokensEl, tokens(sc.tokens), "Input tokens the fleet read today, ended runs and running units");
     streakEl.hidden = sc.streak < STREAK;
@@ -83,34 +144,61 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
   }
 
   function paintFeed(): void {
-    const items = ctx.s.game.items.slice(0, FEED_ROWS);
+    const all = ctx.s.game.items;
     const now = Date.now();
-    feedEl.hidden = !items.length;
+    const test = FILTERS.find(([k]) => k === filter)![2];
+    const matching = open ? all.filter(test) : all;
+    const items = matching.slice(0, open ? shown : FEED_ROWS);
+    const left = open ? matching.length - items.length : 0;
+    set(older, `Show ${Math.min(left, OPEN_ROWS)} older`);
+    feedEl.hidden = !all.length;
+    feedEl.classList.toggle("is-open", open);
+    head.hidden = !open;
+    more.hidden = open || all.length <= FEED_ROWS;
+    set(more, `All of today · ${all.length}`);
+    more.title = "Every close, find, deployment and flag since midnight";
+    if (open) {
+      for (const [key, label, t] of FILTERS) {
+        const c = chips.get(key)!;
+        set(c, `${label} ${all.filter(t).length}`);
+        c.classList.toggle("is-on", key === filter);
+        c.setAttribute("aria-pressed", String(key === filter));
+      }
+    }
     const want: HTMLButtonElement[] = [];
     for (const it of items) {
       let r = rows.get(it.id);
       if (!r) {
-        r = button(`feed-row k-${it.kind}`, "", () => open(it));
+        r = button(`feed-row k-${it.kind}`, "", () => openItem(it.id));
+        rows.set(it.id, r);
+        if (ctx.s.game.primed && !ctx.s.reduced && !open) r.classList.add("is-in");
+      }
+      // A line's words can change: a find names its scout once the ledger does.
+      const sig = `${it.who}\n${it.text}\n${it.xp ?? ""}`;
+      if (r.dataset.sig !== sig) {
+        r.dataset.sig = sig;
         const tick = document.createElement("i");
         tick.style.setProperty("--c", FEED_COLOUR[it.kind]);
-        r.append(tick, span("feed-who", it.who), span("feed-text", it.text));
-        if (it.xp) r.append(span("feed-xp", `+${it.xp}`));
-        r.append(span("feed-at"));
-        rows.set(it.id, r);
-        if (ctx.s.game.primed && !ctx.s.reduced) r.classList.add("is-in");
+        r.replaceChildren(tick, span("feed-who", it.who), span("feed-text", it.text), ...(it.xp ? [span("feed-xp", `+${it.xp}`)] : []), span("feed-at"));
       }
       set(r.lastElementChild as HTMLElement, ago(it.at, now).replace(" ago", ""));
       r.classList.toggle("is-old", now - it.at > FRESH_MS);
       r.title = `${it.who} ${it.text}${it.url ? "\nClick to open the issue." : it.unit ? "\nClick to find the unit." : ""}`;
       want.push(r);
     }
-    for (const id of [...rows.keys()]) if (!items.some((i) => i.id === id)) rows.delete(id);
-    const have = [...feedEl.children];
-    if (have.length !== want.length || have.some((c, i) => c !== want[i])) feedEl.replaceChildren(...want);
+    const ids = new Set(all.map((i) => i.id));
+    for (const id of [...rows.keys()]) if (!ids.has(id)) rows.delete(id);
+    // The open list ends with a button for its older lines, when it has more than it shows.
+    const kids: HTMLElement[] = left > 0 ? [...want, older] : want;
+    const have = [...list.children];
+    if (have.length !== kids.length || have.some((c, i) => c !== kids[i])) list.replaceChildren(...kids);
+    if (!open) shut = feedEl.hidden ? 0 : feedEl.offsetHeight + 12;
   }
 
   /** A feed line finds its unit on the map, else opens its issue. */
-  function open(it: FeedItem): void {
+  function openItem(id: string): void {
+    const it = ctx.s.game.items.find((i) => i.id === id);
+    if (!it) return;
     const a = it.unit ? ctx.s.world?.agents.find((x) => x.fleet?.unit === it.unit) : undefined;
     if (a) ctx.select({ kind: "agent", id: a.id });
     else if (it.url) ctx.events.openUrl(it.url);
@@ -123,9 +211,9 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     if (!big.length) return;
     // One banner a kind per read: three closes at once are "Mission complete" with "+2 more".
     const first = big[0];
-    const more = big.filter((i) => i.kind === first.kind).length - 1;
-    const head = first.head ?? (first.kind === "rank" ? first.text.replace(/^to /, "") : `${first.who} ${first.text}`);
-    queue.push({ ...first, head: more ? `${head} · +${more} more` : head });
+    const more_ = big.filter((i) => i.kind === first.kind).length - 1;
+    const head_ = first.head ?? (first.kind === "rank" ? first.text.replace(/^to /, "") : `${first.who} ${first.text}`);
+    queue.push({ ...first, head: more_ ? `${head_} · +${more_} more` : head_ });
     if (queue.length > 3) queue.splice(0, queue.length - 3);
     if (Date.now() > bannerUntil) next();
   }
@@ -148,7 +236,16 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     bannerTimer = window.setTimeout(next, BANNER_MS);
   }
 
-  return { paint, play, height: () => (feedEl.hidden ? 0 : feedEl.offsetHeight + 12) };
+  return { paint, play, height: () => (feedEl.hidden ? 0 : open ? shut : feedEl.offsetHeight + 12) };
+}
+
+/** Today against yesterday up to this hour: "▲12" ahead, "▼3" behind. Unknown: nothing. */
+function pace(el: HTMLElement, today: number, y: Tally | null, key: "closed" | "found"): void {
+  const d = el.lastElementChild as HTMLElement;
+  const diff = y ? today - y[key] : 0;
+  d.hidden = !y;
+  set(d, diff > 0 ? `▲${diff}` : diff < 0 ? `▼${-diff}` : "=");
+  d.className = `hud-delta ${diff > 0 ? "is-up" : diff < 0 ? "is-down" : ""}`;
 }
 
 function num(el: HTMLElement, value: string, title: string): void {

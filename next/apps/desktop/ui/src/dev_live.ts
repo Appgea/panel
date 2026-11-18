@@ -253,7 +253,12 @@ const fixtureFleet = (): FleetView => {
 };
 const card = (number: number, title: string, kind: "done" | "new", app: string, m: number) => ({ number, title, url: `https://github.com/Appgea/ops/issues/${number}`, kind, apps: [app], priority: 2, who: "", at: iso(m), created: iso(m) });
 const fixtureDay = (): OverviewData => ({
+  since: iso(48 * 60),
+  limit: 300,
   cards: [
+    // Yesterday, before this hour: the pace to beat.
+    ...[1001, 1002, 1003, 1004, 1005, 1006, 1007].map((n) => card(n, `Tavla: yesterday's fix ${n}`, "done" as const, "tavla", 24 * 60 + 30 + n - 1000)),
+    { ...card(1176, "VideoKit: the privacy policy names no ad network", "new", "videokit", 3), scout: "legal@VideoKit" },
     card(1150, "Interbellum: darker overhead map, B target", "done", "interbellum", 25),
     card(1124, "Pillow: sleep timer forgets its value", "done", "pillow_app", 70),
     card(1125, "Pillow: rain loop has no licence", "done", "pillow_app", 70),

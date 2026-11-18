@@ -5,7 +5,8 @@
 .live.is-reduced .live-onair { animation: none; }
 @keyframes live-onair { 50% { opacity: 0.3; } }
 /* One line beside the score. The whole sentence is in its tooltip and in the list's heads. */
-.live-narr { flex: 1 1 260px; min-width: 0; font: 500 12.5px/1.4 var(--l-mono); color: var(--l-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Basis 0: the bar wraps on what the score and the cleanup need, not on the sentence's length. */
+.live-narr { flex: 1 1 0; min-width: 120px; font: 500 12.5px/1.4 var(--l-mono); color: var(--l-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hud:not([hidden]) ~ .live-narr { padding-left: 14px; border-left: 1px solid var(--l-line); }
 .live-left { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 50%; }
 .live-left[hidden] { display: none; }

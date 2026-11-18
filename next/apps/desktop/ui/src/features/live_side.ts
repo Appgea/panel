@@ -14,6 +14,7 @@
 
 import { ageOf, ago, button, cap, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, taskLine, unitClass, unitName } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber } from "./live_types";
+import { XP } from "./live_game";
 
 /** Ended agents in the list. Older ones are in History. */
 const ENDED = 8;
@@ -168,32 +169,39 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     dayHead.hidden = !runs.length;
     dayEl.hidden = !runs.length;
     if (!runs.length) return;
-    const by = new Map<string, { runs: number; closed: Set<number>; mins: number[] }>();
+    // A scout's work is what it filed, a builder's what it closed: both score, as on the bar.
+    const foundBy = ctx.s.game.score.foundBy;
+    const by = new Map<string, { runs: number; closed: Set<number>; found: number; mins: number[] }>();
     for (const r of runs) {
-      const k = by.get(r.kind) ?? { runs: 0, closed: new Set<number>(), mins: [] };
+      const k = by.get(r.kind) ?? { runs: 0, closed: new Set<number>(), found: 0, mins: [] };
       k.runs++;
       r.closed.forEach((n) => k.closed.add(n));
+      k.found += foundBy.get(r.unit) ?? 0;
       k.mins.push(r.minutes);
       by.set(r.kind, k);
     }
-    const best = [...runs].sort((a, b) => b.closed.length - a.closed.length || a.minutes - b.minutes)[0];
-    const kinds = [...by.entries()].sort((a, b) => b[1].closed.size - a[1].closed.size || b[1].runs - a[1].runs);
-    const sig = JSON.stringify([kinds.map(([k, v]) => [k, v.runs, v.closed.size, median(v.mins)]), best?.unit, best?.closed.length]);
+    const xp = (r: (typeof runs)[number]) => r.closed.length * XP.close + (foundBy.get(r.unit) ?? 0) * XP.found;
+    const best = [...runs].sort((a, b) => xp(b) - xp(a) || a.minutes - b.minutes)[0];
+    const score = (v: { closed: Set<number>; found: number }) => v.closed.size * XP.close + v.found * XP.found;
+    const kinds = [...by.entries()].sort((a, b) => score(b[1]) - score(a[1]) || b[1].runs - a[1].runs);
+    const sig = JSON.stringify([kinds.map(([k, v]) => [k, v.runs, v.closed.size, v.found, median(v.mins)]), best?.unit, best && xp(best)]);
     if (sig === daySig) return;
     daySig = sig;
     const grid = div("day-grid");
-    grid.append(span("day-h", "Class"), span("day-h", "Runs"), span("day-h", "Closed"), span("day-h", "Median"));
+    grid.append(span("day-h", "Class"), span("day-h", "Runs"), span("day-h", "Closed"), span("day-h", "Found"), span("day-h", "Median"));
     for (const [kind, v] of kinds) {
       const c = unitClass(kind);
       const name = span("day-cls", c.name);
       name.style.setProperty("--c", c.colour);
-      grid.append(name, span("day-n", String(v.runs)), span("day-n is-closed", String(v.closed.size)), span("day-n", `${median(v.mins)} min`));
+      grid.append(name, span("day-n", String(v.runs)), span("day-n is-closed", String(v.closed.size)), span("day-n is-found", String(v.found)), span("day-n", `${median(v.mins)} min`));
     }
     const out: HTMLElement[] = [grid];
-    if (best?.closed.length) {
+    if (best && xp(best)) {
+      const n = foundBy.get(best.unit) ?? 0;
+      const did = [best.closed.length ? `closed ${best.closed.length}` : "", n ? `found ${n}` : ""].filter(Boolean).join(" and ");
       const mvp = div("day-mvp");
-      mvp.append(span("day-star", "MVP"), span("", `${unitName(best.kind, best.unit)} closed ${best.closed.length} in ${best.minutes} min`));
-      mvp.title = `Closed ${best.closed.map((n) => `#${n}`).join(", ")}`;
+      mvp.append(span("day-star", "MVP"), span("", `${unitName(best.kind, best.unit)} ${did} in ${best.minutes} min`));
+      mvp.title = `${xp(best)} XP in one run${best.closed.length ? `. Closed ${best.closed.map((c) => `#${c}`).join(", ")}` : ""}`;
       out.push(mvp);
     }
     dayEl.replaceChildren(...out);
