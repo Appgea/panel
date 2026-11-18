@@ -436,6 +436,13 @@ def main():
         return _respond(200, listing())
     if method == "GET" and path == "/board":
         return _respond(200, board(qs("fresh") == "1"))
+    if method == "GET" and path == "/routines":
+        # The Board's Routines band: each routine's state and its last reports, from `ops/runbooks/routines.py`.
+        # Owner, 2026-11-18: "I want to be involving in more, understand more what is going on so I can decide".
+        code, stdout, stderr, expired = command(["python3", str(ops_path() / "runbooks/routines.py"), "json"], 30)
+        if code or expired:
+            return _respond(200, {"error": last_line(stderr) or ("routines timed out" if expired else "routines exited %d" % code)})
+        return _respond(200, json.loads(stdout))
     if method == "GET" and path == "/builds":
         return _respond(200, builds())
     if method == "GET" and path == "/picture":
@@ -445,10 +452,14 @@ def main():
         if not scout:
             return _respond(400, {"error": "unknown id"})
         scout_id = scout["id"]
-        prompt = ('Scout `%s`: read `%s`, then `%s`, and do what it says. '
-                  'When done, run `python3 %s record %s --found <N> --note "<one line>"`.' %
-                  (scout_id, ops_path() / "scouts/_rules.md", ops_path() / ("scouts/%s.md" % scout_id),
-                   "'" + str(Path(__file__).resolve()).replace("'", "'\"'\"'") + "'", shlex.quote(scout_id)))
+        # A routine closes through `routines.py done`, which finds what it filed and posts the report he reads.
+        close = ('`python3 %s done %s --note "<one Turkish line: what you looked at and found>"`' %
+                 (shlex.quote(str(ops_path() / "runbooks/routines.py")), shlex.quote(scout_id))
+                 if scout["every"] == "routine" else
+                 '`python3 %s record %s --found <N> --note "<one line>"`' %
+                 ("'" + str(Path(__file__).resolve()).replace("'", "'\"'\"'") + "'", shlex.quote(scout_id)))
+        prompt = ('Scout `%s`: read `%s`, then `%s`, and do what it says. When done, run %s.' %
+                  (scout_id, ops_path() / "scouts/_rules.md", ops_path() / ("scouts/%s.md" % scout_id), close))
         return _respond(200, {"prompt": prompt.replace("\n", " ").replace("\r", " ")})
     if path.startswith("/review/"):
         import review

@@ -112,6 +112,29 @@ const api: BoardApi = {
     if (!path) throw new Error("Pass ?picture=URL to preview an issue's image");
     return path;
   },
+  routines: async () => ({
+    round_since: ago(60 * 20),
+    routines: [
+      { id: "health", title: "Stores, crashes, money and reviews", priority: "P1", state: "done", session: "claude-1a2b3c4d",
+        last_at: ago(45), note: "", start: "routine health",
+        summary: "Run the `operations` skill's daily check, read only: store states, rejections, crashes, money and reviews.",
+        reports: [
+          { at: ago(45), note: "8 kronik çökme grubu tarandı. Tavla bildirim çökmesi 5 kullanıcıda, işe açıldı.", filed: [
+            { number: 1901, title: "Tavla iOS: NotificationService crash on 5 users", url: url(1901) },
+            { number: 1902, title: "Fitstrail Android: ANR on the history screen", url: url(1902) }] },
+          { at: ago(60 * 26), note: "Mağaza durumları temiz. Yeni ret yok.", filed: [] }] },
+      { id: "explore", title: "What the stores reward now", priority: "P2", state: "running", session: "claude-9f8e7d6c",
+        last_at: null, note: "", start: "routine explore", reports: [],
+        summary: "Read what the App Store and Play feature this week, and find one calm, non-casino change an app could make." },
+      { id: "ui-guidelines", title: "Latest platform UI guidelines", priority: "P2", state: "owed", session: null,
+        last_at: ago(60 * 24 * 4), note: "", start: "routine ui-guidelines",
+        summary: "Check one app's screens against this year's Apple and Material guidance.",
+        reports: [{ at: ago(60 * 24 * 4), note: "Bakılan işler okunamadı.", filed: null }] },
+      { id: "complexity", title: "Code complexity", priority: "P3", state: "owed", session: null, last_at: null, note: "",
+        start: "routine complexity", reports: [], summary: "Find the one function in an app that is hardest to change safely." },
+    ],
+    manual: [{ id: "bets", title: "Bets" }, { id: "ideation", title: "Ideation" }],
+  }),
 };
 
 const screen = document.getElementById("boardScreen")!;
@@ -120,6 +143,7 @@ const handle = mountBoard(screen, {
   appIcon: (dir) => params.get(`icon-${dir}`),
   openUrl: (target) => console.log("open", target),
   openSwipe: () => void swipe(),
+  startRoutine: async (id) => { console.log("routine", id); await wait(600); return true; },
 });
 handle.open();
 

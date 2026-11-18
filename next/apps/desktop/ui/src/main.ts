@@ -43,7 +43,7 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
-import type { BoardData, BoardHandle, Scout } from "./features/board";
+import type { BoardData, BoardHandle, RoutinesData, Scout } from "./features/board";
 import type { FleetHandle, FleetView } from "./features/fleet";
 import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
@@ -1567,6 +1567,7 @@ function setupBoard(on: boolean): void {
       api: {
         board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
         picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
+        routines: () => moduleGet<RoutinesData>("/m/scout/routines"),
       },
       appIcon: (dir) => {
         const project = [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`));
@@ -1574,6 +1575,11 @@ function setupBoard(on: boolean): void {
       },
       openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
       openSwipe: () => void openSwipeReview(),
+      // `routine ID` records the run under the session's own name and prints the lens brief, so the
+      // terminal needs only this one line. It ends with `routine done`, which posts the report.
+      startRoutine: async (id) =>
+        Boolean(await launchScout({ id, agent: "claude" } as Scout,
+          `Run \`routine ${id}\` in the shell and do what it prints, to the end.`, async () => undefined)),
     });
     return board;
   });

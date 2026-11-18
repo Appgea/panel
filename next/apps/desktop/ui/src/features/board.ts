@@ -74,10 +74,28 @@ export type BoardData = {
   error?: string;
   apps?: Record<string, { name: string; dir: string }>;
 };
+/** One finished run of a routine: its one-line Turkish note and the issues it filed. `filed` null: GitHub did not say. */
+export type RoutineReport = { at: string; session?: string | null; note: string; failed?: boolean; filed: { number: number; title: string; url: string }[] | null };
+/** A routine from `ops/runbooks/routines.py json`. It runs once a round, only when the owner starts it. */
+export type Routine = {
+  id: string;
+  title: string;
+  priority: string;
+  summary: string;
+  state: "owed" | "running" | "done";
+  session?: string | null;
+  last_at?: string | null;
+  note: string;
+  reports: RoutineReport[];
+  start: string;
+};
+export type RoutinesData = { round_since?: string; routines?: Routine[]; manual?: { id: string; title: string }[]; error?: string };
+
 /** The extension's routes, behind one seam so the dev harness can stand in for it. */
 export type BoardApi = {
   board(fresh: boolean): Promise<BoardData>;
   picture(path: string): Promise<string>;
+  routines(): Promise<RoutinesData>;
 };
 
 export type BoardEvents = {
@@ -86,6 +104,8 @@ export type BoardEvents = {
   openUrl(url: string): void;
   /** The full-screen swipe review of what the board did since you last looked (swipe.ts). */
   openSwipe(): void;
+  /** Open a terminal that runs routine ID. False when no terminal opened. */
+  startRoutine(id: string): Promise<boolean>;
 };
 
 export type BoardHandle = { open(): void; clear(): void; refresh(fresh?: boolean): void; dispose(): void };
@@ -206,6 +226,14 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
   const pictures = new Map<string, Promise<string>>();
   let lanesHost: HTMLElement | null = null;
   let filterHost: HTMLElement | null = null;
+  /** Open tasks or routines: two kinds of work, one screen each. Owner, 2026-11-18: "Open tasks and routines are two
+   *  different tasks ... I want to be involving in more, understand more what is going on so I can decide". */
+  let view: "tasks" | "routines" = remember("view") === "routines" ? "routines" : "tasks";
+  let routines: RoutinesData | null = null;
+  let routinesBusy = false;
+  const openRoutine = new Set<string>();
+  const starting = new Set<string>();
+  const startFailed = new Set<string>();
 
   screen.classList.add("board");
   screen.addEventListener("keydown", (event) => {
@@ -224,9 +252,23 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   /* ------------------------------------------------------------ the clock */
 
+  /** The routines list. Read on open, on a switch to Routines, and with each board refresh while it shows. */
+  async function readRoutines(): Promise<void> {
+    if (routinesBusy) return;
+    routinesBusy = true;
+    try {
+      const read = await api.routines().catch((error: unknown): RoutinesData => ({ error: errorText(error, "the scout extension did not answer") }));
+      routines = read.error && routines?.routines ? { ...routines, error: read.error } : read;
+    } finally {
+      routinesBusy = false;
+      if (view === "routines") paint();
+    }
+  }
+
   async function refresh(fresh = false): Promise<void> {
     // Only the open Board shows a read, so a hidden one costs no `gh` calls. open() reads.
     if (!visible) return;
+    if (view === "routines") void readRoutines();
     // One pass at a time. A trigger that lands mid-pass runs one more pass after it, never two.
     if (busy) {
       again = true;
@@ -784,12 +826,138 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
 
   /* ------------------------------------------------------------ the screen */
 
+  function viewSwitch(): HTMLElement {
+    const group = h("div", "bq-views");
+    group.setAttribute("role", "tablist");
+    const owed = routines?.routines?.filter((r) => r.state === "owed").length;
+    for (const [key, label] of [["tasks", "Open tasks"], ["routines", "Routines"]] as const) {
+      const tab = button(`bq-view${view === key ? " is-on" : ""}`, label);
+      tab.setAttribute("role", "tab");
+      tab.setAttribute("aria-selected", String(view === key));
+      if (key === "routines" && owed) tab.append(h("small", "", String(owed)));
+      tab.addEventListener("click", () => {
+        if (view === key) return;
+        view = key;
+        remember("view", key);
+        if (key === "routines") void readRoutines();
+        paint();
+      });
+      group.append(tab);
+    }
+    return group;
+  }
+
+  /* ------------------------------------------------------------ routines */
+
+  const STATE_WORD: Record<Routine["state"], string> = { owed: "Owed this round", running: "Running", done: "Done this round" };
+
+  function filedChips(report: RoutineReport): HTMLElement {
+    const row = h("div", "bq-r-filed");
+    if (report.filed === null) {
+      row.append(h("span", "bq-r-none", "Filed tasks unknown: GitHub did not answer"));
+      return row;
+    }
+    if (!report.filed.length) {
+      row.append(h("span", "bq-r-none", "Filed nothing"));
+      return row;
+    }
+    for (const issue of report.filed) {
+      const chip = button("bq-r-issue", "", issue.title);
+      chip.append(h("b", "", `#${issue.number}`), h("span", "", issue.title));
+      chip.addEventListener("click", (event) => {
+        event.stopPropagation();
+        events.openUrl(issue.url);
+      });
+      row.append(chip);
+    }
+    return row;
+  }
+
+  function routineRow(r: Routine): HTMLElement {
+    const row = h("article", `bq-routine s-${r.state}`);
+    const open = openRoutine.has(r.id);
+    const latest = r.reports[0];
+    const main = button("bq-r-main");
+    main.setAttribute("aria-expanded", String(open));
+    const top = h("div", "bq-r-top");
+    top.append(h("span", "bq-r-dot"), h("span", "bq-r-title", r.title));
+    if (r.priority === "P0" || r.priority === "P1") top.append(h("span", "bq-r-first", "First in a round"));
+    const state = r.state === "running" && r.session ? `Running in ${r.session}` : STATE_WORD[r.state];
+    // While it runs, the log holds the start, not a finish: the last finish is the latest report.
+    const lastAt = r.last_at ?? latest?.at;
+    const last = lastAt ? ` · last ${when(lastAt)}` : " · never run";
+    top.append(h("span", "bq-r-state", state + last));
+    main.append(top);
+    main.append(rich("p", latest ? "bq-r-note" : "bq-r-note is-summary", latest?.note || r.note || r.summary));
+    if (latest) main.append(filedChips(latest));
+    main.addEventListener("click", () => {
+      if (open) openRoutine.delete(r.id);
+      else openRoutine.add(r.id);
+      paint();
+    });
+    const start = button("bq-action bq-r-start", starting.has(r.id) ? "Opening…" : "Start",
+      `Open a terminal that runs it: ${r.start}`);
+    start.disabled = r.state === "running" || starting.has(r.id);
+    start.addEventListener("click", async () => {
+      starting.add(r.id);
+      startFailed.delete(r.id);
+      paint();
+      try {
+        if (!(await events.startRoutine(r.id).catch(() => false))) startFailed.add(r.id);
+      } finally {
+        starting.delete(r.id);
+        await readRoutines();
+      }
+    });
+    row.append(main, start);
+    if (startFailed.has(r.id)) {
+      row.append(rich("p", "bq-r-fail", `No terminal opened. Run \`${r.start}\` in one yourself.`));
+    }
+    if (open) {
+      const history = h("div", "bq-r-history");
+      history.append(rich("p", "bq-r-what", r.summary));
+      if (r.reports.length > 1) {
+        for (const report of r.reports.slice(1)) {
+          const item = h("div", "bq-r-past");
+          item.append(h("span", "bq-r-when", when(report.at)), rich("p", "bq-r-note", report.note || "No note"), filedChips(report));
+          history.append(item);
+        }
+      } else {
+        history.append(h("p", "bq-r-none", latest ? "No earlier runs." : "It has not run yet."));
+      }
+      history.append(rich("p", "bq-r-cmd", `In a terminal: \`${r.start}\``));
+      row.append(history);
+    }
+    return row;
+  }
+
+  function routinesPane(): HTMLElement {
+    const pane = h("div", "bq-routines");
+    if (!routines) {
+      pane.append(h("p", "bq-loading", "Reading the routines…"));
+      return pane;
+    }
+    if (routines.error) pane.append(h("p", "bq-error", `The routines could not be read: ${routines.error}`));
+    const list = routines.routines ?? [];
+    const owed = list.filter((r) => r.state === "owed").length;
+    const intro = h("p", "bq-r-intro",
+      `Each routine runs once a round, when you start it. ${owed} of ${list.length} are still owed this round` +
+      (routines.round_since ? `, which began ${when(routines.round_since)}.` : "."));
+    pane.append(intro);
+    const order: Record<Routine["state"], number> = { running: 0, owed: 1, done: 2 };
+    for (const r of [...list].sort((a, b) => order[a.state] - order[b.state])) pane.append(routineRow(r));
+    if (routines.manual?.length) {
+      pane.append(h("p", "bq-r-manual", `Only on your word: ${routines.manual.map((m) => m.title).join(" · ")}`));
+    }
+    return pane;
+  }
+
   function header(): HTMLElement {
     const head = h("header", "bq-header");
     const left = h("div", "bq-heading");
-    left.append(h("h1", "", "Board"));
+    left.append(h("h1", "", "Board"), viewSwitch());
     // One plain count. GitHub not sending the closes reads as unknown, never as zero.
-    if (board && board.done !== undefined) {
+    if (view === "tasks" && board && board.done !== undefined) {
       const done = board.done === null ? "–" : number(days(board.done).today.count);
       const count = h("span", "bq-today", `${done} done today`);
       if (board.done === null) count.title = "GitHub did not send the closes. The next refresh tries again.";
@@ -822,6 +990,11 @@ export function mountBoard(screen: HTMLElement, events: BoardEvents): BoardHandl
       return;
     }
     const parts: HTMLElement[] = [header()];
+    if (view === "routines") {
+      lanesHost = filterHost = null;
+      screen.replaceChildren(...parts, routinesPane());
+      return;
+    }
     const error = failure || board?.error;
     if (error) parts.push(h("p", "bq-error", `The board could not be read: ${error}`));
     const hasBoard = board && (board.now || board.ready || board.next);
