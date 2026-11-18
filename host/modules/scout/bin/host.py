@@ -109,7 +109,7 @@ def read_scout(path):
     elif not fields.get("run", fields.get("agent")):
         errors.append("run or agent must not be empty")
     every = fields.get("every", "manual")
-    if every not in ("daily", "manual", *WEEKDAYS) and not re.fullmatch(r"[1-9][0-9]*h", every):
+    if every not in ("daily", "manual", "routine", *WEEKDAYS) and not re.fullmatch(r"[1-9][0-9]*h", every):
         errors.append("invalid every")
     try:
         after = int(fields.get("after", "8"))
@@ -133,10 +133,19 @@ def scouts():
             if not path.name.startswith("_") and path.is_file()]
 
 
+def round_since():
+    """When the current round of routines began. `ops/runbooks/routines.py` starts the next one."""
+    return read_json(state_path() / "routine-round.json", {}).get("since", "1970-01-01T00:00:00+00:00")
+
+
 def schedule(scout, last, current):
     if scout["error"] or scout["every"] == "manual":
         return False, None
     began = last and (last.get("started") or last["at"])
+    if scout["every"] == "routine":
+        # A routine has no day or hour: it is due once a round, and a round ends when every routine has run.
+        # Owner, 2026-11-18: "we must not specify days for the routines, that are just things to do".
+        return (not began or datetime.fromisoformat(began) < datetime.fromisoformat(round_since())), None
     at = datetime.fromisoformat(began).astimezone(current.tzinfo) if began else None
     every = scout["every"]
     if every.endswith("h"):
