@@ -1,6 +1,6 @@
 /**
- * The bar over the map: an on-air dot, the narrator line, the processes no agent owns any more,
- * and the toast. Copied from the concept page: the bar markup at line 192, `narr()` at line 1286,
+ * The bar over the map: an on-air dot, the day's score (live_hud.ts fills it), the narrator line,
+ * the processes no agent owns any more, and the toast. Copied from the concept page: the bar markup at line 192, `narr()` at line 1286,
  * and `.toast` in its CSS. No colour legend: every agent's words say what it does.
  *
  * The left-behind processes sat under This Mac on the map, where their long line ran into the
@@ -17,6 +17,7 @@ const TOAST_MS = 3000;
 export const TOP_HTML = `
   <header class="live-bar">
     <span class="live-onair" aria-hidden="true"></span>
+    <div class="hud" data-hud hidden></div>
     <span class="live-narr" data-narr>Looking for agents</span>
     <span class="live-left" data-left hidden></span>
   </header>`;
@@ -50,6 +51,7 @@ export function mountTop(ctx: LiveCtx, root: HTMLElement, toastEl: HTMLElement):
     if (!ctx.s.world) return;
     paintLeft();
     narr.textContent = line(ctx);
+    narr.title = narr.textContent;
   }
 
   function paintLeft(): void {

@@ -1597,9 +1597,9 @@ function setupBoard(on: boolean): void {
  *  Reused while it lives, so a second direction lands where the first one's context is. The fleet skill's
  *  "When he steers" says what it does with them. */
 let commanderSession: string | null = null;
-async function tellCommander(words: string): Promise<boolean> {
+async function tellCommander(words: string, from = "Overview"): Promise<boolean> {
   const said = words.replace(/\s+/g, " ").trim();
-  const order = `The owner steers the fleet from Panel's Overview: "${said}"`;
+  const order = `The owner steers the fleet from Panel's ${from}: "${said}"`;
   if (commanderSession && (await deck.sendPrompt(commanderSession, order))) return true;
   commanderSession = await launchScout({ id: "commander", agent: "claude" } as Scout,
     `You are the fleet commander. Read ~/.appgeapanel/skills/fleet/SKILL.md, section "When he steers", and act on it. ${order}`,
@@ -4484,6 +4484,10 @@ async function boot(): Promise<void> {
     stop: (pid) => invoke("live_stop", { pid }),
     deleteAnimation: (verb) => invoke("live_catalog_delete", { verb }),
     improveAnimation: (verb, note) => invoke("live_catalog_improve", { verb, note }),
+    // The fleet and the board's day feed Live's score. Without their modules Live runs as before.
+    fleet: () => (moduleInstalled("fleet") ? moduleGet<FleetView>("/m/fleet/view").catch(() => null) : Promise.resolve(null)),
+    day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
+    tellCommander: (words) => tellCommander(words, "Live"),
   });
   forYou = mountForYou(el("forYouScreen"), {
     world: liveWorld,

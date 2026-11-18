@@ -40,7 +40,14 @@ export function facts(read: () => { world: LiveWorld | null; board: BoardFeed | 
     iss && /^Board (worker|reviewer)$/.test(me.title) ? { ...me, title: `#${iss.number} ${cap(withoutRoom(iss.title, room))}`, sub: [me.title, me.sub].filter(Boolean).join(" · ") } : me;
   const own = (a: LiveAgent, parent: string | null) => {
     const room = roomOf(a);
-    return named(who(a, parent), issueOf(a), roomMeta(room)?.name ?? room);
+    const name = roomMeta(room)?.name ?? room;
+    if (a.fleet) {
+      // A unit's mission already leads its name. Its plot already names the app.
+      const me = who(a, parent);
+      const m = /^(#\d+ )(.*)$/.exec(me.title);
+      return m ? { ...me, title: `${m[1]}${cap(withoutRoom(m[2], name))}` } : me;
+    }
+    return named(who(a, parent), issueOf(a), name);
   };
   const whoOf = (a: LiveAgent) => {
     const p = agentById(a.parent);

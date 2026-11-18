@@ -16,6 +16,8 @@ import { mountForYou } from "./features/foryou";
 import type { InboxPost } from "./features/inbox_feed";
 import { renderView } from "./registry";
 import { mountLive, type LiveAgent, type LiveEmber, type LiveJob, type LiveWorld } from "./features/live";
+import type { OverviewData } from "./features/board";
+import type { FleetView } from "./features/fleet";
 import type { BoardFeed } from "./features/live_cards";
 import type { Script } from "./features/live_script";
 import seeds from "./features/live_seeds.json";
@@ -96,18 +98,19 @@ const PLAYS: Record<string, [string, string, string?][]> = {
 
 const agents: LiveAgent[] = [
   agent({
-    id: "pid:101", name: "Pişekar", harness: "claude", room: "interbellum", state: "work", panel: "s1", helpers: 0,
+    id: "pid:101", name: "Pişekar", harness: "claude", room: "interbellum", state: "work", panel: "s1", helpers: 0, commander: true,
     task: "Codex map tickets", steps: [step(4, "Read the sun mesh setup", "plan", "read", `${ROOT}/interbellum/docs/art-direction/README.md`)],
     files: [`${ROOT}/interbellum/apps/web/src/map/map_style.css`, `${ROOT}/interbellum/docs/art-direction/README.md`],
     lastText: "Land sits at 70% and sea at 28%. Both are too bright for the B target.",
   }),
   agent({ id: "pid:102", name: "Haiku 9f", harness: "claude", room: "interbellum", state: "work", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, task: "Find every map colour token" }),
   agent({ id: "pid:111", name: "Haiku a3", harness: "claude", room: "interbellum", state: "think", headless: true, parent: "pid:101", model: "claude-haiku-4-5", via: null, task: "Measure the sea", steps: [step(0.3, "Measure the sea lightness", "check", "think")] }),
-  agent({ id: "pid:103", name: "Terra 2110", harness: "codex", room: "elsewhere", state: "work", headless: true, via: "fleet", model: "gpt-6.1-terra", issue: 1104, session: "01a1a7f3-2375-7d42-9d3c-c6010a502110" }),
+  agent({ id: "pid:103", name: "Terra 2110", harness: "codex", room: "elsewhere", state: "work", headless: true, via: "fleet", model: "gpt-6.1-terra", issue: 1104, session: "01a1a7f3-2375-7d42-9d3c-c6010a502110", task: "#1104 Interbellum: front line drift at zoom", fleet: { unit: "8d17f4", kind: "terra", scout: null, issues: [{ number: 1104, title: "Interbellum: front line drift at zoom" }], budget: 30, startedMs: min(19), flags: [] } }),
+  agent({ id: "pid:141", name: null, harness: "opencode", room: "videokit", state: "think", headless: true, via: "fleet", model: "gemini-3-flash", fleet: { unit: "a832f9", kind: "flash", scout: "legal@VideoKit", issues: [], budget: 30, startedMs: min(12), flags: [] }, steps: [step(0.5, "Read the privacy policy", "check", "read")] }),
   agent({ id: "pid:105", name: "Köroğlu", harness: "claude", room: "videokit", state: "turn", panel: "s2", stateMs: min(6), task: "Zaman makinesi sigara videosu", lastText: "The episode is rendered and passed the judge. It is ready to post today.", steps: [step(6, "Commit and push the due batch", "ship", "git.push")] }),
   agent({ id: "pid:106", name: "Hacivat", harness: "claude", room: "panel", state: "work", panel: "s3", task: "Panel Live map" }),
   agent({ id: "pid:107", name: "Mahmut Hoca", harness: "grok", room: "hq", state: "idle", model: null, via: "Grok Bot", startedMs: min(600) }),
-  agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the store build", "check", "build"), steps: [step(41, "Run the store build", "check", "build")], issue: 742 }),
+  agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the store build", "check", "build"), steps: [step(41, "Run the store build", "check", "build")], issue: 742, task: "#742 Tavla: store build fails", fleet: { unit: "77aa01", kind: "terra", scout: null, issues: [{ number: 742, title: "Tavla: store build fails" }], budget: 30, startedMs: min(44), flags: ["OVER", "STUCK"] } }),
   agent({ id: "pid:109", name: "Karagöz", harness: "claude", room: "tavla", state: "work", panel: "s4", task: "Dice repeat the same roll after a restart" }),
   agent({ id: "pid:110", name: "Zenne", harness: "claude", room: "pillow_app", state: "work", panel: "s5", helpers: 0, task: "Sleep timer forgets its value" }),
   // Background runs named the way Claude names them, which say nothing: Live must say what they are.
@@ -219,6 +222,51 @@ const readWorld = async () => {
   return world;
 };
 const readBoard = async () => (params.has("real") ? ((await (await fetch("/board.real.json")).json()) as BoardFeed) : fixtureBoard);
+
+// The fleet and the day. Twelve seconds in, Terra 8d17f4 closes #1104 and a new unit deploys, so
+// the banner, the burst and the feed's new line can be seen.
+const hm = (m: number) => {
+  const d = new Date(min(m));
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+};
+const fixtureFleet = (): FleetView => {
+  const late = Date.now() - T > 12_000;
+  return {
+    supervisor: true,
+    hold: false,
+    spec: "terra:2,flash:1",
+    units: [
+      { id: "8d17f4", kind: "terra", app: "interbellum", issues: [{ number: 1104, title: "Interbellum: front line drift at zoom" }], minutes: 19, budget: 30, tokens: "4.1M", quiet: 0, flags: [], screen: "• Ran flutter test test/front_line_test.dart\n  └ 00:04 +12: All tests passed!\n\n• Edited lib/map/front_line.dart (+18 -6)\n\n› Explain the shared border path in the commit" },
+      { id: "a832f9", kind: "flash", app: "videokit", issues: [], minutes: 12, budget: 30, tokens: "2.2M", quiet: 0, flags: [], screen: "Read docs/privacy.md\nGrep 'tracking' in lib/\n╹▀▀▀▀▀▀▀▀▀\n⬝⬝⬝■■■ esc interrupt" },
+      { id: "77aa01", kind: "terra", app: "tavla", issues: [{ number: 742, title: "Tavla: store build fails" }], minutes: 44, budget: 30, tokens: "9.8M", quiet: 14, flags: ["OVER", "STUCK"], screen: "• Running flutter build ipa --release\n  └ Waiting for another flutter command to release the startup lock..." },
+      ...(late ? [{ id: "c0ffee", kind: "flash", app: "tavla", issues: [{ number: 1172, title: "Tavla: dice sound plays twice" }], minutes: 0, budget: 30, tokens: "0.1M", quiet: 0, flags: [], screen: "" }] : []),
+    ],
+    today: [
+      ...(late ? [{ time: hm(0), unit: "8d17f4", kind: "terra", app: "-", closed: [1104], minutes: 19, tokens: "4.1M", result: "said bye" }] : []),
+      { time: hm(25), unit: "663f9a", kind: "terra", app: "-", closed: [1150], minutes: 5, tokens: "1.4M", result: "said bye" },
+      { time: hm(48), unit: "2503b4", kind: "flash", app: "-", closed: [], minutes: 33, tokens: "16.0M", result: "scout discrepancies@Tavla, said bye" },
+      { time: hm(70), unit: "420717", kind: "flash", app: "-", closed: [1124, 1125, 1128], minutes: 46, tokens: "20.8M", result: "said bye" },
+      { time: hm(95), unit: "d47815", kind: "terra", app: "-", closed: [1127, 1134, 1135, 1136, 1137], minutes: 33, tokens: "21.3M", result: "said bye" },
+      { time: hm(120), unit: "1944ee", kind: "sonnet", app: "-", closed: [], minutes: 5, tokens: "3.8M", result: "scout legal@VillagesTown, said bye" },
+    ],
+  };
+};
+const card = (number: number, title: string, kind: "done" | "new", app: string, m: number) => ({ number, title, url: `https://github.com/Appgea/ops/issues/${number}`, kind, apps: [app], priority: 2, who: "", at: iso(m), created: iso(m) });
+const fixtureDay = (): OverviewData => ({
+  cards: [
+    card(1150, "Interbellum: darker overhead map, B target", "done", "interbellum", 25),
+    card(1124, "Pillow: sleep timer forgets its value", "done", "pillow_app", 70),
+    card(1125, "Pillow: rain loop has no licence", "done", "pillow_app", 70),
+    card(1128, "Tavla: undo after a double", "done", "tavla", 70),
+    ...[1127, 1134, 1135, 1136, 1137].map((n) => card(n, `Interbellum: front polish ${n}`, "done" as const, "interbellum", 95)),
+    card(1173, "VideoKit: privacy policy names no processor", "new", "videokit", 8),
+    card(1174, "Tavla: store text promises online play", "new", "tavla", 40),
+    card(1175, "Pillow: onboarding skips the notification ask", "new", "pillow_app", 90),
+    ...(Date.now() - T > 12_000 ? [card(1104, "Interbellum: front line drift at zoom", "done" as const, "interbellum", 0)] : []),
+  ],
+});
+const readFleet = async () => (params.has("real") ? ((await (await fetch("/fleet.real.json")).json()) as FleetView) : fixtureFleet());
+const readDay = async () => (params.has("real") ? ((await (await fetch("/day.real.json")).json()) as OverviewData) : fixtureDay());
 const openUrl = (url: string) => console.log("[live harness] open", url);
 const openTerminal = (panel: string) => (console.log("[live harness] terminal", panel), true);
 const sendToAgent = async (panel: string, text: string) => (console.log("[live harness] send", panel, text), true);
@@ -303,6 +351,9 @@ if (params.has("foryou")) {
     improveAnimation: async (verb, note) => {
       world = { ...world, catalog: (world.catalog ?? []).map((x) => (x.verb === verb ? { ...x, improving: true, improved: note } : x)) };
     },
+    fleet: readFleet,
+    day: readDay,
+    tellCommander: async (words) => (console.log("[live harness] commander", words), true),
   });
   document.getElementById("liveScreen")!.hidden = false;
   live.open();

@@ -44,6 +44,13 @@
   --l-idle: #6b7689;
   --l-stuck: #ff5a6a;
   --l-done: #4be38f;
+  /* The fleet's classes and the game's gold. Apart from the state colours, so a class never reads
+     as a state: Terra runs on Codex, Flash on OpenCode, Sonnet and Opus on Claude. */
+  --l-terra: #b892ff;
+  --l-flash: #ff8fd1;
+  --l-sonnet: #f4a77a;
+  --l-opus: #f4a77a;
+  --l-gold: #ffe27a;
   --l-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --l-mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
   --l-display: "Bricolage Grotesque", "IBM Plex Sans", system-ui, sans-serif;
@@ -117,6 +124,26 @@
 .side-row.is-more { padding-top: 2px; padding-bottom: 3px; }
 .side-row.is-more .side-who { color: var(--l-ink-3); font-weight: 500; }
 .side-row.is-more i { box-shadow: none; }
+/* The fleet's rows: the class colour down the left edge, the commander's in gold, and the
+   unit's time against its budget along the foot. */
+.side-head.is-fleet { color: var(--l-gold); }
+.side-row { position: relative; }
+.side-row.is-unit, .side-row.is-boss { box-shadow: inset 2px 0 0 var(--k); border-radius: 0 8px 8px 0; }
+.side-row.is-boss .side-where { color: var(--l-gold); }
+.side-row.is-flagged .side-what { color: var(--l-stuck); }
+.side-bud { position: absolute; left: 8px; bottom: 1px; height: 2px; width: calc((100% - 16px) * var(--p, 0)); border-radius: 1px; background: color-mix(in srgb, var(--l-done) 65%, transparent); }
+.side-bud[hidden] { display: none; }
+.side-bud.is-over { background: var(--l-stuck); }
+/* The day's table by class, under the lists. */
+.side-day { padding: 2px 8px 8px; }
+.side-day[hidden] { display: none; }
+.day-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(3, auto); column-gap: 14px; row-gap: 3px; font: 400 12px/1.4 var(--l-mono); color: var(--l-ink-2); }
+.day-h { font-size: 10.5px; color: var(--l-ink-3); }
+.day-h:not(:first-child), .day-n { text-align: right; }
+.day-cls { color: var(--c); font-weight: 600; }
+.day-n.is-closed { color: var(--l-done); }
+.day-mvp { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; color: var(--l-ink-2); }
+.day-star { padding: 2px 6px; border-radius: 5px; background: color-mix(in srgb, var(--l-gold) 16%, transparent); color: var(--l-gold); font: 700 10px/1.3 var(--l-display); letter-spacing: 0.08em; }
 .side-empty { display: block; width: 100%; padding: 8px; border: 0; background: none; color: var(--l-ink-3); font: 400 12.5px/1.4 var(--l-sans); text-align: left; }
 
 /* Buttons and the reply box, shared by the panel, the catalog and the bar. */

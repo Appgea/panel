@@ -201,6 +201,8 @@ mod tests {
             helper_kind: None,
             panel: None,
             issue: None,
+            fleet: None,
+            commander: false,
         }
     }
 

@@ -43,6 +43,18 @@
 .muted { padding: 5px 6px; color: var(--l-ink-3); font-size: 12.5px; }
 .pnote { margin: 10px 0 0; font-size: 12px; color: var(--l-ink-3); }
 
+/* A fleet unit's mission card: its issues, its budget, its flags and its screen. */
+.pmission { display: grid; gap: 4px; margin-top: 6px; font-size: 13px; }
+.pbudget { display: grid; gap: 5px; margin-top: 10px; }
+.pbudget-text { font: 500 12px/1.2 var(--l-mono); color: var(--l-ink-2); }
+.pbudget-bar { position: relative; height: 5px; border-radius: 3px; background: var(--l-line); overflow: hidden; }
+.pbudget-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--l-done); }
+.pbudget.is-over .pbudget-text { color: var(--l-stuck); }
+.pbudget.is-over .pbudget-bar i { background: var(--l-stuck); }
+.pflags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.chip.is-flag { --c: var(--l-stuck); }
+.pscreen { margin: 6px 0 0; padding: 8px 10px; max-height: 210px; overflow: auto; border: 1px solid var(--l-line); border-radius: 8px; background: var(--l-bg); color: var(--l-ink-2); font: 400 11px/1.45 var(--l-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+
 /* Hold to Stop: a red bar fills under the button over the hold. */
 .live-hold { position: relative; overflow: hidden; }
 .live-hold::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 100%; background: var(--l-stuck); transform: scaleX(0); transform-origin: left; }

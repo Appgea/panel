@@ -12,7 +12,7 @@
  * column until it closes.
  */
 
-import { ageOf, ago, button, cap, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, taskLine } from "./live_text";
+import { ageOf, ago, button, cap, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, taskLine, unitClass, unitName } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber } from "./live_types";
 
 /** Ended agents in the list. Older ones are in History. */
@@ -26,19 +26,29 @@ const KIDS = 0;
 export type Side = { paint(): void };
 
 export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
+  // The fleet first: its commander and its units, the squad the score is about. Then every other
+  // session, the day's table by class, and what ended.
+  const cmdHead = div("side-head is-fleet");
+  const cmdList = div("side-list");
   const nowHead = div("side-head");
   const nowList = div("side-list");
   const endHead = div("side-head");
   const endList = div("side-list");
-  el.append(nowHead, nowList, endHead, endList);
+  const dayHead = div("side-head", "Today's squad");
+  const dayEl = div("side-day");
+  // The day's table sits above Ended, so it shows without a scroll on a full wave.
+  el.append(cmdHead, cmdList, nowHead, nowList, dayHead, dayEl, endHead, endList);
   const rows = new Map<string, HTMLButtonElement>();
+  let daySig = "";
 
   function row(id: string, onClick: () => void, hoverId: string | null): HTMLButtonElement {
     let r = rows.get(id);
     if (!r) {
       r = button("side-row", "", onClick);
       const dot = document.createElement("i");
-      r.append(dot, span("side-who"), span("side-where"), span("side-what"));
+      const bud = span("side-bud");
+      bud.hidden = true;
+      r.append(dot, span("side-who"), span("side-where"), span("side-what"), bud);
       if (hoverId) {
         r.addEventListener("pointerenter", () => ctx.hover(hoverId));
         r.addEventListener("pointerleave", () => ctx.hover(null));
@@ -69,23 +79,45 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const ids = new Set(w.agents.map((a) => a.id));
     const kidsOf = new Map<string, LiveAgent[]>();
     for (const a of w.agents) if (a.parent && ids.has(a.parent)) kidsOf.set(a.parent, [...(kidsOf.get(a.parent) ?? []), a]);
-    const mains = w.agents.filter((a) => !a.parent || !ids.has(a.parent)).length;
-    const helpers = w.agents.length - mains;
-    set(nowHead, mains ? `Running · ${mains} ${plural(mains, "agent")}${helpers ? `, ${helpers} ${plural(helpers, "helper")}` : ""}` : "Running");
+    const tops = w.agents.filter((a) => !a.parent || !ids.has(a.parent));
+    const squad = (a: LiveAgent) => !!a.fleet || !!a.commander;
+    const sessions = tops.filter((a) => !squad(a));
+    const helpers = w.agents.filter((a) => a.parent && ids.has(a.parent)).length;
     // Helpers sit under the agent that started them. A swarm of eight would bury the list, so a
     // parent shows KIDS of them, the ones that need you first, and counts the rest.
-    const nowRows: HTMLElement[] = [];
-    const tree = (a: LiveAgent, depth: number) => {
-      nowRows.push(agentRow(a, now, depth));
+    const tree = (out: HTMLElement[], a: LiveAgent, depth: number) => {
+      out.push(agentRow(a, now, depth));
       const kids = [...(kidsOf.get(a.id) ?? [])].sort(rank);
       const shown = kids.filter((k, i) => i < KIDS || k.state === "turn" || k.state === "stuck");
-      for (const k of shown) tree(k, depth + 1);
-      if (kids.length > shown.length) nowRows.push(moreRow(a, kids.length - shown.length, depth + 1));
+      for (const k of shown) tree(out, k, depth + 1);
+      if (kids.length > shown.length) out.push(moreRow(a, kids.length - shown.length, depth + 1));
     };
-    for (const a of [...w.agents].filter((x) => !x.parent || !ids.has(x.parent)).sort(rank)) tree(a, 0);
+
+    // The commander leads, then the units that need a look, then the ones nearest their budget.
+    const units = tops.filter((a) => a.fleet);
+    const boss = tops.filter((a) => a.commander && !a.fleet);
+    const worry = (a: LiveAgent) => (a.fleet!.flags.length ? 0 : 1);
+    const spent = (a: LiveAgent) => (a.fleet!.budget ? (now - a.fleet!.startedMs) / 60_000 / a.fleet!.budget : 0);
+    units.sort((a, b) => worry(a) - worry(b) || spent(b) - spent(a) || a.id.localeCompare(b.id));
+    const cmdRows: HTMLElement[] = [];
+    for (const a of [...boss, ...units]) tree(cmdRows, a, 0);
+    const f = ctx.s.fleet;
+    const fleetWord = !f ? "" : f.hold ? " · on hold" : f.supervisor ? "" : " · off";
+    set(cmdHead, `Fleet · ${units.length} ${plural(units.length, "unit")}${boss.length ? ", 1 commander" : ""}${fleetWord}`);
+    cmdHead.hidden = !cmdRows.length;
+    cmdList.hidden = !cmdRows.length;
+    cmdRows.forEach((r) => used.add(r.dataset.key!));
+    order(cmdList, cmdRows);
+
+    const nowRows: HTMLElement[] = [];
+    for (const a of [...sessions].sort(rank)) tree(nowRows, a, 0);
+    const label = cmdRows.length ? "Sessions" : "Running";
+    set(nowHead, sessions.length ? `${label} · ${sessions.length} ${plural(sessions.length, "agent")}${helpers ? `, ${helpers} ${plural(helpers, "helper")}` : ""}` : label);
     nowRows.forEach((r) => used.add(r.dataset.key!));
     if (!w.agents.length) nowRows.push(empty("No agent runs on this Mac."));
+    else if (!sessions.length) nowRows.push(empty("Only the fleet runs now."));
     order(nowList, nowRows);
+    paintDay();
 
     const ended = [...w.embers].sort((a, b) => b.endedMs - a.endedMs).slice(0, ENDED);
     endHead.hidden = !ended.length;
@@ -113,10 +145,58 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     const what = a.state === "idle" ? (iss && !named ? `#${iss.number} ${iss.title}` : (taskLine(a.task) ?? "Idle")) : doing(a);
     const age = ageOf(a, now);
     const meta = [me.sub, a.startedMs ? `running ${since(a.startedMs, now)}` : ""].filter(Boolean).join(" · ");
-    const where = [depth ? "" : room, age ? (a.state === "turn" ? `waiting ${age}` : age) : ""].filter(Boolean).join(" · ");
-    fill(r, `var(--l-${a.state})`, title, where, what, [me.title, meta, taskLine(a.task)].filter(Boolean).join("\n"));
-    r.className = `side-row is-${a.state}${depth ? " is-child" : ""}`;
+    const u = a.fleet;
+    const used = u?.startedMs ? (now - u.startedMs) / 60_000 : 0;
+    const clock = u?.budget ? `${Math.round(used)}/${u.budget} min` : "";
+    // A unit's line says its class and its time against the budget. Its plot is on the map.
+    const where = u ? [room, clock].filter(Boolean).join(" · ") : a.commander ? "★ Commander" : [depth ? "" : room, age ? (a.state === "turn" ? `waiting ${age}` : age) : ""].filter(Boolean).join(" · ");
+    const flags = u?.flags.length ? `${u.flags.join(", ")} · ` : "";
+    fill(r, `var(--l-${a.state})`, title, where, `${flags}${what}`, [me.title, meta, taskLine(a.task)].filter(Boolean).join("\n"));
+    const bud = r.children[4] as HTMLElement;
+    bud.hidden = !u?.budget;
+    if (u?.budget) bud.style.setProperty("--p", Math.min(1, used / u.budget).toFixed(3));
+    const over = !!u && (u.flags.includes("OVER") || (!!u.budget && used > u.budget));
+    bud.classList.toggle("is-over", over);
+    r.style.setProperty("--k", u ? unitClass(u.kind).colour : "var(--l-gold)");
+    r.className = `side-row is-${a.state}${depth ? " is-child" : ""}${u ? " is-unit" : ""}${a.commander ? " is-boss" : ""}${u?.flags.length ? " is-flagged" : ""}`;
     return r;
+  }
+
+  /** The day by class: runs, closes and the median run, and the unit that closed most. */
+  function paintDay(): void {
+    const runs = ctx.s.fleet?.today ?? [];
+    dayHead.hidden = !runs.length;
+    dayEl.hidden = !runs.length;
+    if (!runs.length) return;
+    const by = new Map<string, { runs: number; closed: Set<number>; mins: number[] }>();
+    for (const r of runs) {
+      const k = by.get(r.kind) ?? { runs: 0, closed: new Set<number>(), mins: [] };
+      k.runs++;
+      r.closed.forEach((n) => k.closed.add(n));
+      k.mins.push(r.minutes);
+      by.set(r.kind, k);
+    }
+    const best = [...runs].sort((a, b) => b.closed.length - a.closed.length || a.minutes - b.minutes)[0];
+    const kinds = [...by.entries()].sort((a, b) => b[1].closed.size - a[1].closed.size || b[1].runs - a[1].runs);
+    const sig = JSON.stringify([kinds.map(([k, v]) => [k, v.runs, v.closed.size, median(v.mins)]), best?.unit, best?.closed.length]);
+    if (sig === daySig) return;
+    daySig = sig;
+    const grid = div("day-grid");
+    grid.append(span("day-h", "Class"), span("day-h", "Runs"), span("day-h", "Closed"), span("day-h", "Median"));
+    for (const [kind, v] of kinds) {
+      const c = unitClass(kind);
+      const name = span("day-cls", c.name);
+      name.style.setProperty("--c", c.colour);
+      grid.append(name, span("day-n", String(v.runs)), span("day-n is-closed", String(v.closed.size)), span("day-n", `${median(v.mins)} min`));
+    }
+    const out: HTMLElement[] = [grid];
+    if (best?.closed.length) {
+      const mvp = div("day-mvp");
+      mvp.append(span("day-star", "MVP"), span("", `${unitName(best.kind, best.unit)} closed ${best.closed.length} in ${best.minutes} min`));
+      mvp.title = `Closed ${best.closed.map((n) => `#${n}`).join(", ")}`;
+      out.push(mvp);
+    }
+    dayEl.replaceChildren(...out);
   }
 
   /** The helpers a parent row does not list, as one line that opens the parent. */
@@ -162,6 +242,13 @@ function order(list: HTMLElement, want: HTMLElement[]): void {
   const have = [...list.children];
   if (have.length === want.length && have.every((c, i) => c === want[i])) return;
   list.replaceChildren(...want);
+}
+
+function median(xs: number[]): number {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : Math.round((s[m - 1] + s[m]) / 2);
 }
 
 function set(el: HTMLElement, t: string): void {

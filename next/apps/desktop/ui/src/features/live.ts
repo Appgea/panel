@@ -21,7 +21,8 @@
  * column, and live_top over both.
  *
  * This file mounts, polls, keeps the state, moves the camera and starts scripts. Polled every
- * 2 s and the board every 60 s, only while the screen is open. Bevy sleeps while it is closed.
+ * 2 s, the fleet every 5 s, and the board and today's closes every 60 s, only while the screen is
+ * open. Bevy sleeps while it is closed. The game over it is live_game.ts and live_hud.ts.
  * If Bevy cannot start, everything else still works and the stage says why.
  */
 
@@ -29,6 +30,8 @@ import { errorText } from "../errors";
 import type { BoardFeed } from "./live_cards";
 import { mountCatalog } from "./live_catalog";
 import { facts } from "./live_facts";
+import { hoursToday, newGame, update, type FeedItem } from "./live_game";
+import { mountHud } from "./live_hud";
 import { mountLabels } from "./live_labels";
 import { mountPanel } from "./live_panel";
 import { direct, RESULT_MS, RESULTS, type EmberEnd, type Seen } from "./live_playbook";
@@ -46,6 +49,12 @@ export type LiveHandle = { open(): void; clear(): void };
 
 const POLL_MS = 2000;
 const BOARD_MS = 60_000;
+/** The fleet's view is a local read, the day's board a GitHub search. */
+const FLEET_MS = 5000;
+const DAY_MS = 60_000;
+/** Celebrations at once. A wave that ends ten runs in one read bursts four plots, not ten. */
+const MAX_CHEERS = 4;
+const GOLD = "#ffe27a";
 /**
  * More scripts at once than this is noise. A step that finds no room just shows its words.
  * Owner, 2026-11-06: every step animates, but quieter. Six at once was too busy to follow.
@@ -74,6 +83,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
         <canvas id="liveCanvas" class="live-canvas" tabindex="-1" aria-hidden="true"></canvas>
         <div class="live-labels" data-labels></div>
         <div class="live-tools" data-tools></div>
+        <div class="live-feed" data-feed aria-label="What the fleet just did" hidden></div>
+        <div class="live-banner" data-banner role="status" hidden></div>
         <div class="live-toast" data-toast role="status" hidden></div>
         <p class="live-note" data-note hidden></p>
       </div>
@@ -95,6 +106,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   const s: LiveState = {
     world: null,
     board: null,
+    fleet: null,
+    day: null,
+    game: newGame(),
     layout: null,
     slots: { cols: 0, col: new Map(), size: "" },
     camera: { x: 0, y: 0, zoom: 0.6 },
@@ -120,6 +134,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   let timer: number | null = null;
   let polling = false;
   let boardAt = 0;
+  let fleetAt = 0;
+  let dayAt = 0;
   let open = false;
   const played = new Map<string, number>();
   let lastSeen: Seen | null = null;
@@ -150,6 +166,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     toast: (text, bad) => top.toast(text, bad),
   };
   const top = mountTop(ctx, root, q("[data-toast]"));
+  const hud = mountHud(ctx, q("[data-hud]"), q("[data-feed]"), q("[data-banner]"));
   const panel = mountPanel(ctx, panelEl);
   const labels = mountLabels(ctx, q("[data-labels]"));
   const side = mountSide(ctx, listEl);
@@ -188,7 +205,10 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     polling = true;
     try {
       s.world = await events.world();
-      if (Date.now() - boardAt > BOARD_MS) void readBoard();
+      const now = Date.now();
+      if (now - boardAt > BOARD_MS) void readBoard();
+      if (now - fleetAt > FLEET_MS) void readFleet();
+      if (now - dayAt > DAY_MS) void readDay();
       paint();
     } catch (e) {
       top.say(`Could not read the agents: ${errorText(e, "the scan failed")}`);
@@ -207,6 +227,80 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       // Without the board an agent shows its own task instead of its issue.
     }
     paint();
+  }
+
+  /** The fleet's own view: its units' screens and budgets, and what ended today. */
+  async function readFleet(): Promise<void> {
+    fleetAt = Date.now();
+    try {
+      const f = await events.fleet();
+      s.fleet = f && !f.error ? f : null;
+    } catch {
+      // Without the fleet module the units still show from the scan, with no score.
+      s.fleet = null;
+    }
+    score();
+  }
+
+  /** Today's closes and finds on the board, for the score and the feed. */
+  async function readDay(): Promise<void> {
+    dayAt = Date.now();
+    try {
+      const d = await events.day(hoursToday(dayAt));
+      if (d && !d.error) s.day = d;
+    } catch {
+      // The score then counts the fleet's own closes.
+    }
+    score();
+  }
+
+  function score(): void {
+    const iss = (n: number) => {
+      const b = s.board;
+      const i = [...(b?.now ?? []), ...(b?.ready ?? []), ...(b?.done ?? []), ...(b?.waiting ?? []), ...(b?.you ?? [])].find((x) => x.number === n);
+      return i ? { title: i.title, url: i.url, room: i.apps[0] } : undefined;
+    };
+    update(s.game, s.fleet, s.day, Date.now(), iss, ctx.roomName);
+    hud.play(s.game.fresh);
+    celebrate(s.game.fresh);
+    paint();
+  }
+
+  /**
+   * News lands on the map where it happened: a close bursts at its unit, or its plot when the
+   * unit has gone, and its XP floats up; a report flies to the commander. A find pulses its plot.
+   */
+  function celebrate(items: FeedItem[]): void {
+    const l = s.layout;
+    if (!l || !items.length) return;
+    const dotOf = (unit?: string) => {
+      const a = unit ? s.world?.agents.find((x) => x.fleet?.unit === unit) : undefined;
+      return a ? l.dots.get(a.id) : undefined;
+    };
+    const boss = s.world?.agents.find((a) => a.commander);
+    const bossAt = boss ? l.dots.get(boss.id) : undefined;
+    const fx = (...f: FxOut[]) => {
+      if (!s.reduced) s.pendingFx.push(...f);
+    };
+    let n = 0;
+    for (const it of items) {
+      if (n >= MAX_CHEERS) break;
+      const d = it.room ? l.districts.find((x) => x.key === it.room) : undefined;
+      const at = dotOf(it.unit) ?? d;
+      if (!at) continue;
+      n++;
+      if (it.kind === "close") {
+        fx({ kind: "burst", x: at.x, y: at.y, color: COLOR.done, size: 40, count: 26 }, { kind: "ring", x: at.x, y: at.y, color: COLOR.done, size: 70, ms: 1400 });
+        if (bossAt && (bossAt.x !== at.x || bossAt.y !== at.y)) fx({ kind: "orb", x: at.x, y: at.y, x2: bossAt.x, y2: bossAt.y, color: GOLD, size: 5, ms: 1100, delay: 500 });
+        if (it.xp) s.marks.push({ text: `+${it.xp} XP`, at: { x: at.x, y: at.y - 14 }, to: { x: at.x, y: at.y - 54 }, color: GOLD, ms: 1900, xp: true, id: ++markId, born: Date.now() });
+      } else if (it.kind === "found") {
+        fx({ kind: "pulse", x: at.x, y: at.y, color: COLOR.think, size: 46, ms: 1200 });
+      } else if (it.kind === "deploy") {
+        fx({ kind: "ring", x: at.x, y: at.y, color: COLOR.work, size: 50, ms: 1200 });
+      } else if (it.kind === "alert") {
+        fx({ kind: "ring", x: at.x, y: at.y, color: COLOR.stuck, size: 56, ms: 1600 });
+      }
+    }
   }
 
   // ---------------------------------------------------------------- scripts
@@ -388,6 +482,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   function paint(): void {
     if (!s.world) return;
     top.paint();
+    hud.paint();
     judge();
     draw();
     freshResults = [];
@@ -407,10 +502,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   function fit(): void {
     const b = s.layout?.bounds;
     const W = stage.clientWidth;
-    const H = stage.clientHeight;
-    if (!b || !W || !H) return;
+    // The feed sits over the stage's foot, so the fitted map stops above it.
+    const foot = Math.min(hud.height(), stage.clientHeight * 0.3);
+    const H = stage.clientHeight - foot;
+    if (!b || !W || H <= 40) return;
     const zoom = clamp(Math.min((W - 40) / (b.x1 - b.x0), (H - 40) / (b.y1 - b.y0)), ZOOM_MIN, 1);
-    s.camera = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2, zoom };
+    s.camera = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 + foot / 2 / zoom, zoom };
   }
 
   function draw(): void {

@@ -8,6 +8,7 @@
 
 pub mod catalog;
 mod embers;
+mod fleet;
 pub use embers::stopped_by_owner;
 mod jobs;
 mod mac;
@@ -18,7 +19,7 @@ mod verbs;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -110,6 +111,10 @@ pub struct Agent {
     pub issue: Option<u32>,
     /// Set on a subagent: its type, like `Explore`. Its `parent` is the agent that started it.
     pub helper_kind: Option<String>,
+    /// Set on a fleet unit: its class, its mission and its budget (fleet.rs).
+    pub fleet: Option<fleet::Tag>,
+    /// The session that commands the fleet now.
+    pub commander: bool,
 }
 
 /// A room is a project, or HQ, the home folder or Elsewhere.
@@ -141,6 +146,8 @@ pub struct World {
 /// A step running this long, with the process quiet, is stuck. testlock queues and long builds
 /// stay under it.
 const STUCK_MS: u64 = 30 * 60 * 1000;
+/// A step this recent means an agent with no status of its own is still at work.
+const FRESH_MS: u64 = 90_000;
 
 /// A Codex session counts as running while its rollout was written this recently.
 const CODEX_FRESH: Duration = Duration::from_secs(120);
@@ -193,24 +200,19 @@ pub fn scan() -> World {
         agents.push(a);
     }
     fold_wrappers(&mut agents, &procs);
-    let fleet = fleet_workers(&home);
-    let mut producers: HashMap<String, u32> = HashMap::new();
-    let mut claims: HashMap<String, (u32, String)> = HashMap::new();
+    // Each fleet unit names the session it writes, so its steps are read like any other agent's,
+    // and the app a scout was sent to is its room.
+    let units = fleet::units(&home);
+    let mut targets: HashMap<String, String> = HashMap::new();
     for a in &mut agents {
-        let Some(w) = a.pid.and_then(|p| fleet.get(&p)) else { continue };
+        let Some(u) = a.pid.and_then(|p| fleet::unit_of(p, &procs)).and_then(|id| units.get(&id)) else { continue };
         if a.session.is_none() {
-            a.session = w.session.clone();
+            a.session = u.session();
         }
-        if a.name.is_none() {
-            let tail: String = w.session.as_deref().unwrap_or_default().chars().rev().take(4).collect::<Vec<_>>().into_iter().rev().collect();
-            a.name = Some(format!("{} {tail}", title_case(&w.kind)).trim().to_string());
+        if let Some(app) = u.target() {
+            targets.insert(a.id.clone(), app.to_string());
         }
-        if let Some(p) = w.producer {
-            producers.insert(a.id.clone(), p);
-        }
-        if let Some((n, title)) = &w.claim {
-            claims.insert(a.id.clone(), (*n, title.clone()));
-        }
+        a.fleet = Some(u.tag());
     }
     let rollouts = codex_rollouts(&home);
     for (session, cwd, started, headless, busy) in rollouts.iter().cloned() {
@@ -253,7 +255,7 @@ pub fn scan() -> World {
         .filter(|a| a.harness == Harness::Opencode)
         .map(|a| opencode::Want {
             agent: a.id.clone(),
-            session: a.pid.and_then(|p| procs.get(&p)).and_then(|p| opencode::session_in_args(&p.args)),
+            session: a.pid.and_then(|p| procs.get(&p)).and_then(|p| opencode::session_in_args(&p.args)).or_else(|| a.session.clone()),
         })
         .collect();
     let oc = opencode::read(&wants, now);
@@ -263,9 +265,8 @@ pub fn scan() -> World {
     for a in &mut agents {
         if let Some(pid) = a.pid {
             let (parent, via) = lineage(pid, &procs, &by_pid);
-            // A fleet runs under launchd. Its state file names the process that started it.
-            a.parent = parent.or_else(|| producers.get(&a.id).and_then(|p| ancestor_agent(*p, &procs, &by_pid)));
-            a.via = via;
+            a.parent = parent;
+            a.via = if a.fleet.is_some() { Some("fleet".into()) } else { via };
         }
         // The board's folk name wins over Claude's derived one, like `appgea-54`.
         let folk = a.session.as_ref().and_then(|s| people.by_session.get(s)).or_else(|| a.pid.and_then(|p| people.by_pid.get(&p))).cloned();
@@ -290,13 +291,16 @@ pub fn scan() -> World {
             a.session.get_or_insert_with(|| r.session.clone());
             a.task = a.task.take().or_else(|| r.title.clone());
         }
-        if let Some((n, title)) = claims.get(&a.id) {
-            // The claimed issue says more than a fleet session's stock title.
-            a.issue = Some(*n);
-            a.task = Some(title.clone());
+        if let Some(m) = a.fleet.as_ref().and_then(|f| f.issues.first()) {
+            // The issue a unit holds says more than its stock prompt. Its number stays in the task,
+            // so the report it leaves when it ends still names the issue.
+            a.issue = Some(m.number);
+            if !m.title.is_empty() {
+                a.task = Some(format!("#{} {}", m.number, m.title));
+            }
         }
         if a.room.is_empty() {
-            (a.room, a.room_name) = rooms.area(a, t);
+            (a.room, a.room_name) = targets.get(&a.id).and_then(|app| rooms.by_word(app)).unwrap_or_else(|| rooms.area(a, t));
         }
         (a.state, a.state_ms) = state_of(a, t, s, now);
         let mine: Vec<(String, Option<String>, Option<String>, Option<String>, Option<u64>, &track::Track)> = match (t, read) {
@@ -308,6 +312,11 @@ pub fn scan() -> World {
         a.helpers = a.helpers.saturating_sub(mine.len() as u32);
         for (id, kind, what, model, started, st) in mine {
             helpers.push(helper(a, id, kind, what, model, started, st, now));
+        }
+    }
+    if let Some(pid) = fleet::commander(&home, now as f64 / 1000.0) {
+        for a in agents.iter_mut().filter(|a| a.pid == Some(pid) && a.fleet.is_none()) {
+            a.commander = true;
         }
     }
     agents.extend(helpers);
@@ -333,80 +342,6 @@ pub fn scan() -> World {
     let seen: Vec<(String, String)> = agents.iter().flat_map(|a| a.now.iter().chain(a.steps.iter().take(5))).map(|s| (s.verb.clone(), s.label.clone())).collect();
     catalog::write_missing(&seen);
     World { agents, jobs, embers, rooms, mac, catalog: catalog::read(), scanned_ms: now }
-}
-
-/// One worker a `board work --fleet` run started, from its `board-work-fleet-<pid>.json`.
-struct FleetWorker {
-    /// The model kind, like `terra` or `sol`.
-    kind: String,
-    /// Read from the worker's own log, where Codex prints `session id: …`.
-    session: Option<String>,
-    /// The process that started the fleet, when it says.
-    producer: Option<u32>,
-    /// The issue it claimed, from the `#1068 claimed by …: <title>` line board prints in its log.
-    claim: Option<(u32, String)>,
-}
-
-/// The last issue a fleet worker's log says it claimed. Board prints the line near the top.
-fn claim_in_log(log: &Path) -> Option<(u32, String)> {
-    let mut head = String::new();
-    BufReader::new(fs::File::open(log).ok()?).take(64 << 10).read_to_string(&mut head).ok()?;
-    head.lines().rev().find_map(|l| {
-        let rest = l.trim().strip_prefix('#')?;
-        let (n, after) = rest.split_once(" claimed by ")?;
-        let title = after.split_once(": ").map(|(_, t)| t.trim().to_string()).filter(|t| !t.is_empty())?;
-        Some((n.parse().ok()?, title))
-    })
-}
-
-/// Running fleet workers by pid. Board writes these files. Without them, workers still show,
-/// only nameless and without their parent.
-fn fleet_workers(home: &Path) -> HashMap<u32, FleetWorker> {
-    let mut out = HashMap::new();
-    let Ok(dir) = fs::read_dir(home.join(".appgeapanel/state")) else { return out };
-    for e in dir.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned();
-        if !(name.starts_with("board-work-fleet-") && name.ends_with(".json")) {
-            continue;
-        }
-        let Some(v) = fs::read(e.path()).ok().and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok()) else { continue };
-        if !v["ended"].is_null() && v["ended"] != false {
-            continue;
-        }
-        let producer = v["producer_pid"].as_u64().and_then(|p| u32::try_from(p).ok());
-        for w in v["workers"].as_array().into_iter().flatten().filter(|w| w["active"] == true) {
-            let Some(pid) = w["pid"].as_u64().and_then(|p| u32::try_from(p).ok()) else { continue };
-            let log = w["log"].as_str().map(Path::new);
-            let session = log.and_then(codex_session_in_log).or_else(|| w["session"].as_str().map(str::to_string));
-            let claim = log.and_then(claim_in_log);
-            out.insert(pid, FleetWorker { kind: w["kind"].as_str().unwrap_or_default().to_string(), session, producer, claim });
-        }
-    }
-    out
-}
-
-/// Codex prints `session id: <uuid>` in the header of every `codex exec` run.
-fn codex_session_in_log(log: &Path) -> Option<String> {
-    let mut head = String::new();
-    BufReader::new(fs::File::open(log).ok()?).take(4096).read_to_string(&mut head).ok()?;
-    head.lines().find_map(|l| l.trim().strip_prefix("session id:")).map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
-}
-
-/// The agent at `pid` or nearest above it.
-fn ancestor_agent(pid: u32, procs: &HashMap<u32, Proc>, agents: &HashMap<u32, String>) -> Option<String> {
-    let mut cur = pid;
-    for _ in 0..64 {
-        if let Some(id) = agents.get(&cur) {
-            return Some(id.clone());
-        }
-        cur = procs.get(&cur).map(|p| p.ppid).filter(|&p| p > 1)?;
-    }
-    None
-}
-
-fn title_case(word: &str) -> String {
-    let mut c = word.chars();
-    c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
 }
 
 /// Whether hold-to-stop may signal `pid`: an agent or a job in a fresh scan, never a service,
@@ -442,7 +377,10 @@ fn state_of(a: &Agent, t: Option<&track::Track>, s: Option<&ClaudeSession>, now:
                 }
                 return (State::Work, Some(at));
             }
-            if said.is_none() && !a.busy {
+            // No status and a quiet CPU, but a step in the last minute and a half: it thinks
+            // between steps. Fleet units on OpenCode read as idle all the time without this.
+            let fresh = t.is_some_and(|t| t.last_ms > 0 && now.saturating_sub(t.last_ms) < FRESH_MS);
+            if said.is_none() && !a.busy && !fresh {
                 return (State::Idle, None);
             }
             (State::Think, t.map(|t| t.last_ms).filter(|&m| m > 0).or(since))
@@ -509,6 +447,8 @@ fn blank(id: String, pid: Option<u32>, harness: Harness, headless: bool, session
         panel: None,
         issue: None,
         helper_kind: None,
+        fleet: None,
+        commander: false,
     }
 }
 
@@ -903,6 +843,15 @@ impl Rooms {
             return (app.key.clone(), app.name.clone());
         }
         self.room_for(Path::new(&a.cwd))
+    }
+
+    /// The app a word names, as a scout's routine does: `legal@TavlaSkor` names Tavla Skor.
+    /// Its key, its name or its folder, with case, spaces and marks ignored.
+    fn by_word(&self, word: &str) -> Option<(String, String)> {
+        let norm = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+        let w = norm(word);
+        let folder = |dir: &str| norm(dir.rsplit('/').next().unwrap_or(dir));
+        self.apps.iter().find(|a| norm(&a.key) == w || norm(&a.name) == w || folder(&a.dir) == w).map(|a| (a.key.clone(), a.name.clone()))
     }
 
     /// The app a task names as a whole word, like "Cardly native iOS: parity pass". Longest name

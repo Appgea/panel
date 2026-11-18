@@ -1,6 +1,6 @@
 /** Live's words: names, times and counts, and the small DOM makers every Live file shares. */
 
-import type { EmberOutcome, Harness, LiveAgent, State } from "./live_types";
+import type { EmberOutcome, FleetTag, Harness, LiveAgent, State } from "./live_types";
 
 export const HARNESS: Record<Harness, string> = { claude: "Claude", codex: "Codex", grok: "Grok", opencode: "OpenCode", gemini: "Gemini", kimi: "Kimi" };
 export const LETTER: Record<Harness, string> = { claude: "C", codex: "X", grok: "G", opencode: "O", gemini: "M", kimi: "K" };
@@ -32,10 +32,59 @@ const PROMPT_ROLES: [RegExp, string][] = [
   [/^You review a diff before it is pushed/i, "Pre-push reviewer"],
   [/^You write one animation script/i, "Animation writer"],
   [/^You are Terra worker (\S+)/i, "Builder · $1"],
+  [/^You are fleet builder (\S+)/i, "Fleet builder · $1"],
+  [/^You are fleet scout (\S+)/i, "Fleet scout · $1"],
 ];
 
 /** What `who` reads. Agents and embers both have these. */
-export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null; helperKind?: string | null };
+export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null; helperKind?: string | null; fleet?: FleetTag | null };
+
+export type UnitClass = { name: string; colour: string };
+
+/** A fleet unit's class by its kind in `fleet`, with the colour its chip, bubble and rows wear. */
+const CLASSES: Record<string, UnitClass> = {
+  terra: { name: "Terra", colour: "var(--l-terra)" },
+  flash: { name: "Flash", colour: "var(--l-flash)" },
+  sonnet: { name: "Sonnet", colour: "var(--l-sonnet)" },
+  haiku: { name: "Haiku", colour: "var(--l-sonnet)" },
+  opus: { name: "Opus", colour: "var(--l-opus)" },
+  fable: { name: "Fable", colour: "var(--l-opus)" },
+};
+
+export function unitClass(kind: string): UnitClass {
+  return CLASSES[kind] ?? { name: cap(kind || "unit"), colour: "var(--l-ink-2)" };
+}
+
+/** A unit by its class and id: "Flash 8ae149". */
+export function unitName(kind: string, id: string): string {
+  return `${unitClass(kind).name} ${id}`;
+}
+
+/** A scout's routine as words: `ui-guidelines@Sudokov` is "UI guidelines". The app is its plot. */
+export function lensName(scout: string): string {
+  const lens = scout.split("@")[0].replace(/[-_]+/g, " ").trim();
+  return cap(lens.replace(/\bui\b/gi, "UI").replace(/\bux\b/gi, "UX"));
+}
+
+/**
+ * A fleet unit is its mission: "#1917 One owner for the crash policy" for a builder, "Legal scout"
+ * for a scout. Its class and id go second, since the owner steers missions, not unit ids.
+ */
+function unitWho(f: FleetTag, harness: Harness, model: string | null): { title: string; sub: string; role: string } {
+  const m = f.issues[0];
+  const role = f.scout ? "Fleet scout" : "Fleet builder";
+  const title = m ? `#${m.number} ${cap(m.title)}${f.issues.length > 1 ? ` +${f.issues.length - 1}` : ""}` : f.scout ? `${lensName(f.scout)} scout` : unitName(f.kind, f.unit);
+  const engine = [HARNESS[harness], short(model)].filter(Boolean).join(" ");
+  return { title, sub: [`${unitName(f.kind, f.unit)}`, engine].filter(Boolean).join(" · "), role };
+}
+
+/** Input tokens as the fleet prints them, `16.0M` or `850K`, in millions. */
+export function millions(t: string | undefined): number {
+  const m = /^([\d.]+)\s*([KMG]?)/i.exec(t ?? "");
+  if (!m) return 0;
+  const n = parseFloat(m[1]) || 0;
+  return m[2].toUpperCase() === "K" ? n / 1000 : m[2].toUpperCase() === "G" ? n * 1000 : n;
+}
 
 /** A subagent's type as a role: `Explore` → "Explore helper", `general-purpose` → "Helper". */
 export function helperRole(kind: string): string {
@@ -49,6 +98,7 @@ export function helperRole(kind: string): string {
  */
 export function who(a: WhoInput, parent: string | null = null): { title: string; sub: string; role: string } {
   const task = (a.task ?? "").trim();
+  if (a.fleet) return unitWho(a.fleet, a.harness, a.model);
   if (a.helperKind) {
     const role = helperRole(a.helperKind);
     const model = [HARNESS[a.harness], short(a.model)].filter(Boolean).join(" ");

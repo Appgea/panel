@@ -20,7 +20,7 @@ UI / agent ──► module_request("/m/<name>/<route>", method, body)   (Tauri 
    killed after PANEL_MODULE_TIMEOUT_SECONDS (default 60)
 ```
 - Requests under `/m/<name>/assets/…` are served straight from `<module>/assets/` (no process), with a path-climb guard.
-- Each call costs an interpreter start. The UI therefore never polls modules on a timer. One exception: the AI fleet screen reads `fleet` every 5 seconds, only while it is the screen shown, because it shows live terminals.
+- Each call costs an interpreter start. The UI therefore never polls modules on a timer. Exceptions, only while their screen is shown: the AI fleet screen and Live read `fleet` every 5 seconds, because they show live terminals. Live reads scout's `/review/overview?hours=` (today's closes and finds) every 60 seconds for its score.
 - Python is `python3` (macOS/Linux) or `python` (Windows). `.py` runs with `-B`.
 - `module.json` `args` may contain `{root}` (the module folder).
 - Old name `decision-map` is served as `product-spine`.

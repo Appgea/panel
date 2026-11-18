@@ -22,7 +22,8 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
   const f = focus ? world.agents.find((a) => a.id === focus) : undefined;
   const fp = f ? at(f.id) : undefined;
   if (f && fp) {
-    const family = world.agents.filter((a) => a.id === f.parent || a.parent === f.id);
+    // The commander's lines run to every unit, and a unit's to its commander: the chain of command.
+    const family = world.agents.filter((a) => a.id === f.parent || a.parent === f.id || (f.commander && a.fleet) || (f.fleet && a.commander));
     for (const o of family) {
       const op = at(o.id);
       if (op && (op.x !== fp.x || op.y !== fp.y)) links.push({ x1: fp.x, y1: fp.y, x2: op.x, y2: op.y });

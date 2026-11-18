@@ -18,7 +18,7 @@
  */
 
 import { landmarkNews, type News } from "./live_playbook";
-import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine } from "./live_text";
+import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine, unitClass } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveState } from "./live_types";
 import { GLYPHS } from "./live_script";
 import { along, BUBBLE_DX, bubbleW } from "./live_world";
@@ -93,6 +93,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       if (!el) {
         el = m.line ? lineEl() : m.glyph ? glyphEl(m.glyph) : span("live-tag", m.text ?? "");
         if (!m.line) el.classList.add("live-fx");
+        if (m.xp) el.classList.add("is-xp");
         el.style.setProperty("--c", m.color);
         // Ways go first, so every glyph and tag draws over them.
         if (m.line) marksEl.prepend(el);
@@ -179,7 +180,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
   }
 
   const pool = new Map<string, HTMLElement>();
-  const nodes = new Map<string, { el: HTMLElement; bubble: HTMLElement; who: HTMLElement; kids: HTMLElement; res: HTMLElement; say: HTMLElement; age: HTMLElement; lit: number }>();
+  const nodes = new Map<string, { el: HTMLElement; bubble: HTMLElement; cls: HTMLElement; who: HTMLElement; kids: HTMLElement; res: HTMLElement; say: HTMLElement; age: HTMLElement; bud: HTMLElement; lit: number }>();
   let sizes = new WeakMap<HTMLElement, { sig: string; w: number; h: number }>();
   // Words measured in the fallback font wrap wider and taller. Once Live's fonts arrive every
   // size is measured again, or a bubble would hide the sign above it for good.
@@ -207,15 +208,19 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const el = button("live-agent", "", () => ctx.select({ kind: "agent", id: a.id }));
       el.dataset.agent = a.id;
       const bubble = span("live-bubble");
+      // A fleet unit's class, or the commander's star, ahead of the name.
+      const cls = span("live-cls");
       const who = span("live-who");
       const kids = span("live-kids");
       const res = span("live-res");
       const say = span("live-say");
       const age = span("live-age");
-      bubble.append(who, kids, res, say, age);
+      // A unit's time against its budget, a thin line along the bubble's foot.
+      const bud = span("live-bud");
+      bubble.append(cls, who, kids, res, say, age, bud);
       el.append(bubble);
       // Joins the page in paint, after its first place is set, so it never slides in from 0, 0.
-      n = { el, bubble, who, kids, res, say, age, lit: 0 };
+      n = { el, bubble, cls, who, kids, res, say, age, bud, lit: 0 };
       nodes.set(a.id, n);
     }
     return n;
@@ -372,7 +377,16 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       n.res.className = `live-res${result ? (result.ok ? " is-ok" : " is-bad") : ""}`;
       text(n.say, said);
       text(n.age, age ? (a.state === "turn" ? `waiting ${age}` : age) : "");
-      n.el.className = `live-agent is-${a.state}${focus ? " is-focus" : ""}${n.lit > now ? " is-new" : ""}`;
+      const f = a.fleet;
+      const kind = f ? unitClass(f.kind) : null;
+      text(n.cls, kind ? kind.name : a.commander ? "★ Commander" : "");
+      n.cls.style.setProperty("--c", kind ? kind.colour : "var(--l-gold)");
+      const used = f?.startedMs ? (now - f.startedMs) / 60_000 : 0;
+      const over = !!f && (f.flags.includes("OVER") || (f.budget > 0 && used > f.budget));
+      n.bud.hidden = !f?.budget;
+      if (f?.budget) n.bud.style.width = `${Math.round(Math.min(1, used / f.budget) * 100)}%`;
+      n.bud.classList.toggle("is-over", over);
+      n.el.className = `live-agent is-${a.state}${focus ? " is-focus" : ""}${n.lit > now ? " is-new" : ""}${f ? " is-unit" : ""}${a.commander ? " is-boss" : ""}${f?.flags.includes("STUCK") ? " is-flagged" : ""}`;
       const full = `${name}, ${STATE_WORD[a.state]}${age ? ` ${age}` : ""}: ${result ? `${result.text}. ` : ""}${said}`;
       n.el.setAttribute("aria-label", full);
       n.bubble.title = full;

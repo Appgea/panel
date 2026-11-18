@@ -1,6 +1,9 @@
 /** The shapes Live passes between its files. The backend's types first, then the screen's state. */
 
+import type { OverviewData } from "./board";
+import type { FleetView } from "./fleet";
 import type { BoardFeed } from "./live_cards";
+import type { Game } from "./live_game";
 import type { Facts } from "./live_facts";
 import type { FxOut, Mark, Pt, Script } from "./live_script";
 import type { Slots, World } from "./live_world";
@@ -44,6 +47,24 @@ export type LiveAgent = {
   issue: number | null;
   /** Set on a subagent: its type, like `Explore`. `parent` is the agent that started it. */
   helperKind?: string | null;
+  /** Set on a fleet unit (src-tauri/src/live/fleet.rs). */
+  fleet?: FleetTag | null;
+  /** The session that commands the fleet now. */
+  commander?: boolean;
+};
+
+/** A fleet unit's class, mission and budget, as the scan reads them from the fleet's state. */
+export type FleetTag = {
+  unit: string;
+  /** `terra`, `flash`, `sonnet`, `opus`: the unit's class. */
+  kind: string;
+  /** A scout's routine, like `legal@TavlaSkor`. Null for a builder. */
+  scout: string | null;
+  issues: { number: number; title: string }[];
+  /** Minutes before it counts as slow. */
+  budget: number;
+  startedMs: number;
+  flags: string[];
 };
 
 export type LiveJob = {
@@ -118,6 +139,12 @@ export type LiveEvents = {
   deleteAnimation(verb: string): Promise<void>;
   /** Has a writer rewrite one animation with the owner's note. The old one plays until then. */
   improveAnimation(verb: string, note: string): Promise<void>;
+  /** `fleet view` through the fleet module: units, their screens, what ended today. Null without the module. */
+  fleet(): Promise<FleetView | null>;
+  /** The board's issues closed and filed in the last `hours`, from the scout module. Null without it. */
+  day(hours: number): Promise<OverviewData | null>;
+  /** His words to the fleet's commander, as the Board's Overview sends them. False when no terminal took them. */
+  tellCommander(words: string): Promise<boolean>;
 };
 
 /** What `apps/live` exports after wasm-bindgen. */
@@ -138,6 +165,11 @@ export type Camera = { x: number; y: number; zoom: number };
 export type LiveState = {
   world: LiveWorld | null;
   board: BoardFeed | null;
+  /** The fleet's own view and today's board, read slower than the world (live.ts). */
+  fleet: FleetView | null;
+  day: OverviewData | null;
+  /** The score, the feed and what just happened (live_game.ts). */
+  game: Game;
   layout: World | null;
   slots: Slots;
   camera: Camera;

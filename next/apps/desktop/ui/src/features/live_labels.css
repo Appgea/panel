@@ -118,6 +118,20 @@
 .live-age:empty { display: none; }
 .live-agent.is-turn .live-age { color: var(--l-turn); }
 
+/* A fleet unit: its class in its colour before the mission, its budget along the foot. The
+   commander wears a gold star and a gold edge, so the eye finds who runs the fleet. */
+.live-cls { margin-right: 6px; padding: 0 5px; border: 1px solid color-mix(in srgb, var(--c) 55%, transparent); border-radius: 5px; color: var(--c); font: 600 10px/1.45 var(--l-mono); letter-spacing: 0.02em; white-space: nowrap; }
+.live-cls:empty { display: none; }
+.live-agent.is-boss .live-cls { border: 0; padding: 0; font-size: 10.5px; }
+.live-agent.is-boss .live-bubble { border-color: color-mix(in srgb, var(--l-gold) 50%, transparent); }
+.live-bud { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: color-mix(in srgb, var(--l-done) 75%, transparent); transition: width 1s linear; }
+.live-bud[hidden] { display: none; }
+.live-bud.is-over { background: var(--l-stuck); }
+.live-agent.is-flagged .live-bubble { border-color: color-mix(in srgb, var(--l-stuck) 55%, transparent); }
+.is-reduced .live-bud { transition: none; }
+/* The XP a close earns, floating up from where it happened. */
+.live-tag.is-xp { background: none; color: var(--l-gold); font: 700 12px/1 var(--l-display); letter-spacing: 0.03em; }
+
 /* Glyphs and tags from animation scripts. They centre on their point and never take a click. */
 .live-fxmarks { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
 .live-fx { position: absolute; left: 0; top: 0; will-change: transform, opacity; }

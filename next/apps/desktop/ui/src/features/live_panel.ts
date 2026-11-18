@@ -7,7 +7,7 @@
 
 import { errorText } from "../errors";
 import { RESULTS } from "./live_playbook";
-import { ageOf, ago, button, div, doing, hhmm, holdButton, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, startedBy, STATE_RANK, STATE_WORD, taskLine } from "./live_text";
+import { ageOf, ago, button, div, doing, hhmm, holdButton, lensName, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, startedBy, STATE_RANK, STATE_WORD, taskLine, unitName } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber, Step } from "./live_types";
 import "./live_panel.css";
 
@@ -144,14 +144,18 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     for (const k of kids) fam.append(link(k.helperKind ? `${k.task ?? ctx.nameOf(k)} · ${doing(k)}` : ctx.nameOf(k), () => ctx.select({ kind: "agent", id: k.id })));
     if (a.helpers) fam.append(span("", `${a.helpers} ${plural(a.helpers, "helper")}`));
     for (const j of jobs) fam.append(span("", `${j.label}${j.bay ? " in a test bay" : ""}`));
-    const list: [string, string | HTMLElement][] = [["Task", task], ["Now", `${doing(a)}${age ? ` · ${a.state === "turn" ? `waiting ${age}` : age}` : ""}`]];
+    // A unit's issues are its mission card's, below.
+    const list: [string, string | HTMLElement][] = [...(a.fleet ? [] : [["Task", task] as [string, string | HTMLElement]]), ["Now", `${doing(a)}${age ? ` · ${a.state === "turn" ? `waiting ${age}` : age}` : ""}`]];
     // Stuck or waiting, its own last words are the best clue to why.
     if ((a.state === "stuck" || a.state === "turn") && a.lastText && a.lastText !== doing(a)) list.push(["Last said", a.lastText]);
     const res = s.results.get(a.id);
     if (res && res.until > now) list.push(["Result", `${res.ok ? "✓" : "✗"} ${res.text}`]);
-    list.push(["Started by", by]);
+    // A unit's class and id are its subtitle already. Its mission card says the rest.
+    if (!a.fleet) list.push(["Started by", by]);
+    if (a.commander) list.push(["Commands", `${s.world!.agents.filter((x) => x.fleet).length} fleet units`]);
     if (fam.childElementCount) list.push(["Helpers", fam]);
     out.push(rows(list));
+    if (a.fleet) out.push(...unitParts(a));
     out.push(...doneList("Steps", a.steps));
     if (talking && a.panel) {
       const input = document.createElement("input");
@@ -186,9 +190,22 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     }
     if (!a.panel && iss) acts.append(button("opt", `Open #${iss.number}`, () => ctx.events.openUrl(iss.url)));
     if (a.session && a.harness === "claude") acts.append(button("opt", "History", () => ctx.events.openHistory(a.session!)));
-    if (a.pid) acts.append(holdButton("Hold to Stop", () => void stopPid(a.pid!, ctx.nameOf(a))));
+    // A unit ends through its commander, whose `fleet end` hands its issue on. A killed process
+    // would leave the issue held.
+    if (a.fleet) {
+      const attach = `tmux -L fleet attach -t ${a.fleet.kind}-${a.fleet.unit}`;
+      acts.append(
+        button("opt", "Copy attach", () =>
+          void navigator.clipboard?.writeText(attach).then(
+            () => ctx.toast(`Copied: ${attach}`),
+            () => ctx.toast("Could not copy the command.", true),
+          ),
+        ),
+      );
+    } else if (a.pid) acts.append(holdButton("Hold to Stop", () => void stopPid(a.pid!, ctx.nameOf(a))));
     out.push(acts);
-    if (!a.panel)
+    if (a.fleet) out.push(div("pnote", "It runs in tmux. Copy attach and paste it in a terminal to watch it live. Ctrl-b d leaves it running."));
+    else if (!a.panel)
       out.push(
         div(
           "pnote",
@@ -200,6 +217,91 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
         ),
       );
     return out;
+  }
+
+  /**
+   * A unit's mission card: its issues, its time against the budget, what it read, its flags, the
+   * last lines of its screen, and a line to its commander. Owner, 2026-11-18: he steers the fleet
+   * through its commander, so the words go there, never to the unit.
+   */
+  function unitParts(a: LiveAgent): HTMLElement[] {
+    const f = a.fleet!;
+    const now = Date.now();
+    const view = ctx.s.fleet?.units?.find((u) => u.id === f.unit);
+    const out: HTMLElement[] = [div("psec", f.scout ? "Scout run" : "Mission")];
+    if (f.issues.length) {
+      const miss = div("pmission");
+      for (const m of f.issues) {
+        const known = ctx.issueOf(a)?.number === m.number ? ctx.issueOf(a) : undefined;
+        const url = known?.url ?? `https://github.com/Appgea/ops/issues/${m.number}`;
+        miss.append(link(`#${m.number} ${m.title}`, () => ctx.events.openUrl(url)));
+      }
+      out.push(miss);
+    } else if (f.scout) out.push(div("presult", `${lensName(f.scout)}${f.scout.includes("@") ? ` in ${f.scout.split("@")[1]}` : ""}. It files what it finds and builds nothing.`));
+    const used = f.startedMs ? (now - f.startedMs) / 60_000 : 0;
+    const over = f.flags.includes("OVER") || (f.budget > 0 && used > f.budget);
+    const meter = div(`pbudget${over ? " is-over" : ""}`);
+    const bar = span("pbudget-bar");
+    const fillEl = document.createElement("i");
+    fillEl.style.width = `${Math.round(Math.min(1, f.budget ? used / f.budget : 0) * 100)}%`;
+    bar.append(fillEl);
+    meter.append(span("pbudget-text", `${Math.round(used)} of ${f.budget} min${over ? " · over budget" : ""}`), bar);
+    out.push(meter);
+    const facts: string[] = [];
+    if (view?.tokens) facts.push(`${view.tokens} tokens read`);
+    if (view && view.quiet > 0) facts.push(`screen quiet ${view.quiet} min`);
+    if (facts.length) out.push(div("pnote", facts.join(" · ")));
+    if (f.flags.length) {
+      const flags = div("pflags");
+      for (const fl of f.flags) flags.append(span("chip is-flag", fl === "OVER" ? "Over budget" : fl === "STUCK" ? "Stuck" : fl));
+      out.push(flags);
+    }
+    // The screen's last lines, without the TUI's rules and boxes.
+    const lines = (view?.screen ?? "").split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => l && !/^[\s╹╻▀▄█■⬝─│┃━┏┓┗┛╭╮╰╯═║▔▁·.]*$/.test(l));
+    if (lines.length) {
+      out.push(div("psec", "Screen"));
+      const pre = document.createElement("pre");
+      pre.className = "pscreen";
+      pre.textContent = lines.slice(-14).join("\n");
+      out.push(pre);
+    }
+    const input = document.createElement("input");
+    input.className = "reply";
+    input.type = "text";
+    input.autocomplete = "off";
+    // Short enough for the column at its narrowest. The Enter hint is in the tooltip.
+    input.placeholder = "Tell the commander about it";
+    input.title = "Your words go to the commander, naming this unit. Enter sends.";
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      const words = input.value.trim();
+      if (!words) return;
+      const mission = f.issues[0] ? `#${f.issues[0].number} ${f.issues[0].title}` : f.scout ? `scout ${f.scout}` : "no issue";
+      void steer(`About ${unitName(f.kind, f.unit)} (unit ${f.unit}, ${mission}): ${words}`).then((how) => {
+        if (how !== "failed") input.value = "";
+        ctx.toast(how === "sent" ? "Sent to the commander." : how === "copied" ? "The commander runs outside Panel. Your words are copied: paste them in its terminal." : "No commander terminal took it.", how === "failed");
+      });
+    });
+    out.push(input);
+    return out;
+  }
+
+  /**
+   * His words to the commander: into the commander's own Panel terminal when it has one. A
+   * commander that runs outside Panel gets them on the clipboard: Panel cannot type into it, and
+   * a second commander would fight the first over the same units. With no commander on the map,
+   * the Board's Overview way starts one.
+   */
+  async function steer(words: string): Promise<"sent" | "copied" | "failed"> {
+    const order = `The owner steers the fleet from Panel's Live: "${words}"`;
+    const boss = s.world?.agents.find((x) => x.commander);
+    if (boss?.panel) return (await ctx.events.sendToAgent(boss.panel, order)) ? "sent" : "failed";
+    if (boss) {
+      const ok = await navigator.clipboard?.writeText(order).then(() => true, () => false);
+      return ok ? "copied" : "failed";
+    }
+    return (await ctx.events.tellCommander(words)) ? "sent" : "failed";
   }
 
   function reportPanel(e: LiveEmber): HTMLElement[] {
