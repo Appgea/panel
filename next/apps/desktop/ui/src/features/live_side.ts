@@ -15,6 +15,7 @@
 import { ageOf, ago, button, cap, div, doing, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, STATE_RANK, taskLine, unitClass, unitName } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber } from "./live_types";
 import { XP } from "./live_game";
+import { art, crest, STAR } from "./game_art";
 
 /** Ended agents in the list. Older ones are in History. */
 const ENDED = 8;
@@ -191,7 +192,8 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
     grid.append(span("day-h", "Class"), span("day-h", "Runs"), span("day-h", "Closed"), span("day-h", "Found"), span("day-h", "Median"));
     for (const [kind, v] of kinds) {
       const c = unitClass(kind);
-      const name = span("day-cls", c.name);
+      const name = span("day-cls");
+      name.append(art("day-crest", crest(kind)), span("", c.name));
       name.style.setProperty("--c", c.colour);
       grid.append(name, span("day-n", String(v.runs)), span("day-n is-closed", String(v.closed.size)), span("day-n is-found", String(v.found)), span("day-n", `${median(v.mins)} min`));
     }
@@ -200,7 +202,15 @@ export function mountSide(ctx: LiveCtx, el: HTMLElement): Side {
       const n = foundBy.get(best.unit) ?? 0;
       const did = [best.closed.length ? `closed ${best.closed.length}` : "", n ? `found ${n}` : ""].filter(Boolean).join(" and ");
       const mvp = div("day-mvp");
-      mvp.append(span("day-star", "MVP"), span("", `${unitName(best.kind, best.unit)} ${did} in ${best.minutes} min`));
+      const star = span("day-star");
+      star.append(art("day-star-ico", STAR), document.createTextNode("MVP"));
+      const line = span("day-mvp-line");
+      const who = document.createElement("b");
+      who.textContent = unitName(best.kind, best.unit);
+      const mins = document.createElement("i");
+      mins.textContent = `${best.minutes} min`;
+      line.append(who, ` ${did} in `, mins);
+      mvp.append(star, line, span("day-mvp-xp", `+${xp(best)} XP`));
       mvp.title = `${xp(best)} XP in one run${best.closed.length ? `. Closed ${best.closed.map((c) => `#${c}`).join(", ")}` : ""}`;
       out.push(mvp);
     }

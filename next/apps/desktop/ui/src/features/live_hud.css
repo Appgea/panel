@@ -7,22 +7,14 @@
 .hud > * + * { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--l-line); }
 
 .hud-rank { display: flex; align-items: center; gap: 9px; flex: none; cursor: default; }
-.hud-lv {
-  display: grid;
-  place-items: center;
-  width: 30px;
-  height: 30px;
-  border: 1px solid color-mix(in srgb, var(--l-gold) 60%, transparent);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--l-gold) 10%, var(--l-deck));
-  color: var(--l-gold);
-  font: 700 16px/1 var(--l-display);
-}
+/* The rank's insignia: its metal climbs bronze, silver, gold, platinum, legend (game_art.ts). */
+.hud-lv { display: block; flex: none; width: 27px; filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5)); }
+.hud-lv svg, .hud-flame svg, .feed-crest svg, .ban-art svg { display: block; width: 100%; height: 100%; }
 .hud-rk { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 8px; row-gap: 3px; }
-.hud-rk-name { font: 600 13px/1.1 var(--l-sans); color: var(--l-ink); }
+.hud-rk-name { font: 700 13.5px/1.1 var(--l-sans); color: var(--l-ink); }
 .hud-xp-text { grid-column: 2; grid-row: 1; justify-self: end; font: 500 11px/1.1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
-.hud-xp { grid-column: 1 / 3; position: relative; width: 132px; height: 4px; border-radius: 2px; background: var(--l-line); overflow: hidden; }
-.hud-xp i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--l-gold); box-shadow: 0 0 8px var(--l-gold); transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.hud-xp { grid-column: 1 / 3; position: relative; width: 132px; height: 5px; border-radius: 3px; background: var(--l-line); overflow: hidden; }
+.hud-xp i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: linear-gradient(90deg, #c98a2a, var(--l-gold)); box-shadow: 0 0 8px var(--l-gold); transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .is-reduced .hud-xp i { transition: none; }
 
 /* Each number over its word, so the four read as a row of counters. */
@@ -35,7 +27,9 @@
 .hud-delta { grid-column: 2; grid-row: 1; font: 600 10.5px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
 .hud-delta[hidden] { display: none; }
 .hud-delta.is-up { color: var(--l-done); }
-.hud-streak { align-self: center; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--l-gold) 14%, transparent); color: var(--l-gold); font: 600 11px/1 var(--l-sans); white-space: nowrap; }
+.hud-streak { display: inline-flex; align-self: center; align-items: center; gap: 3px; padding: 3px 8px 3px 5px; border-radius: 999px; background: color-mix(in srgb, #ff8a4c 16%, transparent); color: #ff9a5c; font: 500 11px/1 var(--l-sans); white-space: nowrap; }
+.hud-streak b { font-weight: 800; }
+.hud-flame { width: 13px; height: 13px; }
 .hud-streak[hidden] { display: none; }
 
 .hud-fleet { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 14px; font: 600 12px/1 var(--l-sans); color: var(--l-ink-3); white-space: nowrap; cursor: default; }
@@ -109,7 +103,7 @@
 .feed-chip:focus-visible, .feed-less:focus-visible, .feed-more:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 1px; }
 .feed-row {
   display: grid;
-  grid-template-columns: 6px auto minmax(0, 1fr) auto auto;
+  grid-template-columns: 16px auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -125,10 +119,17 @@
 }
 .feed-row:hover { background: var(--l-raise); }
 .feed-row:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 1px; }
-.feed-row i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.feed-row > i { width: 6px; height: 6px; margin: 0 5px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+/* A unit's line: its class's crest on a tile in the class's hue. */
+.feed-crest { width: 16px; height: 16px; padding: 3px; box-sizing: border-box; border-radius: 4px; color: var(--k); background: color-mix(in srgb, var(--k) 20%, transparent); }
+:is(.feed-crest, .ban-art).c-terra { --k: var(--l-terra); }
+:is(.feed-crest, .ban-art).c-flash { --k: var(--l-flash); }
+:is(.feed-crest, .ban-art):is(.c-sonnet, .c-haiku) { --k: var(--l-sonnet); }
+:is(.feed-crest, .ban-art):is(.c-opus, .c-fable) { --k: var(--l-opus); }
+.feed-text b { color: var(--l-ink); font-weight: 600; }
 .feed-who { color: var(--l-ink); font-weight: 600; white-space: nowrap; }
 .feed-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feed-xp { font: 600 11px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-gold); }
+.feed-xp { padding: 2px 6px; border-radius: 999px; background: color-mix(in srgb, var(--l-gold) 14%, transparent); font: 700 10.5px/1.1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-gold); white-space: nowrap; }
 .feed-at { font: 400 10.5px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); white-space: nowrap; }
 .feed-row.k-alert .feed-text { color: var(--l-stuck); }
 .feed-row.is-old { opacity: 0.6; }
@@ -142,11 +143,11 @@
   z-index: 5;
   top: 56px;
   left: 50%;
-  display: grid;
-  justify-items: center;
-  gap: 3px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
   width: max-content;
-  max-width: min(560px, calc(100% - 32px));
+  max-width: min(600px, calc(100% - 32px));
   padding: 11px 22px 12px;
   border: 1px solid color-mix(in srgb, var(--c, var(--l-done)) 55%, transparent);
   border-radius: 14px;
@@ -169,6 +170,11 @@
   85% { opacity: 1; }
   100% { opacity: 0; }
 }
+.ban-body { display: grid; justify-items: center; gap: 3px; min-width: 0; }
+.ban-art { flex: none; }
+.ban-art.is-rank { width: 40px; filter: drop-shadow(0 3px 8px rgba(0, 0, 0, 0.5)); }
+.ban-art.is-crest { width: 36px; height: 36px; padding: 8px; box-sizing: border-box; border-radius: 10px; color: var(--k); background: color-mix(in srgb, var(--k) 20%, transparent); }
+.ban-by b { color: var(--l-gold); font-weight: 700; }
 .ban-kicker { font: 700 12px/1 var(--l-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--c); }
 .ban-title { max-width: 100%; font: 600 16px/1.3 var(--l-sans); color: var(--l-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ban-by { font: 500 11.5px/1.2 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }

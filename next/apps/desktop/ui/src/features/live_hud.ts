@@ -9,6 +9,7 @@
  */
 
 import { FEED_COLOUR, STREAK, rank, type FeedItem, type FeedKind, type Tally } from "./live_game";
+import { art, crest, crestKind, FLAME, insignia } from "./game_art";
 import { ago, button, div, plural, span } from "./live_text";
 import type { LiveCtx } from "./live_types";
 import "./live_hud.css";
@@ -117,7 +118,10 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     const known = g.primed || g.dayPrimed;
     bar.hidden = !known;
     if (!known) return;
-    set(lv, String(sc.rank.level));
+    if (lv.dataset.level !== String(sc.rank.level)) {
+      lv.dataset.level = String(sc.rank.level);
+      lv.innerHTML = insignia(sc.rank.level);
+    }
     set(rk, sc.rank.name);
     const span_ = sc.rank.next ? sc.rank.next - sc.rank.floor : 1;
     fill.style.width = `${sc.rank.next ? Math.round(((sc.xp - sc.rank.floor) / span_) * 100) : 100}%`;
@@ -134,7 +138,12 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     num(unitsEl, String(sc.units), `${sc.units} fleet ${plural(sc.units, "unit")} running, ${sc.runs} ${plural(sc.runs, "run")} ended today`);
     num(tokensEl, tokens(sc.tokens), "Input tokens the fleet read today, ended runs and running units");
     streakEl.hidden = sc.streak < STREAK;
-    set(streakEl, `×${sc.streak} streak`);
+    if (streakEl.dataset.n !== String(sc.streak)) {
+      streakEl.dataset.n = String(sc.streak);
+      const n = document.createElement("b");
+      n.textContent = `×${sc.streak}`;
+      streakEl.replaceChildren(art("hud-flame", FLAME), n, " streak");
+    }
     streakEl.title = `${sc.streak} closes in the last half hour`;
     const state = !f || f.error ? "off" : f.hold ? "hold" : f.supervisor ? "on" : "off";
     set(fleetEl, state === "on" ? "Fleet on" : state === "hold" ? "Fleet on hold" : "Fleet off");
@@ -177,9 +186,11 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
       const sig = `${it.who}\n${it.text}\n${it.xp ?? ""}`;
       if (r.dataset.sig !== sig) {
         r.dataset.sig = sig;
-        const tick = document.createElement("i");
+        // A fleet unit's line wears its class's crest. Anyone else's, a dot in the kind's colour.
+        const kind = it.unit ? crestKind(it.who) : "";
+        const tick = kind ? art(`feed-crest c-${kind}`, crest(kind)) : document.createElement("i");
         tick.style.setProperty("--c", FEED_COLOUR[it.kind]);
-        r.replaceChildren(tick, span("feed-who", it.who), span("feed-text", it.text), ...(it.xp ? [span("feed-xp", `+${it.xp}`)] : []), span("feed-at"));
+        r.replaceChildren(tick, span("feed-who", it.who), text(it.text), ...(it.xp ? [span("feed-xp", `+${it.xp} XP`)] : []), span("feed-at"));
       }
       set(r.lastElementChild as HTMLElement, ago(it.at, now).replace(" ago", ""));
       r.classList.toggle("is-old", now - it.at > FRESH_MS);
@@ -225,7 +236,18 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
       return;
     }
     const by = it.by ?? (it.kind === "rank" || it.kind === "alert" || it.kind === "deploy" ? "" : it.who);
-    bannerEl.replaceChildren(span("ban-kicker", BANNER[it.kind] ?? ""), span("ban-title", it.head ?? it.text), span("ban-by", [by, it.xp && it.kind !== "rank" ? `+${it.xp} XP` : ""].filter(Boolean).join(" · ")));
+    // A promotion shows its new insignia, a unit's news its class's crest.
+    const kind = crestKind(it.who);
+    const pic = it.kind === "rank" ? art("ban-art is-rank", insignia(ctx.s.game.score.rank.level)) : kind && it.unit ? art(`ban-art is-crest c-${kind}`, crest(kind)) : null;
+    const byEl = span("ban-by", by);
+    if (it.xp && it.kind !== "rank") {
+      const xp = document.createElement("b");
+      xp.textContent = `+${it.xp} XP`;
+      byEl.append(by ? " · " : "", xp);
+    }
+    const body = span("ban-body");
+    body.append(span("ban-kicker", BANNER[it.kind] ?? ""), span("ban-title", it.head ?? it.text), byEl);
+    bannerEl.replaceChildren(...(pic ? [pic] : []), body);
     bannerEl.className = `live-banner k-${it.kind}`;
     bannerEl.hidden = false;
     // Restart the animation for a banner that replaces one still showing.
@@ -246,6 +268,20 @@ function pace(el: HTMLElement, today: number, y: Tally | null, key: "closed" | "
   d.hidden = !y;
   set(d, diff > 0 ? `▲${diff}` : diff < 0 ? `▼${-diff}` : "=");
   d.className = `hud-delta ${diff > 0 ? "is-up" : diff < 0 ? "is-down" : ""}`;
+}
+
+/** A feed line's words, with its issue numbers in bold so the eye finds them. */
+function text(t: string): HTMLElement {
+  const el = span("feed-text");
+  for (const [i, part] of t.split(/(#\d+)/).entries()) {
+    if (!part) continue;
+    if (i % 2) {
+      const b = document.createElement("b");
+      b.textContent = part;
+      el.append(b);
+    } else el.append(part);
+  }
+  return el;
 }
 
 function num(el: HTMLElement, value: string, title: string): void {

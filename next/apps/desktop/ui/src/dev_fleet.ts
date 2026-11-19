@@ -6,6 +6,7 @@
  * stopped fleet, ?error=1 a failed read over the last good one.
  */
 import "./style.css";
+import type { OverviewData } from "./features/board";
 import { mountFleet, type FleetView } from "./features/fleet";
 
 const params = new URLSearchParams(location.search);
@@ -61,9 +62,28 @@ async function view(): Promise<FleetView> {
   return FIXTURE;
 }
 
+// The board's day: today's closes and finds, and yesterday's up to this hour for the pace.
+const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+// A closed issue was filed days ago: only a new one counts as a find today.
+const card = (number: number, kind: "done" | "new", m: number, scout = "") => ({ number, title: `Issue ${number}`, url: "", kind, apps: [], priority: 2, who: "", at: ago(m), created: ago(kind === "new" ? m : 5 * 24 * 60), scout });
+const DAY: OverviewData = {
+  since: ago(48 * 60),
+  limit: 300,
+  cards: [
+    // With the fleet's close at 20 minutes, two more in the last half hour light the streak.
+    ...[1992, 2029, 2030, 1793, 1797, 1850, 1851, 1852, 1853].map((n, i) => card(n, "done", [20, 40, 40, 100, 100, 5, 12, 170, 190][i])),
+    card(2101, "new", 26, "wild@gunun_hadisi"),
+    card(2102, "new", 28, "wild@gunun_hadisi"),
+    card(2103, "new", 82, "ui-guidelines@snakev"),
+    card(2104, "new", 300),
+    ...[1001, 1002, 1003, 1004, 1005, 1006].map((n) => card(n, "done", 24 * 60 + 30)),
+  ],
+};
+
 let reads = 0;
 const handle = mountFleet(document.getElementById("fleetScreen")!, {
   openIssue: (n) => console.log("open issue", n),
+  day: async () => (params.has("empty") ? { cards: [] } : params.get("real") === "now" ? null : DAY),
   view: async () => {
     reads += 1;
     if (params.has("error") && reads > 1) throw new Error("fleet view timed out after 8 s");

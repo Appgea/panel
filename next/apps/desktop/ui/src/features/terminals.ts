@@ -2208,6 +2208,13 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
 
   /* --------------------------------------------------------------- ＋ pane */
 
+  /** A project's own hue, the same every time: an app with no icon still has a colour to be found by. */
+  const hueOf = (id: string): number => {
+    let h = 7;
+    for (const c of id) h = (h * 31 + c.charCodeAt(0)) % 360;
+    return h;
+  };
+
   const projectIcon = (p: TerminalsProject): HTMLElement => {
     const ico = make("span", "plus-ico");
     // The main folder is no app: it has no icon to find, and a letter would read as a project.
@@ -2218,6 +2225,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     }
     const glyph = make("span", "plus-glyph");
     glyph.textContent = p.name.trim().charAt(0).toUpperCase();
+    ico.style.setProperty("--hue", String(hueOf(p.id)));
     ico.append(glyph);
     const img = document.createElement("img");
     img.src = projectIconUrl(p.id);
@@ -2373,12 +2381,13 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       const cards = make("div", "plus-cards");
       for (const p of recent) {
         const card = button(p, "plus-card");
+        card.style.setProperty("--hue", String(hueOf(p.id)));
         card.append(projectIcon(p));
         const text = make("span", "plus-card-text");
         const name = make("b", "plus-result-name");
         name.textContent = p.name;
-        const when = make("small", `plus-card-when${p.running ? " is-live" : ""}`);
-        when.textContent = p.running ? "running" : since(p.lastActive);
+        const when = make(p.running ? "small" : "i", `plus-card-when${p.running ? " is-live" : ""}`);
+        when.textContent = p.running ? "Running" : since(p.lastActive);
         text.append(name, when);
         card.append(text);
         cards.append(card);
@@ -2756,6 +2765,10 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     tile.classList.toggle("is-ask", phase === "ask");
     const dot = tile.querySelector<HTMLElement>(".term-state");
     if (dot) dot.title = phase === "work" ? "working" : phase === "ask" ? "waiting on you" : "";
+    // The same state as words on the wall's head: a dot alone was a speck to hunt for.
+    const word = tile.querySelector<HTMLElement>(".term-phase");
+    const text = phase === "work" ? "Working" : phase === "ask" ? "Your turn" : "";
+    if (word && word.textContent !== text) word.textContent = text;
   };
 
   /** Where this session is standing, asked of the OS once and kept. The answer is the folder's
@@ -2804,12 +2817,15 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       `<i class="term-kind-dot k-${session.kind}" title="${session.kind}">${kindLetter(session.kind)}</i>` +
       `</span>` +
       `<b class="term-project"></b><span class="term-title"></span>` +
-      `<i class="term-state" aria-hidden="true"></i>` +
+      `<i class="term-state" aria-hidden="true"></i><span class="term-phase"></span>` +
       `<span class="term-ended"${dead ? "" : " hidden"}>ended</span>` +
       `<span class="term-mem" hidden></span>`;
     const logo = head.querySelector<HTMLElement>(".term-logo")!;
     logo.querySelector<HTMLElement>(".term-logo-glyph")!.textContent =
       p.name.trim().charAt(0).toUpperCase();
+    logo.style.setProperty("--hue", String(hueOf(p.id)));
+    // The engine's hue, which the tag wears on the wall: opencode's models share opencode's.
+    head.style.setProperty("--k", `var(--k-${session.kind.startsWith("opencode") ? "opencode" : session.kind}, var(--ink-dim))`);
     const logoImg = document.createElement("img");
     logoImg.src = projectIconUrl(p.id);
     logoImg.alt = "";

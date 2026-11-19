@@ -1456,6 +1456,23 @@
   width: 100%; height: 100%;
   object-fit: cover;
 }
+/* An app's letter, until or unless its icon loads, sits on the app's own hue. */
+.plus-ico:not(.is-folder) {
+  border-color: rgb(255 255 255 / 0.1);
+  background: linear-gradient(140deg, hsl(var(--hue, 260) 62% 58%), hsl(calc(var(--hue, 260) + 38) 56% 36%));
+  color: #fff;
+  font-weight: 800;
+}
+.plus-card {
+  background:
+    linear-gradient(115deg, hsl(var(--hue, 260) 60% 55% / 0.13), transparent 55%),
+    var(--bg-raised);
+}
+.plus-card:hover { border-color: hsl(var(--hue, 260) 55% 60% / 0.45); }
+.plus-card .plus-result-name { color: var(--ink); font-weight: 700; }
+.plus-card-when.is-live { display: inline-flex; align-items: center; gap: 5px; }
+.plus-card-when.is-live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.plus-section { font-size: var(--text-sm); font-weight: 650; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
 
 /* Collapses an open picker back into the header's ＋ button — only shown once there's a
    button to collapse into (a tab with zero terminals has nowhere else for the wall to go). */
@@ -1936,7 +1953,6 @@
   min-height: 32px;
   padding: 0 6px 0 10px;
   border-top: 2px solid transparent;
-  font-family: ui-monospace, Menlo, monospace;
 }
 .terms-inner .term-tile.is-focused .term-tile-head {
   --head-bg: color-mix(in oklab, var(--accent) 10%, var(--bg-sunken));
@@ -1948,33 +1964,56 @@
 }
 .terms-inner .term-tile.is-focused .term-tile-head::after,
 .terms-inner .term-tile.is-ask .term-tile-head::after { display: none; }
-/* The head says what the tab says: a dot in the engine's hue, the project, the terminal's name.
-   The icon, the seat number and the pill around the name go. */
+/* The head says what the tab says, in pictures first: the app's icon (its own hue when it has
+   none), the project in bold, the terminal's name in its engine's hue, and the state as a word.
+   Owner, 2026-11-19: "the graphics and gamification must be way stronger … work on the terminals
+   page." The seat number stays off: the flat wall reads by icon. */
 .terms-inner .term-seat,
-.terms-inner .term-logo img,
-.terms-inner .term-logo-glyph { display: none; }
+.terms-inner .term-logo .term-kind-dot { display: none; }
 .terms-inner .term-logo {
-  width: auto; height: auto;
+  width: 20px; height: 20px;
   border: 0;
-  background: none;
-  overflow: visible;
+  border-radius: 6px;
+  background: linear-gradient(140deg, hsl(var(--hue, 260) 62% 58%), hsl(calc(var(--hue, 260) + 38) 56% 36%));
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
 }
-.terms-inner .term-logo .term-kind-dot {
-  position: static;
-  width: 6px; height: 6px;
-  font-size: 0;
-  box-shadow: none;
-}
+.terms-inner .term-logo-glyph { color: #fff; font-size: 11px; font-weight: 800; }
 .terms-inner .term-project,
-.terms-inner .term-tile.is-focused .term-project { color: var(--ink); font-weight: 600; }
-.terms-inner .term-title {
-  padding: 0;
-  background: none;
+.terms-inner .term-tile.is-focused .term-project { color: var(--ink); font-weight: 700; letter-spacing: -0.01em; }
+.terms-inner .term-tile.is-ask .term-project { color: var(--ink); }
+/* The terminal's name, in its engine's hue: "claude", "shell", or the name you gave it. */
+.terms-inner .term-title,
+.terms-inner .term-tile.is-ask .term-title {
+  padding: 2px 7px;
   border: 0;
-  border-radius: 0;
-  color: var(--ink-faint);
+  border-radius: 5px;
+  color: var(--k);
+  background: color-mix(in oklab, var(--k) 15%, transparent);
+  font-weight: 650;
 }
-.terms-inner .term-title::before { content: "· "; }
+.terms-inner .term-tile.is-focused .term-title { color: var(--k); }
+.terms-inner .term-tile-head:hover .term-title { color: var(--k); background: color-mix(in oklab, var(--k) 24%, transparent); }
+/* The state as a word beside the name. Blue and breathing is a turn in flight. Amber is yours. */
+.terms-inner .term-state { display: none; }
+.term-phase { display: none; }
+.terms-inner .term-phase:not(:empty) {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px 2px 6px;
+  border-radius: 999px;
+  color: var(--m-work);
+  background: color-mix(in oklab, var(--m-work) 14%, transparent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.terms-inner .term-phase::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.terms-inner .term-tile.is-work .term-phase::before { animation: term-state-pulse 1.4s var(--ease) infinite; }
+.terms-inner .term-tile.is-ask .term-phase { color: var(--warn); background: color-mix(in oklab, var(--warn) 18%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  .terms-inner .term-tile.is-work .term-phase::before { animation: none; }
+}
 .terms-inner .term-skills { border: 0; border-radius: 0; background: none; }
 
 /* The grid toolbar's count and ＋, flat. */

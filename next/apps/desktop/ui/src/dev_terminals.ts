@@ -48,8 +48,9 @@ const PROJECTS: TerminalsProject[] = [
   sessions: Array.from({ length: index === 0 && EXTRA > 0 ? EXTRA : 0 }, (_, i) => ({
     id: `s-${i}`,
     project: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-    kind: "shell" as const,
-    title: `shell ${i + 1}`,
+    // Mixed engines, so the wall's heads show each engine's hue.
+    kind: (["claude", "codex", "shell", "opencode"] as const)[i % 4],
+    title: `${["claude", "codex", "shell", "opencode"][i % 4]} ${i + 1}`,
     terminal_id: `t-${i}`,
   })),
 }));
@@ -77,6 +78,8 @@ const events: TerminalsEvents = {
   jump: () => {},
   close: () => {},
   isExited: () => false,
+  // One working, one waiting on you, so the heads' state words show.
+  phaseOf: (id: string) => (id === "s-0" ? "work" : id === "s-1" ? "ask" : "idle"),
   runApp: () => {},
   runView: () => null,
   runTargetPicker: () => document.createElement("span"),

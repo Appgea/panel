@@ -1528,6 +1528,8 @@ function showFleet(): void {
   const loading = fleetLoading ?? import("./features/fleet").then(({ mountFleet }) => {
     fleet = mountFleet(screen, {
       view: () => moduleGet<FleetView>("/m/fleet/view"),
+      // The board's day scores the rank the way Live does. Without the scout module the fleet's own closes score.
+      day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
       openIssue: (n) => void invoke("open_link", { url: `https://github.com/Appgea/ops/issues/${n}` }).catch((error: unknown) => console.warn("[panel] fleet", error)),
     });
     return fleet;

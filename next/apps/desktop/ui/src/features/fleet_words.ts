@@ -103,7 +103,7 @@ export function tidy(screen: string): string {
     .replace(/^\s*\n/, "");
 }
 
-export type RunLine = { kind: "closed" | "scout" | "none"; text: string; numbers: number[] };
+export type RunLine = { kind: "closed" | "scout" | "none"; text: string; numbers: number[]; lens?: string; app?: string };
 
 /** What an ended run did, as a person says it. The ledger writes "build 2011,2013, said bye". */
 export function runLine(run: { closed: number[]; result: string }): RunLine {
@@ -111,12 +111,30 @@ export function runLine(run: { closed: number[]; result: string }): RunLine {
   const scout = /^scout\s+([^,\s]+)/.exec(run.result);
   if (scout) {
     const [lens, app] = scout[1].split("@");
-    return { kind: "scout", text: `Scouted ${lensName(lens)}${app ? ` in ${appName(app)}` : ""}`, numbers: [] };
+    return { kind: "scout", text: `Scouted ${lensName(lens)}${app ? ` in ${appName(app)}` : ""}`, numbers: [], lens: lensName(lens), app: app ? appName(app) : "" };
   }
   const build = /^build\s+([\d,]+)/.exec(run.result);
   const numbers = build ? build[1].split(",").filter(Boolean).map(Number) : [];
   const rest = run.result.replace(/^build\s+[\d,]+,?\s*/, "").replace(/,?\s*said bye$/, "").trim();
   return { kind: "none", text: rest ? `Nothing closed: ${rest}` : numbers.length ? "Nothing closed on" : "Nothing closed", numbers };
+}
+
+export type Marked = { mark: "" | "b" | "i" | "code"; text: string };
+
+/**
+ * The inline marks an agent writes, so its sentence keeps them: **bold**, *italic* and `code`.
+ * Underscores stay plain: they are mostly in snake_case names. A lone star is just a star.
+ */
+export function marks(text: string): Marked[] {
+  const out: Marked[] = [];
+  let at = 0;
+  for (const m of text.matchAll(/\*\*([^*]+)\*\*|`([^`]+)`|(?<![\w*])\*(?!\s)([^*]+?)(?<!\s)\*(?![\w*])/g)) {
+    if (m.index > at) out.push({ mark: "", text: text.slice(at, m.index) });
+    out.push(m[1] ? { mark: "b", text: m[1] } : m[2] ? { mark: "code", text: m[2] } : { mark: "i", text: m[3] });
+    at = m.index + m[0].length;
+  }
+  if (at < text.length) out.push({ mark: "", text: text.slice(at) });
+  return out;
 }
 
 /** Millions as a person reads them: 0.8M, 48M, 1.2B. */

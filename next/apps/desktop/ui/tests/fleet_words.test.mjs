@@ -2,7 +2,15 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { src } from "./load.mjs";
 
-const { said, mission } = await src("features/fleet_words.ts");
+const { said, mission, marks } = await src("features/fleet_words.ts");
+
+test("a card keeps an agent's bold, italic and code, and leaves snake_case and lone stars alone", () => {
+  assert.deepEqual(marks("Fixed **two** crashes in `feed.dart`, *finally*."), [
+    { mark: "", text: "Fixed " }, { mark: "b", text: "two" }, { mark: "", text: " crashes in " },
+    { mark: "code", text: "feed.dart" }, { mark: "", text: ", " }, { mark: "i", text: "finally" }, { mark: "", text: "." },
+  ]);
+  assert.deepEqual(marks("rate_limit_ms is 5 * 60 * 1000"), [{ mark: "", text: "rate_limit_ms is 5 * 60 * 1000" }]);
+});
 
 test("a unit's card reads the last words its CLI wrote to a person, not its tools or input box", () => {
   const codex = [
