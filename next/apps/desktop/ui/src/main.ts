@@ -1526,7 +1526,10 @@ function showFleet(): void {
   screen.hidden = false;
   if (!fleet) screen.textContent = "Reading the fleet…";
   const loading = fleetLoading ?? import("./features/fleet").then(({ mountFleet }) => {
-    fleet = mountFleet(screen, { view: () => moduleGet<FleetView>("/m/fleet/view") });
+    fleet = mountFleet(screen, {
+      view: () => moduleGet<FleetView>("/m/fleet/view"),
+      openIssue: (n) => void invoke("open_link", { url: `https://github.com/Appgea/ops/issues/${n}` }).catch((error: unknown) => console.warn("[panel] fleet", error)),
+    });
     return fleet;
   });
   fleetLoading = loading;

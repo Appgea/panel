@@ -1,17 +1,31 @@
 /* The bar over the stage and the toast. Copied from `.bar` and `.toast` in the concept page CSS. */
 
-.live-bar { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; padding: 6px 0 10px; }
+.live-bar { flex: none; display: flex; align-items: center; gap: 12px; min-width: 0; padding: 4px 0 12px; }
 .live-onair { width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--l-ink); box-shadow: 0 0 10px var(--l-ink); animation: live-onair 1.6s ease-in-out infinite; }
 .live.is-reduced .live-onair { animation: none; }
 @keyframes live-onair { 50% { opacity: 0.3; } }
-/* One line beside the score. The whole sentence is in its tooltip and in the list's heads. */
-/* Basis 0: the bar wraps on what the score and the cleanup need, not on the sentence's length. */
-.live-narr { flex: 1 1 0; min-width: 120px; font: 500 12.5px/1.4 var(--l-mono); color: var(--l-ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hud:not([hidden]) ~ .live-narr { padding-left: 14px; border-left: 1px solid var(--l-line); }
-.live-left { display: flex; align-items: center; gap: 10px; min-width: 0; max-width: 50%; }
+/* What runs, in pieces: the count big, then each state in its colour. The whole sentence is in its
+   tooltip. Basis 0: the bar wraps on what the score and the cleanup need, not on this line. */
+.live-narr { flex: 1 1 0; display: flex; align-items: baseline; min-width: 160px; overflow: hidden; font: 400 13px/1.4 var(--l-sans); color: var(--l-ink-2); white-space: nowrap; }
+.narr-count { flex: none; font: 600 17px/1.2 var(--l-sans); letter-spacing: -0.01em; color: var(--l-ink); }
+/* The states matter more than the project count, so "in 6 projects" gives way first. */
+.narr-rest { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+/* Then the states give way, a whole chip at a time: one that does not fit wraps under and hides. */
+.narr-states { flex: 0 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; min-width: 0; height: 19px; overflow: hidden; }
+.narr-st { display: inline-block; flex: none; margin-left: 14px; color: var(--l-ink-2); }
+.narr-st::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 7px; vertical-align: 1px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.narr-st .narr-n { font-weight: 600; color: var(--l-ink); font-variant-numeric: tabular-nums; }
+.narr-st.is-turn { --c: var(--l-turn); color: var(--l-turn); }
+.narr-st.is-turn .narr-n { color: var(--l-turn); }
+.narr-st.is-stuck { --c: var(--l-stuck); color: var(--l-stuck); }
+.narr-st.is-stuck .narr-n { color: var(--l-stuck); }
+.narr-st.is-work { --c: var(--l-work); }
+.narr-st.is-idle { --c: var(--l-idle); }
+/* Processes ended agents left: one amber pill, the names in its tooltip. */
+.live-left { display: flex; flex: none; align-items: center; gap: 8px; min-width: 0; padding: 3px 3px 3px 12px; border: 1px solid color-mix(in srgb, var(--l-turn) 35%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--l-turn) 8%, transparent); }
 .live-left[hidden] { display: none; }
-.live-left-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11.5px/1.3 var(--l-mono); color: var(--l-turn); }
-.live-left .opt { flex: none; padding: 4px 9px; font-size: 12px; }
+.live-left-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 12px/1.3 var(--l-sans); color: var(--l-turn); }
+.live-left .opt { flex: none; padding: 4px 10px; border-radius: 999px; border-color: color-mix(in srgb, var(--l-turn) 40%, transparent); font-size: 12px; }
 
 .live-toast {
   position: absolute;

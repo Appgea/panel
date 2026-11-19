@@ -15,7 +15,7 @@
 .pclose { flex: none; padding: 2px 6px; border: 0; border-radius: 6px; background: none; color: var(--l-ink-2); font: 400 20px/1 var(--l-sans); cursor: pointer; }
 .pclose:hover { color: var(--l-ink); }
 .pstate { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 12px; color: var(--l-ink-3); }
-.chip { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--c); border-radius: 999px; color: var(--c); font: 500 11.5px/1 var(--l-mono); }
+.chip { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid var(--c); border-radius: 999px; color: var(--c); font: 500 11.5px/1 var(--l-sans); font-variant-numeric: tabular-nums; }
 .prows { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 6px 10px; margin: 12px 0 0; }
 .prows dt { padding-top: 1px; color: var(--l-ink-3); font-size: 12px; }
 .prows dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
@@ -46,7 +46,7 @@
 /* A fleet unit's mission card: its issues, its budget, its flags and its screen. */
 .pmission { display: grid; gap: 4px; margin-top: 6px; font-size: 13px; }
 .pbudget { display: grid; gap: 5px; margin-top: 10px; }
-.pbudget-text { font: 500 12px/1.2 var(--l-mono); color: var(--l-ink-2); }
+.pbudget-text { font: 500 12px/1.2 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-2); }
 .pbudget-bar { position: relative; height: 5px; border-radius: 3px; background: var(--l-line); overflow: hidden; }
 .pbudget-bar i { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: var(--l-done); }
 .pbudget.is-over .pbudget-text { color: var(--l-stuck); }

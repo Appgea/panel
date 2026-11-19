@@ -14,3 +14,5 @@ apps/desktop/ui/deck.real.json
 apps/desktop/ui/live.real.json
 apps/desktop/ui/fleet.real.json
 apps/desktop/ui/day.real.json
+# A saved `fleet view` for the AI fleet harness (dev_fleet.html?real=now). Real terminal text.
+apps/desktop/ui/fleet.now.real.json

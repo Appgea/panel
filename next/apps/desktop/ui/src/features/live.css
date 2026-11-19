@@ -90,12 +90,15 @@
 }
 .live-list { padding: 4px 6px 8px; }
 .live-list[hidden] { display: none; }
-.side-head { padding: 8px 8px 3px; font: 500 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.side-head { padding: 10px 8px 4px; font: 600 11.5px/1.3 var(--l-sans); font-variant-numeric: tabular-nums; letter-spacing: 0.01em; color: var(--l-ink-3); }
 .side-head[hidden], .side-list[hidden] { display: none; }
+/* A section after a shown one starts under a hairline, so Fleet, Sessions, the squad and Ended
+   read as four blocks. */
+.side-list:not([hidden]) ~ .side-head, .side-day:not([hidden]) ~ .side-head { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--l-line); }
 .side-row {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
-  grid-template-areas: "dot who where" ". what what";
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
+  grid-template-areas: "dot who where where" ". what what what";
   align-items: center;
   column-gap: 8px;
   row-gap: 0;
@@ -113,7 +116,7 @@
 .side-row:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 1px; }
 .side-row i { grid-area: dot; width: 7px; height: 7px; border-radius: 50%; background: var(--c); box-shadow: 0 0 7px var(--c); }
 .side-who { grid-area: who; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--l-ink); font-weight: 600; }
-.side-where { grid-area: where; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.3 var(--l-mono); color: var(--l-ink-3); }
+.side-where { grid-area: where; justify-self: end; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 11px/1.3 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
 .side-what { grid-area: what; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .side-what[hidden] { display: none; }
 .side-row.is-turn .side-what { color: var(--l-turn); }
@@ -125,19 +128,30 @@
 .side-row.is-more .side-who { color: var(--l-ink-3); font-weight: 500; }
 .side-row.is-more i { box-shadow: none; }
 /* The fleet's rows: the class colour down the left edge, the commander's in gold, and the
-   unit's time against its budget along the foot. */
+   unit's time against its budget as a small meter after its minutes. A full-width line under
+   every row read as an underline, and red ones as errors. */
 .side-head.is-fleet { color: var(--l-gold); }
 .side-row { position: relative; }
 .side-row.is-unit, .side-row.is-boss { box-shadow: inset 2px 0 0 var(--k); border-radius: 0 8px 8px 0; }
+.side-row.is-unit { grid-template-areas: "dot who where bud" ". what what what"; }
 .side-row.is-boss .side-where { color: var(--l-gold); }
 .side-row.is-flagged .side-what { color: var(--l-stuck); }
-.side-bud { position: absolute; left: 8px; bottom: 1px; height: 2px; width: calc((100% - 16px) * var(--p, 0)); border-radius: 1px; background: color-mix(in srgb, var(--l-done) 65%, transparent); }
+.side-bud {
+  --bf: color-mix(in srgb, var(--l-done) 80%, transparent);
+  grid-area: bud;
+  align-self: center;
+  width: 28px;
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(to right, var(--bf) calc(var(--p, 0) * 100%), var(--l-line-2) 0);
+}
 .side-bud[hidden] { display: none; }
-.side-bud.is-over { background: var(--l-stuck); }
+.side-bud.is-over { --bf: var(--l-stuck); }
+.side-row.is-unit:has(.side-bud.is-over) .side-where { color: color-mix(in srgb, var(--l-stuck) 80%, var(--l-ink-3)); }
 /* The day's table by class, under the lists. */
 .side-day { padding: 2px 8px 8px; }
 .side-day[hidden] { display: none; }
-.day-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 12px; row-gap: 3px; font: 400 12px/1.4 var(--l-mono); color: var(--l-ink-2); }
+.day-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 12px; row-gap: 3px; font: 400 12px/1.4 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-2); }
 .day-h { font-size: 10.5px; color: var(--l-ink-3); }
 .day-h:not(:first-child), .day-n { text-align: right; }
 .day-cls { color: var(--c); font-weight: 600; }

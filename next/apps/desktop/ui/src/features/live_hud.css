@@ -1,8 +1,10 @@
 /* The game's words: the rank and score in the bar, the feed on the stage, the banner. Numbers are
    mono, the rank's level is in the display face, and nothing glows but the XP bar's end. */
 
-.hud { display: flex; align-items: center; gap: 14px; min-width: 0; flex: none; }
+/* The day's score as one block on the bar's right: rank, numbers, fleet, with hairlines between. */
+.hud { display: flex; align-items: center; gap: 0; min-width: 0; flex: none; padding: 5px 6px; border: 1px solid var(--l-line); border-radius: 12px; background: var(--l-deck); }
 .hud[hidden] { display: none; }
+.hud > * + * { margin-left: 14px; padding-left: 14px; border-left: 1px solid var(--l-line); }
 
 .hud-rank { display: flex; align-items: center; gap: 9px; flex: none; cursor: default; }
 .hud-lv {
@@ -18,29 +20,32 @@
 }
 .hud-rk { display: grid; grid-template-columns: auto auto; align-items: center; column-gap: 8px; row-gap: 3px; }
 .hud-rk-name { font: 600 13px/1.1 var(--l-sans); color: var(--l-ink); }
-.hud-xp-text { grid-column: 2; grid-row: 1; font: 500 11px/1.1 var(--l-mono); color: var(--l-ink-3); }
-.hud-xp { grid-column: 1 / 3; position: relative; width: 150px; height: 4px; border-radius: 2px; background: var(--l-line); overflow: hidden; }
+.hud-xp-text { grid-column: 2; grid-row: 1; justify-self: end; font: 500 11px/1.1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
+.hud-xp { grid-column: 1 / 3; position: relative; width: 132px; height: 4px; border-radius: 2px; background: var(--l-line); overflow: hidden; }
 .hud-xp i { position: absolute; inset: 0 auto 0 0; border-radius: 2px; background: var(--l-gold); box-shadow: 0 0 8px var(--l-gold); transition: width 0.8s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .is-reduced .hud-xp i { transition: none; }
 
-.hud-stats { display: flex; align-items: baseline; gap: 14px; flex: none; }
-.hud-stat { display: inline-flex; align-items: baseline; gap: 5px; font-size: 11.5px; color: var(--l-ink-3); cursor: default; white-space: nowrap; }
-.hud-stat b { font: 600 15px/1 var(--l-mono); color: var(--l-ink); }
+/* Each number over its word, so the four read as a row of counters. */
+.hud-stats { display: flex; align-items: center; gap: 16px; flex: none; }
+.hud-stat { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: 4px; font: 400 10.5px/1.2 var(--l-sans); color: var(--l-ink-3); cursor: default; white-space: nowrap; }
+.hud-stat b { grid-column: 1; grid-row: 1; font: 600 16px/1.1 var(--l-sans); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; color: var(--l-ink); }
+.hud-stat > span:not(.hud-delta) { grid-column: 1 / 3; grid-row: 2; }
 .hud-stat:first-child b { color: var(--l-done); }
 /* Today against yesterday up to this hour. Ahead is green, behind stays quiet: a slow morning is no alarm. */
-.hud-delta { font: 600 10.5px/1 var(--l-mono); color: var(--l-ink-3); }
+.hud-delta { grid-column: 2; grid-row: 1; font: 600 10.5px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
 .hud-delta[hidden] { display: none; }
 .hud-delta.is-up { color: var(--l-done); }
-.hud-streak { padding: 3px 8px; border: 1px solid color-mix(in srgb, var(--l-gold) 55%, transparent); border-radius: 999px; color: var(--l-gold); font: 600 11px/1 var(--l-mono); white-space: nowrap; }
+.hud-streak { align-self: center; padding: 3px 8px; border-radius: 999px; background: color-mix(in srgb, var(--l-gold) 14%, transparent); color: var(--l-gold); font: 600 11px/1 var(--l-sans); white-space: nowrap; }
 .hud-streak[hidden] { display: none; }
 
-.hud-fleet { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border: 1px solid var(--l-line-2); border-radius: 999px; font: 500 11.5px/1 var(--l-mono); color: var(--l-ink-3); white-space: nowrap; cursor: default; }
-.hud-fleet::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.hud-fleet.is-on { color: var(--l-done); border-color: color-mix(in srgb, var(--l-done) 45%, transparent); }
-.hud-fleet.is-hold { color: var(--l-turn); border-color: color-mix(in srgb, var(--l-turn) 45%, transparent); }
+.hud-fleet { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 14px; font: 600 12px/1 var(--l-sans); color: var(--l-ink-3); white-space: nowrap; cursor: default; }
+.hud-fleet::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; box-shadow: 0 0 6px currentColor; }
+.hud-fleet.is-on { color: var(--l-done); }
+.hud-fleet.is-hold { color: var(--l-turn); }
+.hud-fleet.is-off::before { box-shadow: none; }
 
-/* The feed: newest on top, five lines, over the stage's lower left. Only the lines take clicks,
-   so the map drags through the gaps. */
+/* The feed: newest on top, five lines, over the stage's lower left, on one dim pane rather than
+   five boxes. Only the lines take clicks, so the map drags through the pane. */
 .live-feed {
   position: absolute;
   z-index: 3;
@@ -48,27 +53,34 @@
   bottom: 12px;
   display: grid;
   gap: 3px;
-  width: min(420px, calc(100% - 24px));
+  width: min(440px, calc(100% - 24px));
+  padding: 6px;
+  border: 1px solid var(--l-line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--l-bg) 82%, transparent);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   pointer-events: none;
 }
 .live-feed[hidden] { display: none; }
 /* A column, each line at its own height: in a capped scroll box grid rows were squeezed flat. */
-.feed-list { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.feed-list { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .feed-list > .feed-row { flex: none; }
 .feed-list > .feed-older { flex: none; align-self: flex-start; margin-top: 3px; }
 .feed-head[hidden], .feed-more[hidden] { display: none; }
 .feed-more {
   justify-self: start;
-  padding: 4px 10px;
-  border: 1px solid var(--l-line);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--l-bg) 86%, transparent);
+  margin: 2px 0 0 4px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
   color: var(--l-ink-3);
-  font: 500 11px/1.2 var(--l-mono);
+  font: 500 11px/1.2 var(--l-sans); font-variant-numeric: tabular-nums;
   cursor: pointer;
   pointer-events: auto;
 }
-.feed-more:hover { color: var(--l-ink); border-color: var(--l-line-2); }
+.feed-more:hover { color: var(--l-ink); background: var(--l-raise); }
 
 /* Open: the whole day as one panel over the map's corner, scrolled inside. */
 .live-feed.is-open {
@@ -99,25 +111,25 @@
   display: grid;
   grid-template-columns: 6px auto minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 7px;
+  gap: 8px;
   min-width: 0;
-  padding: 4px 9px;
-  border: 1px solid var(--l-line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--l-bg) 86%, transparent);
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: none;
   color: var(--l-ink-2);
   font: 400 12px/1.3 var(--l-sans);
   text-align: left;
   cursor: pointer;
   pointer-events: auto;
 }
-.feed-row:hover { border-color: var(--l-line-2); background: var(--l-raise); }
+.feed-row:hover { background: var(--l-raise); }
 .feed-row:focus-visible { outline: 2px solid var(--l-ink); outline-offset: 1px; }
 .feed-row i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
 .feed-who { color: var(--l-ink); font-weight: 600; white-space: nowrap; }
 .feed-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.feed-xp { font: 600 11px/1 var(--l-mono); color: var(--l-gold); }
-.feed-at { font: 400 10.5px/1 var(--l-mono); color: var(--l-ink-3); white-space: nowrap; }
+.feed-xp { font: 600 11px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-gold); }
+.feed-at { font: 400 10.5px/1 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); white-space: nowrap; }
 .feed-row.k-alert .feed-text { color: var(--l-stuck); }
 .feed-row.is-old { opacity: 0.6; }
 .feed-row.is-old:hover { opacity: 1; }
@@ -159,7 +171,7 @@
 }
 .ban-kicker { font: 700 12px/1 var(--l-display); letter-spacing: 0.14em; text-transform: uppercase; color: var(--c); }
 .ban-title { max-width: 100%; font: 600 16px/1.3 var(--l-sans); color: var(--l-ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ban-by { font: 500 11.5px/1.2 var(--l-mono); color: var(--l-ink-3); }
+.ban-by { font: 500 11.5px/1.2 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-3); }
 
 /* A wide bar puts the narrator beside the score. A narrow one wraps it under. */
 .live-bar { flex-wrap: wrap; row-gap: 6px; }
