@@ -16,6 +16,10 @@
  * with no script yet gets one written on its own (src-tauri/src/live/catalog.rs), and the owner
  * deletes bad ones in the catalog view (live_catalog.ts).
  *
+ * Agents talk to each other on the map (live_talk.ts): the commander's orders and looks, the
+ * reports that come back, and a file handed from the agent that wrote it to the one that reads
+ * it, each as a token flying between the two dots. Bevy draws what each dot is doing around it.
+ *
  * Bevy, built to WebAssembly from apps/live, draws every shape from the scene in live_scene.ts.
  * Words are HTML on top: live_labels on the map, live_side, live_panel and live_catalog in the
  * column, and live_top over both.
@@ -38,6 +42,7 @@ import { direct, RESULT_MS, RESULTS, type EmberEnd, type Seen } from "./live_pla
 import { scene } from "./live_scene";
 import { COLOR, PLAIN, play, type FxOut, type Pt, type Script, type Stagehand } from "./live_script";
 import { mountSide } from "./live_side";
+import { newHeard, talk, TALK, TO_HELPERS, type Talk } from "./live_talk";
 import { appName, button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
 import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
@@ -62,6 +67,13 @@ const GOLD = "#ffe27a";
 const MAX_SCRIPTS = 3;
 /** Glyphs and tags on the map at once. Past this a new one is dropped: a crowd says nothing. */
 const MAX_MARKS = 12;
+/**
+ * Talks flying between dots at once, apart from the scripts (live_talk.ts). Decided: their own
+ * cap, since the owner asked to see the crew talk (2026-11-19), and a talk is one small glyph.
+ */
+const MAX_TALKS = 3;
+/** The same talk between the same two dots plays once in this long. */
+const TALK_EVERY_MS = 12_000;
 /** A trip's faint way stays this long after the trip ends, so the eye can follow it back. */
 const LINE_LINGER_MS = 500;
 /** Trips shorter than this, in world pixels, draw no way. */
@@ -120,6 +132,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     pendingFx: [],
     marks: [],
     results: new Map(),
+    pings: new Map(),
+    calls: new Map(),
     reduced: !!reducedQuery?.matches,
   };
   root.classList.toggle("is-reduced", s.reduced);
@@ -151,6 +165,10 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   /** Results found by this poll, for the playbook's ✓ and ✗. */
   let freshResults: { agentId: string; ok: boolean }[] = [];
   let markId = 0;
+  const heard = newHeard();
+  /** When each talk last played, by kind and pair, and when each one in flight lands. */
+  const spoke = new Map<string, number>();
+  let talking: number[] = [];
 
   const toScreen = (p: Pt): Pt => ({ x: (p.x - s.camera.x) * s.camera.zoom + stage.clientWidth / 2, y: (p.y - s.camera.y) * s.camera.zoom + stage.clientHeight / 2 });
   const toWorld = (p: Pt): Pt => ({ x: (p.x - stage.clientWidth / 2) / s.camera.zoom + s.camera.x, y: (p.y - stage.clientHeight / 2) / s.camera.zoom + s.camera.y });
@@ -488,6 +506,65 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
+  /**
+   * The crew's talk this poll (live_talk.ts): orders, looks, reports and handoffs fly between
+   * dots. A helper riding on its agent has no way to fly: each step it takes, and each talk with
+   * that agent, sends a spark along the agent's orbit instead.
+   */
+  function chat(): void {
+    const { talks, stepped } = talk(s.world!.agents, heard, freshResults);
+    const l = s.layout;
+    if (!l || (!talks.length && !stepped.length)) return;
+    for (const a of stepped) {
+      const on = l.dots.get(a.id)?.on;
+      const st = a.now ?? a.steps[0];
+      // A riding helper's step, or one a helper inside the session took, is news for its agent.
+      if (on) bump(s.pings, on);
+      else if (st?.helper) bump(s.pings, a.id);
+      // An agent that starts the helpers inside its session, or writes to them, sends them a spark.
+      if (!on && a.helpers > 0 && (st?.verb === "spawn" || (st?.verb === "message" && TO_HELPERS.test(st.label)))) bump(s.calls, a.id);
+    }
+    for (const t of talks)
+      if (t.delay)
+        window.setTimeout(() => {
+          speak(t);
+          draw();
+        }, t.delay);
+      else speak(t);
+    draw();
+  }
+
+  const bump = (m: Map<string, number>, id: string) => m.set(id, (m.get(id) ?? 0) + 1);
+
+  /** One talk: its glyph flies the clear way from one dot to the other, and a ring marks where it lands. */
+  function speak(t: Talk): void {
+    const l = s.layout;
+    const a = l?.dots.get(t.from);
+    const b = l?.dots.get(t.to);
+    if (!l || !a || !b || s.reduced) return;
+    const top = a.on === t.to ? t.to : b.on === t.from ? t.from : a.on && a.on === b.on ? a.on : null;
+    if (top) {
+      // Between a helper and the agent it rides on, or two helpers of one: a spark on the orbit.
+      bump(t.kind === "order" ? s.calls : s.pings, top);
+      return;
+    }
+    const now = Date.now();
+    talking = talking.filter((end) => end > now);
+    const pair = `${t.kind}:${t.from}>${t.to}`;
+    if (talking.length >= MAX_TALKS || now - (spoke.get(pair) ?? -Infinity) < TALK_EVERY_MS || s.marks.filter((x) => !x.line).length >= MAX_MARKS) return;
+    spoke.set(pair, now);
+    const k = TALK[t.kind];
+    talking.push(now + k.ms);
+    const path = route(l, a, b);
+    s.marks.push({ glyph: k.glyph, talk: true, at: a, to: b, path, color: k.color, ms: k.ms, id: ++markId, born: now });
+    addLine(path, k.color, k.ms + LINE_LINGER_MS);
+    // The glyph lands at four fifths of its time (live_labels.ts).
+    const lands = Math.round(k.ms * 0.8);
+    s.pendingFx.push({ kind: "pulse", x: a.x, y: a.y, color: k.color, size: 22, ms: 600 }, { kind: "ring", x: b.x, y: b.y, color: k.color, size: 28, ms: 800, delay: lands });
+    const tag = t.tag;
+    if (tag) window.setTimeout(() => hand.mark(t.to, { text: tag, at: { x: b.x, y: b.y - 16 }, color: k.color, ms: 1800 }), lands);
+  }
+
   /** The catalog's Play: on the open agent, or on the busiest one. */
   function playOn(verb: string): boolean {
     const x = scriptFor(verb);
@@ -508,6 +585,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     hud.paint();
     judge();
     draw();
+    // After the layout, so a unit the fleet just started has a dot to receive its orders.
+    chat();
     freshResults = [];
     act();
     panel.paint();

@@ -315,7 +315,11 @@ fn step(name: &str, input: &Value, at_ms: u64) -> Option<Step> {
             asks = true;
             ("Asked you a question".into(), Station::Plan)
         }
-        "SendMessage" => ("Messaged another session".into(), Station::Plan),
+        // The recipient's name, never the words: Live flies the message to that session's dot.
+        "SendMessage" => (
+            s("to").map(one_line).map_or_else(|| "Messaged another session".into(), |to| format!("Messaged {to}")),
+            Station::Plan,
+        ),
         "Artifact" => ("Published a page".into(), Station::Ship),
         "Workflow" => ("Ran a workflow of agents".into(), Station::Build),
         n if n.starts_with("mcp__") => {
