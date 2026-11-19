@@ -149,6 +149,19 @@
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* A talk between two agents (live_talk.ts) is a token, so it reads as a message on its way and
+   not as a script's hint: a round chip in the talk's colour, its icon inside. */
+.live-glyph.is-talk {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--c) 22%, var(--l-bg));
+  border: 1.5px solid color-mix(in srgb, var(--c) 85%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--c) 12%, transparent);
+}
+.live-glyph.is-talk svg { width: 12px; height: 12px; stroke: var(--c); stroke-width: 2; }
 /* A tag is a caption, not a button: no border, the map's quiet ink, a backing only so it
    stays legible over a line. */
 .live-tag {

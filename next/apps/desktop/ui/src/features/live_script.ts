@@ -98,7 +98,7 @@ export type FxOut = { kind: string; x: number; y: number; x2?: number; y2?: numb
  * `path` is the clear way a travelling glyph takes (live_world.ts `route`). A `line` mark is that
  * way drawn faint, so the eye can follow what went where.
  */
-export type Mark = { glyph?: string; text?: string; at: Pt; to?: Pt; path?: Pt[]; line?: boolean; color: string; ms: number; xp?: boolean };
+export type Mark = { glyph?: string; text?: string; at: Pt; to?: Pt; path?: Pt[]; line?: boolean; color: string; ms: number; xp?: boolean; talk?: boolean };
 
 /** Line icons in a 24 by 24 box. `check` and `cross` are Live's own, for results. */
 export const GLYPHS: Record<string, string> = {

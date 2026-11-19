@@ -63,7 +63,7 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["build", "Build the Bevy wasm view"],
     ["git.commit", "Commit the new Live map"],
     ["git.push", "Push develop to GitHub"],
-    ["read", "Read live_scene.ts", `${ROOT}/panel/ui/src/features/live_scene.ts`],
+    ["edit", "Edited live_scene.ts", `${ROOT}/panel/ui/src/features/live_scene.ts`],
   ],
   "pid:109": [
     ["search", "Search for the dice roll seed"],
@@ -73,12 +73,20 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["test", "Run the dice tests again"],
     ["git.push", "Push the dice fix"],
   ],
+  // The commander: its words name the units it talks to (live_talk.ts).
   "pid:101": [
-    ["spawn", "Start two helpers for the map colours"],
+    ["read", "Read the fleet news"],
     ["message", "Ask the helpers for their counts"],
-    ["think", "Weigh the land and sea numbers"],
-    ["board", "Claim #1163 on the board"],
     ["message", "Send the new target to Terra"],
+    ["search", "Peek at the stuck unit in Tavla"],
+    ["think", "Weigh the land and sea numbers"],
+    ["cmd.fleet", "Check the fleet reports"],
+  ],
+  // The pre-push reviewer reads what Hacivat wrote: each read is a handoff.
+  "pid:131": [
+    ["read", "Read live_world.ts", `${ROOT}/panel/ui/src/features/live_world.ts`],
+    ["review", "Review the Live map diff"],
+    ["read", "Read live_scene.ts", `${ROOT}/panel/ui/src/features/live_scene.ts`],
   ],
   "pid:102": [
     ["search", "Search for map colour tokens"],
@@ -94,6 +102,8 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["message", "Collect the helpers' findings"],
     ["render", "Render the sleep timer clip"],
   ],
+  // Zenne's eight helpers: each step they take flies a spark in along Zenne's orbit.
+  ...Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`pid:12${i}`, [["search", "Search the timer code"], ["read", "Read sleep_timer.dart", `${ROOT}/pillow_app/lib/sleep_timer.dart`]]])),
 };
 
 const agents: LiveAgent[] = [
@@ -195,7 +205,8 @@ function move(): void {
     const n = Math.floor((tick + i) / 3) % plays.length;
     const [verb, label, file] = plays[n];
     const s = { atMs: now, label, station: "build" as St, verb, file };
-    const files = file && !a.files.includes(file) ? [file, ...a.files] : a.files;
+    // `files` are the files an agent wrote, as the scan reports them.
+    const files = file && verb === "edit" && !a.files.includes(file) ? [file, ...a.files] : a.files;
     const helpers = a.id === "pid:101" ? 2 : a.helpers;
     // The step before ends with a result, as a tool result says it: the first dice test run fails.
     const ended = a.now ? [{ ...a.now, ok: a.now.label !== "Run the dice tests" }] : [];
@@ -203,6 +214,9 @@ function move(): void {
     return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...ended, ...rest].slice(0, 20), files, helpers };
   });
   const bayHolder = list.find((a) => a.now && (a.now.verb === "test" || a.now.verb === "build") && a.state === "work");
+  // Twelve seconds in the fleet starts a unit for #1172: the commander's orders fly to it.
+  if (now - T > 12_000 && !list.some((a) => a.id === "pid:150"))
+    list.push(agent({ id: "pid:150", name: "Flash c0ffee", harness: "opencode", room: "tavla", state: "work", headless: true, via: "fleet", model: "gemini-3-flash", issue: 1172, task: "#1172 Tavla: dice sound plays twice", fleet: { unit: "c0ffee", kind: "flash", scout: null, issues: [{ number: 1172, title: "Tavla: dice sound plays twice" }], budget: 30, startedMs: now, flags: [] }, now: step(0, "Read the sound player", "plan", "read") }));
   world = {
     ...world,
     agents: list,

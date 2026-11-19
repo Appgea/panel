@@ -5,7 +5,7 @@
  */
 
 import { LANDMARK_QUIET_MS, landmarkNews, type News } from "./live_playbook";
-import type { LiveCtx } from "./live_types";
+import type { LiveAgent, LiveCtx, State } from "./live_types";
 
 export function scene(ctx: LiveCtx, width: number, height: number): object {
   const s = ctx.s;
@@ -30,10 +30,20 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     }
   }
 
+  // The helpers riding on each agent, in the order Bevy puts them on its orbit: the scan's own first.
+  const crew = new Map<string, State[]>();
+  for (const a of world.agents) {
+    const on = w.dots.get(a.id)?.on;
+    if (on) crew.set(on, [...(crew.get(on) ?? []), a.state]);
+  }
   const dots = world.agents.flatMap((a) => {
     const spot = w.dots.get(a.id);
     if (!spot || spot.swarm < 0) return [];
-    return [{ id: a.id, x: spot.x, y: spot.y, r: spot.r, state: a.state, helpers: a.helpers + spot.swarm, selected: sel?.kind === "agent" && sel.id === a.id, hovered: s.hover === a.id, carry: s.carries.get(a.id) ?? null }];
+    return [{
+      id: a.id, x: spot.x, y: spot.y, r: spot.r, state: a.state, helpers: a.helpers + spot.swarm,
+      selected: sel?.kind === "agent" && sel.id === a.id, hovered: s.hover === a.id, carry: s.carries.get(a.id) ?? null,
+      act: act(a), crew: crew.get(a.id) ?? [], pings: s.pings.get(a.id) ?? 0, calls: s.calls.get(a.id) ?? 0,
+    }];
   });
 
   return {
@@ -53,4 +63,22 @@ export function scene(ctx: LiveCtx, width: number, height: number): object {
     dots,
     fx: s.pendingFx,
   };
+}
+
+/**
+ * What a dot is seen doing, by its step's verb (apps/live/src/dot.rs `Act`): making sparks,
+ * looking with a scan, checking with a ring, saying and thinking with three bobbing dots.
+ */
+const ACTS: Record<string, string> = {
+  edit: "make", build: "make", render: "make", "git.commit": "make",
+  read: "look", search: "look", web: "look", review: "look", skill: "look",
+  test: "check", typecheck: "check", shot: "check",
+  message: "say", spawn: "say", ask: "say", board: "say",
+};
+
+function act(a: LiveAgent): string | null {
+  if (a.state === "think") return "think";
+  if (a.state !== "work") return null;
+  const v = a.now?.verb ?? "";
+  return ACTS[v] ?? (v.startsWith("mcp.") ? "look" : "make");
 }

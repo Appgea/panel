@@ -22,7 +22,11 @@
 //! - `links`: lines from the hovered or selected dot to its parent and children.
 //! - `dots`: the agents. Each keeps its id across scenes and glides to its new `x`, `y`. `r`
 //!   is its core size, `state` its colour and blink, `helpers` the electrons circling it,
-//!   `carry` the colour of a crate it holds, if any.
+//!   `carry` the colour of a crate it holds, if any. `act` is what it is doing, drawn around it
+//!   while it works: `make` sparks, `look` a scan, `check` a ring, `say` and `think` three
+//!   bobbing dots. Another word draws nothing. `crew` is the state of each helper riding on it,
+//!   for its electron's colour. `pings` and `calls` count what its helpers sent it and what it
+//!   sent them: each rise flies a spark along the orbit, in or out.
 //! - `fx`: effects starting now, from the playbook (live_playbook.ts) and the animation scripts
 //!   (live_script.ts): `orb`, `beam`, `pulse`, `ring`, `burst`, `sweep`, `orbit`. Each has `x`,
 //!   `y`, and `x2`, `y2` where it travels, a `color`, a `size`, a length `ms`, a `count` and a
@@ -257,6 +261,14 @@ pub(crate) struct Dot {
     pub hovered: bool,
     #[serde(default)]
     pub carry: Option<String>,
+    #[serde(default)]
+    pub act: Option<String>,
+    #[serde(default)]
+    pub crew: Vec<State>,
+    #[serde(default)]
+    pub pings: u32,
+    #[serde(default)]
+    pub calls: u32,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]

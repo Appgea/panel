@@ -94,6 +94,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         el = m.line ? lineEl() : m.glyph ? glyphEl(m.glyph) : span("live-tag", m.text ?? "");
         if (!m.line) el.classList.add("live-fx");
         if (m.xp) el.classList.add("is-xp");
+        if (m.talk) el.classList.add("is-talk");
         el.style.setProperty("--c", m.color);
         // Ways go first, so every glyph and tag draws over them.
         if (m.line) marksEl.prepend(el);

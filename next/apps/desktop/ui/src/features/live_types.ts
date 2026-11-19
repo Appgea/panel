@@ -186,6 +186,9 @@ export type LiveState = {
   marks: (Mark & { id: number; born: number; room?: { key: string; x: number; y: number } })[];
   /** How each agent's last test, build or push went, shown in its bubble until `until`. */
   results: Map<string, { text: string; ok: boolean; until: number }>;
+  /** By agent: how often its helpers reported to it and it sent to them (live.ts `chat`). Each rise flies a spark on its orbit. */
+  pings: Map<string, number>;
+  calls: Map<string, number>;
   reduced: boolean;
 };
 

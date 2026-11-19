@@ -19,8 +19,8 @@ export type Pt = { x: number; y: number };
 export type Box = { x: number; y: number; w: number; h: number };
 /** `x`, `y` is the centre. `r` is half the longer side, for effects that ring the whole plot. */
 export type District = { key: string; name: string; x: number; y: number; w: number; h: number; r: number; agents: string[]; waiting: number; stuck: boolean };
-/** `swarm` is how many helpers ride on this agent, or -1 for a helper riding on its parent. */
-export type DotSpot = { x: number; y: number; r: number; room: string; swarm: number };
+/** `swarm` is how many helpers ride on this agent, or -1 for a helper riding on `on`, the agent at the top of its chain. */
+export type DotSpot = { x: number; y: number; r: number; room: string; swarm: number; on?: string };
 /** GitHub and the web as cards beside This Mac. `sky` is GitHub's, for scripts written before. */
 export type Landmarks = { tower: Box; web: Box; sky: Box };
 export type World = {
@@ -130,7 +130,7 @@ export function lay(input: WorldInput): World {
     p.rows.forEach((a, i) => {
       const spot = { x: x0 + PLOT.dotX, y: y0 + PLOT.head + PLOT.row * i + PLOT.row / 2, r: radius(a), room: key, swarm: p.riders.get(a.id)?.length ?? 0 };
       dots.set(a.id, spot);
-      for (const k of p.riders.get(a.id) ?? []) dots.set(k.id, { ...spot, swarm: -1 });
+      for (const k of p.riders.get(a.id) ?? []) dots.set(k.id, { ...spot, swarm: -1, on: a.id });
     });
     const waiting = p.agents.filter((a) => a.state === "turn").length;
     return { key, name: input.roomName(key), x: x0 + plotW / 2, y: y0 + p.h / 2, w: plotW, h: p.h, r: Math.max(plotW, p.h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck") };
