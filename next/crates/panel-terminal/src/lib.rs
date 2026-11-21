@@ -439,31 +439,53 @@ struct ProcessTable {
     children: HashMap<u32, Vec<u32>>,
     /// Resident memory in bytes. `ps` reports kilobytes.
     resident: HashMap<u32, u64>,
+    commands: HashMap<u32, String>,
 }
+
+const TOOL_SHELL: &str = "/.claude/shell-snapshots/";
 
 impl ProcessTable {
     fn read() -> Self {
+        Self::try_read().unwrap_or_default()
+    }
+
+    fn try_read() -> Option<Self> {
         if cfg!(windows) {
-            return Self::default();
+            return Some(Self::default());
         }
-        let Ok(out) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid=,rss="]).output() else {
-            return Self::default();
-        };
-        Self::parse(&String::from_utf8_lossy(&out.stdout))
+        let out = std::process::Command::new("ps")
+            .args(["-A", "-o", "pid=,ppid=,rss=,command="])
+            .output()
+            .ok()
+            .filter(|out| out.status.success())?;
+        Some(Self::parse(&String::from_utf8_lossy(&out.stdout)))
     }
 
     fn parse(text: &str) -> Self {
         let mut table = Self::default();
         for line in text.lines() {
-            let mut fields = line.split_whitespace().map(|field| field.parse::<u64>().ok());
-            let (Some(Some(pid)), Some(Some(ppid))) = (fields.next(), fields.next()) else { continue };
-            let (pid, ppid) = (pid as u32, ppid as u32);
+            let mut fields = line.split_whitespace();
+            let (Some(Ok(pid)), Some(Ok(ppid))) =
+                (fields.next().map(str::parse::<u32>), fields.next().map(str::parse::<u32>))
+            else {
+                continue;
+            };
             table.children.entry(ppid).or_default().push(pid);
-            if let Some(Some(kilobytes)) = fields.next() {
+            if let Some(Ok(kilobytes)) = fields.next().map(str::parse::<u64>) {
                 table.resident.insert(pid, kilobytes * 1024);
+            }
+            let command = fields.collect::<Vec<_>>().join(" ");
+            if !command.is_empty() {
+                table.commands.insert(pid, command);
             }
         }
         table
+    }
+
+    fn runs_tool(&self, root: u32) -> bool {
+        self.below(root)
+            .iter()
+            .any(|pid| self.commands.get(pid).is_some_and(|command| command.contains(TOOL_SHELL)))
     }
 
     /// Every process below `root`, not counting `root` itself.
@@ -505,6 +527,15 @@ pub fn tree_memory(roots: &[u32]) -> HashMap<u32, u64> {
         .iter()
         .filter_map(|&root| Some((root, table.tree_bytes(root)?)))
         .collect()
+}
+
+pub fn running_tools(roots: &[u32]) -> Option<std::collections::HashSet<u32>> {
+    let table = ProcessTable::try_read()?;
+    Some(roots.iter().copied().filter(|&root| table.runs_tool(root)).collect())
+}
+
+pub fn tool_running(root: u32) -> bool {
+    ProcessTable::try_read().is_none_or(|table| table.runs_tool(root))
 }
 
 /// SIGTERM, a second's grace to shut down cleanly, then SIGKILL for whatever is left.
@@ -968,5 +999,20 @@ mod process_tests {
         assert_eq!(below, vec![11, 12, 13]);
         assert_eq!(table.tree_bytes(10), Some((1000 + 200 + 30) * 1024));
         assert_eq!(table.tree_bytes(99), None);
+    }
+
+    #[test]
+    fn a_running_tool_command_keeps_its_agent_awake_and_an_mcp_server_does_not() {
+        let table = ProcessTable::parse(concat!(
+            " 10 1 1000 claude\n",
+            " 11 10 200 node /opt/mcp/server.js\n",
+            " 12 10 50 /bin/zsh -c source /Users/x/.claude/shell-snapshots/snapshot-zsh-1.sh && eval 'vk make'\n",
+            " 13 12 900 python3 burn_chunked.py\n",
+            " 20 1 1000 claude\n",
+            " 21 20 200 node /opt/mcp/server.js\n",
+        ));
+        assert!(table.runs_tool(10));
+        assert!(!table.runs_tool(20));
+        assert_eq!(table.tree_bytes(10), Some((1000 + 200 + 50 + 900) * 1024));
     }
 }

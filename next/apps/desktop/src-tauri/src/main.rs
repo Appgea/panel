@@ -2366,12 +2366,14 @@ async fn session_memory(state: State<'_, DesktopState>) -> Result<HashMap<String
     off_main(move || {
         let pids: Vec<u32> = roots.iter().filter_map(|(_, pid)| *pid).collect();
         let bytes = panel_terminal::tree_memory(&pids);
+        let busy = panel_terminal::running_tools(&pids);
         Ok(roots
             .into_iter()
             .map(|(session, pid)| {
                 let memory = SessionMemory {
                     bytes: pid.and_then(|pid| bytes.get(&pid).copied()),
-                    can_sleep: sleepable.contains(&session.id),
+                    can_sleep: sleepable.contains(&session.id)
+                        && busy.as_ref().is_some_and(|busy| !pid.is_some_and(|pid| busy.contains(&pid))),
                 };
                 (session.id, memory)
             })
@@ -2394,6 +2396,10 @@ async fn sleep_session(state: State<'_, DesktopState>, session: String) -> Resul
             found.kind
         ));
     };
+    let pid = state.terminals.lock().unwrap().pid(&found.terminal_id);
+    if off_main(move || Ok(pid.is_some_and(panel_terminal::tool_running))).await? {
+        return Err("A command still runs in this agent, so it stays awake. Close its tab to end it.".into());
+    }
     let screen = state.terminals.lock().unwrap().screen(&found.terminal_id).unwrap_or_default();
     // Out of `sessions` before the sleeper is filed, so no reader ever sees one session twice.
     if state.sessions.lock().unwrap().remove(&session).is_none() {
