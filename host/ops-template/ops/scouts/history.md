@@ -20,4 +20,4 @@ whose default changed, a dependency bump in the lockfile and what it changed, a 
 releases that still guards a user path, or a reverted commit whose bug came back.
 
 A finding: something a user meets because of a change over time, at `path:line`, with the commit or tag that brought it.
-Not a finding: a change the task asked for, a refactor with the same behaviour, style.
+Not a finding: anything a user would meet the same way on a fresh install of today's build.
