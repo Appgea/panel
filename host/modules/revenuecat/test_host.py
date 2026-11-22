@@ -98,6 +98,16 @@ class RevenueCatHostTests(unittest.TestCase):
         self.assertEqual(key, "sk_repository_key")
         self.assertEqual(source, "project RevenueCat MCP")
 
+    def test_the_vault_key_of_the_app_folder_wins_over_an_mcp_file(self):
+        app = self.root / "Sagar"
+        app.mkdir()
+        (app / ".mcp.json").write_text(json.dumps({"mcpServers": {
+            "revenuecat": {"env": {"REVENUECAT_SECRET_KEY": "sk_repository_key"}},
+        }}))
+        (self.root / "sagar_rc.env").write_text("OTHER=1\nRC_SECRET_KEY=sk_vault_key\n")
+        with mock.patch.dict(os.environ, {"RC_SECRETS_DIR": str(self.root)}):
+            self.assertEqual(host.local_mcp_key(str(app)), ("sk_vault_key", "vault"))
+
     def test_new_keys_are_sent_to_keychain_over_stdin_not_process_arguments(self):
         result = mock.Mock(returncode=0, stdout="", stderr="")
         with mock.patch.object(host, "keychain_available", return_value=True), \

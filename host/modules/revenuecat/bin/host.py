@@ -292,7 +292,23 @@ def project_mcp_key(root: str) -> str:
     return ""
 
 
+def vault_key(root: str) -> str:
+    """The app's own key in the secrets vault, found by its folder name: `<folder>_rc.env`."""
+    if not root:
+        return ""
+    vault = Path(os.environ.get("RC_SECRETS_DIR") or (Path.home() / "Desktop/projects/secrets"))
+    name = Path(root).expanduser().resolve().name.lower()
+    try:
+        lines = (vault / f"{name}_rc.env").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    return next((line.split("=", 1)[1].strip() for line in lines if line.startswith("RC_SECRET_KEY=")), "")
+
+
 def local_mcp_key(root: str) -> tuple[str, str]:
+    key = vault_key(root)
+    if key:
+        return key, "vault"
     key = project_mcp_key(root)
     if key:
         return key, "project RevenueCat MCP"
