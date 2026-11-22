@@ -16,10 +16,18 @@ Branch, dirt, test state, versions, store state: read them live or ask an agent.
 
 ## What you read
 
-Every session: `now.md`, `company.md`, `principles.md`, `portfolio.yaml`, `decisions/index.md`,
-and the sprint in `sprints/` whose dates hold today.
+Every session: `now.md`, `company.md`, `direction.md`, `principles.md`, `portfolio.yaml`,
+`decisions/index.md`, and the sprint in `sprints/` whose dates hold today.
 On demand: `apps/<key>.md`, `rollouts/<id>.md`, `decisions/<year>.md`, `backlog.md` via `rg`,
-`runbooks/`, `standards/`. Never read `log/` unless he asks what happened to something.
+`runbooks/`, `standards/`, `scouts/`. Never read `log/` unless he asks what happened to something.
+
+## Scouts and standards
+
+A scout finds work and files it in `backlog.md`. It never builds. `scouts/_rules.md` is how a run goes.
+A lens is one person at one stage, in `scouts/<id>.md`. An ability is one narrow check inside a lens, in
+`scouts/abilities/`. Panel's Board lists the lenses and runs them.
+A standard is a rule every app meets, in `standards/<id>.md`. `python3 _system/standards.py` prints which app
+passes which standard. Panel's Standards screen reads it.
 
 ## Filing
 
