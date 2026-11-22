@@ -13,19 +13,19 @@ from slack_mirror import slack_mirror, voice_problems
 
 def main():
     parser = argparse.ArgumentParser(description="Send a rich message to Panel")
-    parser.add_argument("--title", required=True)
-    parser.add_argument("--text", required=True)
+    parser.add_argument("--title", help="needed unless only pictures are sent: then the first caption")
+    parser.add_argument("--text")
     parser.add_argument(
         "--outcome",
-        required=True,
+        default="done",
         choices=["progress", "done", "blocked", "needs_decision"],
     )
     parser.add_argument(
         "--flow",
         action="append",
-        required=True,
+        default=[],
         metavar="REF|LABEL|DETAIL",
-        help="repeatable code-backed flow step",
+        help="repeatable code-backed flow step. A pictures-only send gets one step a picture",
     )
     parser.add_argument("--image", action="append", default=[], metavar="PATH[|CAPTION]")
     parser.add_argument("--audio", action="append", default=[])
@@ -40,6 +40,13 @@ def main():
         "panel:git, panel:manager (paths project-relative)",
     )
     args = parser.parse_args()
+    shots = [raw.partition("|") for raw in args.image]
+    if not (args.title and args.text and args.flow):
+        if not shots or (args.title or args.text or args.flow):
+            parser.error("--title, --text and --flow are needed, unless only --image PATH|CAPTION is sent")
+        captions = [c or os.path.basename(p) for p, _, c in shots]
+        args.title, args.text = captions[0], "\n".join(captions)
+        args.flow = [f"{p}|Picture|{c}" for (p, _, _), c in zip(shots, captions)]
 
     flow = []
     for raw in args.flow:
@@ -55,10 +62,7 @@ def main():
     }
     if args.image:
         # PATH|CAPTION, so a report's screenshots can say what they show.
-        payload["images"] = [
-            {"path": p, "caption": c} if c else p
-            for p, _, c in (raw.partition("|") for raw in args.image)
-        ]
+        payload["images"] = [{"path": p, "caption": c} if c else p for p, _, c in shots]
     if args.audio:
         payload["audio"] = args.audio
     if args.video:
