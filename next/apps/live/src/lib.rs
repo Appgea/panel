@@ -161,7 +161,6 @@ pub(crate) struct Hub {
 }
 
 pub(crate) const STATION: Vec2 = Vec2::new(36.0, 34.0);
-pub(crate) const MARK_DX: f32 = 28.0;
 
 impl Hub {
     pub fn station(&self) -> Vec2 {

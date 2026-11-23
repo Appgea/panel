@@ -17,21 +17,20 @@ export type World = {
 };
 export type Slots = { cols: number; col: Map<string, number>; size: string };
 
-export const HUB = { w: 320, h: 118 };
-export const CARD = { w: 200, h: 64, gap: 30 };
-const BAND = { x0: -(HUB.w / 2 + CARD.gap + CARD.w + 10), x1: HUB.w / 2 + CARD.gap + CARD.w + 10, y0: -HUB.h / 2 - 12 };
-export const PLOT = { w: 300, head: 64, row: 52, pad: 8, gap: 28, top: 120, dotX: 34 };
+export const BAND = { h: 104, min: 240 };
+export const PLOT = { w: 300, head: 64, row: 58, pad: 6, gap: 28, top: BAND.h / 2 + 28, dotX: 34 };
 export const PLANET = { x: 38, y: 32, r: 17 };
 export const STATION = { x: 36, y: 34 };
-export const MARK_DX = 28;
-export const markAt = (c: Box): Pt => ({ x: c.x - c.w / 2 + MARK_DX, y: c.y });
-export const stationAt = (hub: Box): Pt => ({ x: hub.x - hub.w / 2 + STATION.x, y: hub.y - hub.h / 2 + STATION.y });
+export const markAt = (c: Box): Pt => ({ x: c.x - c.w / 2 + STATION.x, y: c.y - c.h / 2 + STATION.y });
+export const stationAt = markAt;
+const MARK_FOOT = 24;
 export const BUBBLE_DX = 24;
 export const bubbleW = (plotW: number) => plotW - PLOT.dotX - BUBBLE_DX - 10;
-const PLOT_MAX_W = 440;
+const PLOT_MAX_W = 460;
+const BAND_W = 3 * BAND.min + 2 * PLOT.gap;
 const MAX_COLS = 6;
 const RECOLUMN = 1.15;
-const BAY = { pad: 24, gap: 16, y: 26, h: 38 };
+const BAY = { pad: 16, gap: 12, y: 24, h: 38 };
 const TURN = 12;
 
 export function radius(a: LiveAgent): number {
@@ -61,7 +60,7 @@ export function lay(input: WorldInput): World {
   const order = [...slots.col.keys(), ...[...plots.keys()].filter((k) => !slots.col.has(k)).sort()];
   const heights = new Map([...plots].map(([k, p]) => [k, p.h]));
   const stage = { w: Math.max(200, input.stage.w || 1000), h: Math.max(200, input.stage.h || 700) };
-  const zoomOf = (cols: number) => Math.min(1, (stage.w - 40) / Math.max(BAND.x1 - BAND.x0, gridWidth(cols)), (stage.h - 40) / (PLOT.top + grid(order, heights, cols).tall - BAND.y0));
+  const zoomOf = (cols: number) => Math.min(1, stage.w / Math.max(gridWidth(cols), cols >= 3 ? 0 : BAND_W), stage.h / (PLOT.top + grid(order, heights, cols).tall + BAND.h / 2));
   const most = Math.max(1, Math.min(order.length, MAX_COLS));
   let best = 1;
   const spare = (c: number) => Math.ceil(order.length / c) * c - order.length;
@@ -75,27 +74,24 @@ export function lay(input: WorldInput): World {
     slots.cols = best;
   }
   const cols = slots.cols;
-  const { col, tops, rowH, tall, lanes } = grid(order, heights, cols);
+  const { col, tops, tall, lanes } = grid(order, heights, cols);
   for (const k of order) slots.col.set(k, col.get(k)!);
-  const z = zoomOf(cols);
-  const roomy = ((stage.w - 40) / z - 24 - (cols - 1) * PLOT.gap) / cols;
-  const plotW = Math.max(PLOT.w, Math.min(PLOT_MAX_W, Math.floor(roomy / 20) * 20));
+  const plotW = Math.max(PLOT.w, Math.min(PLOT_MAX_W, Math.floor((stage.w / zoomOf(cols) - (cols - 1) * PLOT.gap) / cols)));
 
-  const snug = cols >= 3;
-  const odd = cols % 2 === 1;
-  const hubW = snug && odd ? plotW : HUB.w;
-  const cardW = snug ? plotW : CARD.w;
-  const cardX = snug ? (plotW + PLOT.gap) * (odd ? 1 : 1.5) : HUB.w / 2 + CARD.gap + CARD.w / 2;
-  const card = (side: number): Box => ({ x: side * cardX, y: -HUB.h / 2 + CARD.h / 2, w: cardW, h: CARD.h });
+  const gridW = gridWidth(cols, plotW);
+  const full = cols >= 3 ? gridW : Math.max(gridW, BAND_W);
+  const sideW = cols >= 3 ? plotW : (full - 2 * PLOT.gap) / 3;
+  const hubW = full - 2 * (sideW + PLOT.gap);
+  const card = (side: number): Box => ({ x: (side * (full - sideW)) / 2, y: 0, w: sideW, h: BAND.h });
   const bayW = (hubW - 2 * BAY.pad - BAY.gap) / 2;
-  const hub = { x: 0, y: 0, w: hubW, h: HUB.h, bays: [-1, 1].map((side) => ({ x: (side * (bayW + BAY.gap)) / 2, y: BAY.y, w: bayW, h: BAY.h })) };
+  const hub = { x: 0, y: 0, w: hubW, h: BAND.h, bays: [-1, 1].map((side) => ({ x: (side * (bayW + BAY.gap)) / 2, y: BAY.y, w: bayW, h: BAY.h })) };
   const landmarks: Landmarks = { tower: card(-1), sky: card(-1), web: card(1) };
 
   const dots = new Map<string, DotSpot>();
-  const left = -gridWidth(cols, plotW) / 2;
+  const left = -gridW / 2;
   const districts: District[] = order.map((key) => {
     const p = plots.get(key)!;
-    const h = rowH.get(key)!;
+    const h = p.h;
     const x0 = left + col.get(key)! * (plotW + PLOT.gap);
     const y0 = PLOT.top + tops.get(key)!;
     p.rows.forEach((a, i) => {
@@ -107,8 +103,7 @@ export function lay(input: WorldInput): World {
     return { key, name: input.roomName(key), x: x0 + plotW / 2, y: y0 + h / 2, w: plotW, h, r: Math.max(plotW, h) / 2, agents: p.agents.map((a) => a.id), waiting, stuck: p.agents.some((a) => a.state === "stuck"), planet: { x: x0 + PLANET.x, y: y0 + PLANET.y } };
   });
 
-  const half = Math.max(BAND.x1, gridWidth(cols, plotW) / 2 + 10);
-  return { hub, landmarks, districts, dots, bounds: { x0: -half, y0: BAND.y0, x1: half, y1: PLOT.top + Math.max(0, tall) + 10 }, plotW, lanes: lanes.map((y) => PLOT.top + y) };
+  return { hub, landmarks, districts, dots, bounds: { x0: -full / 2, y0: -BAND.h / 2, x1: full / 2, y1: PLOT.top + Math.max(0, tall) }, plotW, lanes: lanes.map((y) => PLOT.top + y) };
 }
 
 function plot(key: string, list: LiveAgent[]): Plot {
@@ -180,7 +175,10 @@ function leg(w: Ways, p: Pt): { at: Pt; inner?: Pt; gutter: number | null; band:
   }
   const L = w.landmarks;
   for (const c of [L.tower, L.web])
-    if (Math.abs(p.x - c.x) <= c.w / 2 && p.y <= c.y + c.h / 2 + 2) return { at: { x: markAt(c).x, y: c.y + 22 }, gutter: null, band: true };
+    if (Math.abs(p.x - c.x) <= c.w / 2 && Math.abs(p.y - c.y) <= c.h / 2 + 2) {
+      const m = markAt(c);
+      return { at: { x: m.x, y: c.y + c.h / 2 }, inner: { x: m.x, y: m.y + MARK_FOOT }, gutter: null, band: true };
+    }
   return { at: p, gutter: null, band: p.y < LANE_Y };
 }
 
@@ -232,10 +230,9 @@ export function along(path: Pt[], k: number): Pt {
   return path[path.length - 1];
 }
 
-function grid(order: string[], heights: Map<string, number>, cols: number): { col: Map<string, number>; tops: Map<string, number>; rowH: Map<string, number>; tall: number; lanes: number[] } {
+function grid(order: string[], heights: Map<string, number>, cols: number): { col: Map<string, number>; tops: Map<string, number>; tall: number; lanes: number[] } {
   const col = new Map<string, number>();
   const tops = new Map<string, number>();
-  const rowH = new Map<string, number>();
   const lanes: number[] = [];
   let y = 0;
   for (let i = 0; i < order.length; i += cols) {
@@ -244,12 +241,11 @@ function grid(order: string[], heights: Map<string, number>, cols: number): { co
     row.forEach((k, c) => {
       col.set(k, c);
       tops.set(k, y);
-      rowH.set(k, h);
     });
     y += h + PLOT.gap;
     lanes.push(y - PLOT.gap / 2);
   }
-  return { col, tops, rowH, tall: Math.max(0, y - PLOT.gap), lanes };
+  return { col, tops, tall: Math.max(0, y - PLOT.gap), lanes };
 }
 
 function gridWidth(cols: number, plotW = PLOT.w): number {

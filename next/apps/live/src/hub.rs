@@ -1,5 +1,5 @@
 use crate::draw::{arc, edge_shape, fade, parts, rect_shape, srgba, Frame, Kit, Pace, Shape, BLINKING, DECK, HULL, LINE, MOVING, THINK, VOID, WAIT, WALL, WORK};
-use crate::{Current, LandmarkKind, Step, MARK_DX};
+use crate::{Current, LandmarkKind, Step, STATION};
 use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI, TAU};
@@ -81,7 +81,8 @@ fn redraw(
     }
 
     for l in &current.0.landmarks {
-        let at = Vec2::new(l.x - l.w / 2.0 + MARK_DX, l.y);
+        boxed(&mut commands, &mut kit, &mut meshes, &mut mats, frame, (l.x, l.y, l.w, l.h, 14.0), (DECK, 0.6), (LINE, 0.7), 0.0);
+        let at = Vec2::new(l.x - l.w / 2.0 + STATION.x, l.y - l.h / 2.0 + STATION.y);
         let here = |dx: f32, dy: f32, z: f32| Transform::from_translation(frame.at(at.x, at.y, z) + Vec3::new(dx, dy, 0.0));
         match l.kind {
             LandmarkKind::Tower => {

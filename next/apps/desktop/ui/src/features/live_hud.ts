@@ -21,6 +21,9 @@ const FILTERS: [Filter, string, (i: FeedItem) => boolean][] = [
   ["fleet", "Fleet", (i) => !!i.unit],
 ];
 
+const FOOT_GAP = 28;
+const SHORT_ROWS = 3;
+
 export type Hud = { paint(): void; play(fresh: FeedItem[]): void; height(): number };
 
 export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, bannerEl: HTMLElement): Hud {
@@ -40,10 +43,10 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     if (pace) el.append(span("hud-delta"));
     return el;
   };
-  const closedEl = stat("closed", true);
-  const foundEl = stat("found", true);
-  const unitsEl = stat("units out");
-  const tokensEl = stat("tokens");
+  const closedEl = stat("closed today", true);
+  const foundEl = stat("found today", true);
+  const unitsEl = stat("units running");
+  const tokensEl = stat("tokens today");
   const streakEl = span("hud-streak");
   const fleetEl = span("hud-fleet");
   const stats = span("hud-stats");
@@ -73,7 +76,9 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
   });
   const dayEl = div("feed-day");
   let daySig = "";
-  feedEl.append(head, dayEl, list, more);
+  const cap = div("feed-cap");
+  cap.textContent = "Just happened";
+  feedEl.append(cap, head, dayEl, list, more);
   feedEl.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && open) {
       e.stopPropagation();
@@ -150,8 +155,9 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     feedEl.hidden = !all.length;
     feedEl.classList.toggle("is-open", open);
     head.hidden = !open;
+    cap.hidden = open;
     paintDay();
-    more.hidden = open || (all.length <= FEED_ROWS && !ctx.s.fleet?.today?.length);
+    more.hidden = open || (all.length <= SHORT_ROWS && !ctx.s.fleet?.today?.length);
     set(more, `All of today · ${all.length}`);
     more.title = "Every close, find, deployment and flag since midnight";
     if (open) {
@@ -188,7 +194,7 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     const kids: HTMLElement[] = left > 0 ? [...want, older] : want;
     const have = [...list.children];
     if (have.length !== kids.length || have.some((c, i) => c !== kids[i])) list.replaceChildren(...kids);
-    if (!open) shut = feedEl.hidden ? 0 : feedEl.offsetHeight + 12;
+    if (!open) shut = feedEl.hidden ? 0 : feedEl.offsetHeight + FOOT_GAP;
   }
 
   function paintDay(): void {
@@ -289,7 +295,7 @@ export function mountHud(ctx: LiveCtx, bar: HTMLElement, feedEl: HTMLElement, ba
     bannerTimer = window.setTimeout(next, BANNER_MS);
   }
 
-  return { paint, play, height: () => (feedEl.hidden ? 0 : open ? shut : feedEl.offsetHeight + 12) };
+  return { paint, play, height: () => (feedEl.hidden ? 0 : open ? shut : feedEl.offsetHeight + FOOT_GAP) };
 }
 
 function pace(el: HTMLElement, today: number, y: Tally | null, key: "closed" | "found"): void {

@@ -210,7 +210,11 @@
 .live-labels { position: absolute; inset: 0; pointer-events: none; }
 .live-labels button { pointer-events: auto; }
 
-.live-tools { position: absolute; top: 12px; right: 12px; z-index: 4; display: flex; gap: 6px; }
+.live-tools { position: absolute; top: 14px; right: 28px; z-index: 6; display: flex; gap: 6px; }
+.live-key { position: absolute; top: 50px; right: 28px; z-index: 6; display: grid; gap: 8px; width: min(380px, calc(100% - 56px)); padding: 14px 16px; border: 1px solid var(--l-line-2); border-radius: 12px; background: var(--l-bg); box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55); cursor: default; user-select: text; }
+.live-key[hidden] { display: none; }
+.live-key p { margin: 0; font: 400 12px/1.45 var(--l-sans); color: var(--l-ink-2); }
+.live-key b { display: block; font-weight: 600; color: var(--l-ink); }
 .live-tool {
   min-width: 30px;
   padding: 6px 11px;

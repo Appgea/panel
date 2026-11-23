@@ -3,22 +3,23 @@ import { landmarkNews, type News } from "./live_playbook";
 import { ageOf, ago, button, div, doing, plural, span, STATE_WORD, taskLine, unitClass } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveState } from "./live_types";
 import { closedToday } from "./live_scene";
-import { along, BUBBLE_DX, bubbleW, MARK_DX, PLANET, STATION } from "./live_world";
+import { along, BUBBLE_DX, bubbleW, PLANET, STATION } from "./live_world";
 import "./live_labels.css";
 
 export type Labels = { paint(): void };
 
-const HUB_LINE_ZOOM = 0.6;
+const HUB_LINE_ZOOM = 0.7;
+const MARK_LINE_ZOOM = 0.55;
 const BAY_ZOOM = 0.75;
 const META_ZOOM = 0.55;
-const TIGHT_ZOOM = 0.9;
-const SMALL_ZOOM = 0.62;
+const TIGHT_ZOOM = 0.85;
+const SMALL_ZOOM = 0.7;
 const GAP = 3;
 const NEW_MS = 1200;
 const LINE_OPACITY = 0.5;
 const SIGN_DX = PLANET.x + PLANET.r * 1.85 + 8;
 const HUB_DX = STATION.x + 30;
-const MARK_WORDS_DX = MARK_DX + 28;
+const HUB_DY = 14;
 
 const RANK = { focusBubble: 0, urgentBubble: 1, bubble: 2, sign: 3, hub: 4, mark: 6, bay: 7 } as const;
 
@@ -120,7 +121,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       markBoxes.set(m.id, b);
       if (dx || dy) {
         const spot = { x: end.x + dx / unit, y: end.y + dy / unit };
-        if (m.path) m.path.push(spot);
+        if (m.path) m.path = [...m.path, spot];
         else if (m.to) m.to = spot;
         else m.at = spot;
       }
@@ -162,7 +163,11 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const say = span("live-say");
       const age = span("live-age");
       const bud = span("live-bud");
-      bubble.append(cls, who, kids, res, say, age, bud);
+      const top = span("live-l1");
+      const low = span("live-l2");
+      top.append(cls, who, kids, age);
+      low.append(res, say);
+      bubble.append(top, low, bud);
       el.append(bubble);
       n = { el, bubble, cls, who, kids, res, say, age, bud, lit: 0 };
       nodes.set(a.id, n);
@@ -235,7 +240,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
     hubLine.classList.toggle("is-hot", m.hot);
     hub.style.width = `${Math.max(60, (w.hub.w - HUB_DX - 10) * z)}px`;
     hub.classList.toggle("is-small", z < HUB_LINE_ZOOM);
-    const hp = place(hub, w.hub.x - w.hub.w / 2 + HUB_DX, w.hub.y - w.hub.h / 2 + 14);
+    const hp = place(hub, w.hub.x - w.hub.w / 2 + HUB_DX, w.hub.y - w.hub.h / 2 + HUB_DY);
     words.push({ el: hub, rank: RANK.hub, x: hp.x, y: hp.y, anchor: "corner", dx: 0 });
     if (z >= BAY_ZOOM)
       w.hub.bays.forEach((b, i) => {
@@ -243,31 +248,31 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
         const owner = ctx.agentById(hold?.agent ?? null);
         const bay = keep(`bay:${i}`, used, () => {
           const el = div("live-bay");
-          el.append(span("live-bay-name", `Test bay ${i + 1}`), span("live-bay-who"));
+          el.append(span("live-bay-name", `Build or test ${i + 1}`), span("live-bay-who"));
           return el;
         });
         bay.classList.toggle("is-held", !!hold?.holder);
         bay.style.width = `${Math.max(40, b.w * z - 16)}px`;
         text(bay.children[1] as HTMLElement, hold?.holder ? (owner ? ctx.nameOf(owner) : hold.holder) : "Free");
-        bay.title = hold?.holder ? `${owner ? `${ctx.nameOf(owner)} runs: ` : ""}${hold.holder}` : "No build or test runs here";
+        bay.title = hold?.holder ? `${owner ? `${ctx.nameOf(owner)} runs: ` : ""}${hold.holder}` : "Free. The next build or test starts here.";
         const p = place(bay, b.x - b.w / 2 + 8, b.y - b.h / 2 + 5);
         words.push({ el: bay, rank: RANK.bay, x: p.x, y: p.y, anchor: "corner", dx: 0 });
       });
 
     const L = w.landmarks;
     const now = Date.now();
-    const card = (key: "tower" | "web", name: string, line: string) => {
+    const card = (key: "tower" | "web", name: string, what: string, line: string) => {
       const c = L[key];
       const el = keep(`mark:${key}`, used, () => {
         const e = div(`live-mark is-${key}`);
-        e.append(span("live-mark-name", name), span("live-mark-line"));
+        e.append(span("live-mark-name", name), span("live-mark-what", what), span("live-mark-line"));
         return e;
       });
-      text(el.children[1] as HTMLElement, line);
-      el.title = line;
-      el.style.width = `${Math.max(60, (c.w - MARK_WORDS_DX) * z)}px`;
-      el.classList.toggle("is-small", z < HUB_LINE_ZOOM);
-      const p = place(el, c.x - c.w / 2 + MARK_WORDS_DX, c.y - c.h / 2 + 8);
+      text(el.children[2] as HTMLElement, line);
+      el.title = `${what}. ${line}`;
+      el.style.width = `${Math.max(60, (c.w - HUB_DX - 12) * z)}px`;
+      el.classList.toggle("is-small", z < MARK_LINE_ZOOM);
+      const p = place(el, c.x - c.w / 2 + HUB_DX, c.y - c.h / 2 + HUB_DY);
       words.push({ el, rank: RANK.mark, x: p.x, y: p.y, anchor: "corner", dx: 0 });
     };
     const news = landmarkNews(world);
@@ -276,8 +281,8 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const by = n.agent ? ctx.nameOf(n.agent) : n.ember ? ctx.emberWho(n.ember).title : "";
       return `${ago(n.at, now)} · ${by ? `${by}: ` : ""}${n.label}`;
     };
-    card("tower", "GitHub gate", told(news.tower, "No push lately"));
-    card("web", "Web relay", told(news.web, "No web visit lately"));
+    card("tower", "GitHub", "Pushes and board issues go here", told(news.tower, "Nothing sent lately"));
+    card("web", "Web", "Searches and page visits go here", told(news.web, "No visit lately"));
     for (const [key, el] of pool)
       if (!used.has(key)) {
         el.remove();
@@ -312,6 +317,7 @@ export function mountLabels(ctx: LiveCtx, layer: HTMLElement): Labels {
       const f = a.fleet;
       const kind = f ? unitClass(f.kind) : null;
       text(n.cls, kind ? kind.name : a.commander ? "★ Commander" : "");
+      n.cls.title = kind ? `${kind.name}: the fleet class of this unit` : a.commander ? "Runs the fleet: starts units and reads their reports" : "";
       n.cls.style.setProperty("--c", kind ? kind.colour : "var(--l-gold)");
       const used = f?.startedMs ? (now - f.startedMs) / 60_000 : 0;
       const over = !!f && (f.flags.includes("OVER") || (f.budget > 0 && used > f.budget));

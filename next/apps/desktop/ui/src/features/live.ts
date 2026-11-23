@@ -36,6 +36,16 @@ const LINE_MIN = 48;
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 1.6;
 const ZOOM_STEP = 1.25;
+const EDGE = { side: 28, top: 56, bottom: 16 };
+const KEY: [string, string][] = [
+  ["Top row", "Where agents send work. GitHub takes pushes and board issues. This Mac runs builds and tests, two at a time. Web is searches and page visits."],
+  ["Card with a planet", "One project. A gold moon is an issue closed today."],
+  ["Ship", "One agent. The first line says who it is, the second what it does right now."],
+  ["Ship shapes", "Jet: a session you opened. Flagship: the fleet commander. Freighter: a fleet builder on one issue. Small craft: a scout or a helper."],
+  ["Colours", "Cyan works. Blue thinks. Amber waits for you. Red is stuck. Grey is idle."],
+  ["Green bar under a row", "How much of its time budget a fleet unit has used. Red means over."],
+  ["Light moving on a line", "Something on its way: a push, a build or test, a web visit, or a message between two agents."],
+];
 
 export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   root.innerHTML = `
@@ -45,6 +55,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
         <canvas id="liveCanvas" class="live-canvas" tabindex="-1" aria-hidden="true"></canvas>
         <div class="live-labels" data-labels></div>
         <div class="live-tools" data-tools></div>
+        <div class="live-key" data-key hidden></div>
         <div class="live-feed" data-feed aria-label="What the fleet just did" hidden></div>
         <div class="live-banner" data-banner role="status" hidden></div>
         <div class="live-toast" data-toast role="status" hidden></div>
@@ -494,14 +505,17 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     listEl.hidden = catalog.isOpen() || !panelEl.hidden;
   }
 
+  function room(): { w: number; h: number } {
+    const foot = Math.min(hud.height(), stage.clientHeight * 0.36);
+    return { w: stage.clientWidth - 2 * EDGE.side, h: stage.clientHeight - EDGE.top - Math.max(EDGE.bottom, foot) };
+  }
+
   function fit(): void {
     const b = s.layout?.bounds;
-    const W = stage.clientWidth;
-    const foot = Math.min(hud.height(), stage.clientHeight * 0.3);
-    const H = stage.clientHeight - foot;
-    if (!b || !W || H <= 40) return;
-    const zoom = clamp(Math.min((W - 40) / (b.x1 - b.x0), (H - 40) / (b.y1 - b.y0)), ZOOM_MIN, 1);
-    s.camera = { x: (b.x0 + b.x1) / 2, y: (b.y0 + b.y1) / 2 + foot / 2 / zoom, zoom };
+    const { w, h } = room();
+    if (!b || w <= 40 || h <= 40) return;
+    const zoom = clamp(Math.min(w / (b.x1 - b.x0), h / (b.y1 - b.y0)), ZOOM_MIN, 1);
+    s.camera = { x: (b.x0 + b.x1) / 2, y: b.y0 + (stage.clientHeight / 2 - EDGE.top) / zoom, zoom };
   }
 
   function draw(): void {
@@ -509,7 +523,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const width = stage.clientWidth;
     if (!w || !width) return;
     const now = Date.now();
-    s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots, stage: { w: width, h: stage.clientHeight } });
+    s.layout = lay({ world: w, roomOf: ctx.roomOf, roomName: ctx.roomName, slots: s.slots, stage: room() });
     if (!s.cameraHeld) {
       const { x, y, zoom } = s.camera;
       fit();
@@ -577,7 +591,22 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     if (!catalog.isOpen() && s.selection) select(null);
     catalog.toggle();
   });
-  tools.append(zoomOut, zoomIn, fitBtn, anim);
+  const keyEl = q("[data-key]");
+  for (const [name, what] of KEY) {
+    const row = document.createElement("p");
+    const b = document.createElement("b");
+    b.textContent = name;
+    row.append(b, what);
+    keyEl.append(row);
+  }
+  const keyBtn = button("live-tool", "What is what", () => {
+    keyEl.hidden = !keyEl.hidden;
+    keyBtn.classList.toggle("is-on", !keyEl.hidden);
+    keyBtn.setAttribute("aria-expanded", String(!keyEl.hidden));
+  });
+  keyBtn.title = "What each thing on the map means";
+  keyBtn.setAttribute("aria-expanded", "false");
+  tools.append(zoomOut, zoomIn, fitBtn, anim, keyBtn);
 
   function paintTools(): void {
     zoomOut.disabled = s.camera.zoom <= ZOOM_MIN + 0.001;
@@ -631,7 +660,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintTools();
   }
 
-  const OVER = ".live-tools, button, input, .live-feed.is-open";
+  const OVER = ".live-tools, .live-key, button, input, .live-feed.is-open";
   let drag: { x: number; y: number; moved: boolean; id: number } | null = null;
   stage.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || (e.target as HTMLElement).closest(OVER)) return;
@@ -691,7 +720,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     if (!open || e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === "TEXTAREA" || t.tagName === "INPUT" || t.isContentEditable)) return;
-    if (e.key === "Escape" && s.selection) select(null);
+    if (e.key === "Escape" && !keyEl.hidden) keyBtn.click();
+    else if (e.key === "Escape" && s.selection) select(null);
     else if (e.key === "0") refit();
     else if (e.key === "+" || e.key === "=") zoomBy(ZOOM_STEP);
     else if (e.key === "-") zoomBy(1 / ZOOM_STEP);
