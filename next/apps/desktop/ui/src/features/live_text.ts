@@ -1,4 +1,3 @@
-/** Live's words: names, times and counts, and the small DOM makers every Live file shares. */
 
 import type { EmberOutcome, FleetTag, Harness, LiveAgent, State } from "./live_types";
 
@@ -18,16 +17,8 @@ export function short(model: string | null): string {
 export const OUTCOME_WORD: Record<EmberOutcome, string> = { done: "Done", failed: "Failed", stopped: "Stopped", crashed: "Crashed", stuck: "Stuck" };
 export const OUTCOME_COLOUR: Record<EmberOutcome, string> = { done: "var(--l-done)", failed: "var(--l-stuck)", crashed: "var(--l-stuck)", stopped: "var(--l-idle)", stuck: "var(--l-turn)" };
 
-/**
- * Claude's own session names, like `cardly-e7` or `cmd-style-drift-80`: a slug and a short hex
- * tail. They say nothing about the agent, so Live never shows them.
- */
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*-[0-9a-f]{2,4}$/;
 
-/**
- * What kind of agent a headless run is, read from its first prompt. First match wins, and `$1`
- * is the first group. Add a line when a new kind of background run shows up as "Background run".
- */
 const PROMPT_ROLES: [RegExp, string][] = [
   [/^You review a diff before it is pushed/i, "Pre-push reviewer"],
   [/^You write one animation script/i, "Animation writer"],
@@ -36,12 +27,10 @@ const PROMPT_ROLES: [RegExp, string][] = [
   [/^You are fleet scout (\S+)/i, "Fleet scout · $1"],
 ];
 
-/** What `who` reads. Agents and embers both have these. */
 export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null; helperKind?: string | null; fleet?: FleetTag | null };
 
 export type UnitClass = { name: string; colour: string };
 
-/** A fleet unit's class by its kind in `fleet`, with the colour its chip, bubble and rows wear. */
 const CLASSES: Record<string, UnitClass> = {
   terra: { name: "Terra", colour: "var(--l-terra)" },
   flash: { name: "Flash", colour: "var(--l-flash)" },
@@ -55,21 +44,15 @@ export function unitClass(kind: string): UnitClass {
   return CLASSES[kind] ?? { name: cap(kind || "unit"), colour: "var(--l-ink-2)" };
 }
 
-/** A unit by its class and id: "Flash 8ae149". */
 export function unitName(kind: string, id: string): string {
   return `${unitClass(kind).name} ${id}`;
 }
 
-/** A scout's routine as words: `ui-guidelines@Sudokov` is "UI guidelines". The app is its plot. */
 export function lensName(scout: string): string {
   const lens = scout.split("@")[0].replace(/[-_]+/g, " ").trim();
   return cap(lens.replace(/\bui\b/gi, "UI").replace(/\bux\b/gi, "UX"));
 }
 
-/**
- * A fleet unit is its mission: "#1917 One owner for the crash policy" for a builder, "Legal scout"
- * for a scout. Its class and id go second, since the owner steers missions, not unit ids.
- */
 function unitWho(f: FleetTag, harness: Harness, model: string | null): { title: string; sub: string; role: string } {
   const m = f.issues[0];
   const role = f.scout ? "Fleet scout" : "Fleet builder";
@@ -78,7 +61,6 @@ function unitWho(f: FleetTag, harness: Harness, model: string | null): { title: 
   return { title, sub: [`${unitName(f.kind, f.unit)}`, engine].filter(Boolean).join(" · "), role };
 }
 
-/** Input tokens as the fleet prints them, `16.0M` or `850K`, in millions. */
 export function millions(t: string | undefined): number {
   const m = /^([\d.]+)\s*([KMG]?)/i.exec(t ?? "");
   if (!m) return 0;
@@ -86,16 +68,10 @@ export function millions(t: string | undefined): number {
   return m[2].toUpperCase() === "K" ? n / 1000 : m[2].toUpperCase() === "G" ? n * 1000 : n;
 }
 
-/** A subagent's type as a role: `Explore` → "Explore helper", `general-purpose` → "Helper". */
 export function helperRole(kind: string): string {
   return /^(general-purpose|helper|fork)$/i.test(kind) ? "Helper" : `${cap(kind.replace(/[-_]/g, " "))} helper`;
 }
 
-/**
- * Who an agent is, for a person who did not start it. `title` is the name to show: the folk name
- * of a session someone types into (the name on its terminal tab), else its role. `sub` says the
- * rest: the role or the folk name, and the model. `parent` is the name of the agent that started it.
- */
 export function who(a: WhoInput, parent: string | null = null): { title: string; sub: string; role: string } {
   const task = (a.task ?? "").trim();
   if (a.fleet) return unitWho(a.fleet, a.harness, a.model);
@@ -126,45 +102,36 @@ export function who(a: WhoInput, parent: string | null = null): { title: string;
   return { title: role, sub: [folk, model].filter(Boolean).join(" · "), role };
 }
 
-/** A first prompt that only names the agent's kind is no news once `who` has said the kind. */
 export function taskLine(task: string | null): string | null {
   const t = task?.trim();
   if (!t || PROMPT_ROLES.some(([re]) => re.test(t))) return null;
   return humane(t);
 }
 
-/** Board titles start with their app, "Tavla: …". The row already names the room. */
 export function withoutRoom(title: string, room: string): string {
   return title.toLowerCase().startsWith(`${room.toLowerCase()}: `) ? title.slice(room.length + 2) : title;
 }
 
-/** An app key as people say it: "dream_commenter" is "Dream Commenter". A name stays as it is. */
 export function appName(key: string): string {
   return /[_-]/.test(key) || key === key.toLowerCase() ? key.split(/[_-]+/).filter(Boolean).map(cap).join(" ") : key;
 }
 
-/** A scout's lens id in a line, "discrepancies@dream_commenter", as words. */
 export function humane(text: string): string {
   return text.replace(/\b([a-z][a-z0-9-]*)@([A-Za-z][\w-]*)/g, (_, lens: string, app: string) => `${lensName(lens)} (${appName(app)})`);
 }
 
-/** What an agent is doing, in one line. */
 export function doing(a: LiveAgent): string {
   return humane(doingRaw(a));
 }
 
 function doingRaw(a: LiveAgent): string {
   switch (a.state) {
-    // A bare "Working" says nothing. The last step or the last words say what it is on. A step
-    // label is a past or plain verb ("Read x", "Ran tests"), so it goes first and the state after.
     case "work":
-      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `${a.steps[0].label} · working` : a.startedMs && Date.now() - a.startedMs < 120_000 ? "Starting up" : "Working. No steps read yet");
+      return a.now?.label ?? a.lastText ?? (a.steps[0] ? `${a.steps[0].label} · working` : a.startedMs && Date.now() - a.startedMs < 120_000 ? "Starting up" : "Working. Panel cannot read its steps");
     case "think":
       return a.steps[0] ? `${a.steps[0].label} · thinking` : (a.lastText ?? "Thinking");
     case "turn":
       return a.lastText ?? "Waits for your answer";
-    // Stuck means its step runs long with the process quiet (src-tauri/src/live/mod.rs). How
-    // long is what tells a slow build from a hang.
     case "stuck":
       return `No output for ${since(a.stateMs ?? a.now?.atMs ?? Date.now(), Date.now())} on ${lower(a.now?.label ?? "its step")}`;
     default:
@@ -172,20 +139,14 @@ function doingRaw(a: LiveAgent): string {
   }
 }
 
-/** A step running this long gets its age shown. Shorter ones change too fast for a time to help. */
 const LONG_STEP_MS = 3 * 60_000;
 
-/**
- * How long an agent has been in what it shows, when that matters: waiting for you, or one step
- * running long. "" otherwise, so the map carries no times that say nothing.
- */
 export function ageOf(a: LiveAgent, now: number): string {
   if (a.state === "turn" && a.stateMs) return since(a.stateMs, now);
   if (a.state === "work" && a.now && now - a.now.atMs > LONG_STEP_MS) return since(a.now.atMs, now);
   return "";
 }
 
-/** Who started an agent, in words. `via` is the process that launched it (src-tauri/src/live/mod.rs). */
 export function startedBy(via: string | null): string {
   if (!via) return "Not known";
   if (via === "Terminal") return "You, in Terminal";
@@ -197,7 +158,6 @@ export function plural(n: number, one: string, many = `${one}s`): string {
   return n === 1 ? one : many;
 }
 
-/** "Edited main.dart" → "edited main.dart", for a label inside a sentence. Leaves "CI" alone. */
 function lower(s: string): string {
   return /^[A-Z][a-z]/.test(s) ? s[0].toLowerCase() + s.slice(1) : s;
 }
@@ -227,7 +187,6 @@ export function clock(ms: number): string {
   return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
 }
 
-/** Wall-clock time as HH:MM. */
 export function hhmm(ms: number): string {
   const d = new Date(ms);
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -261,10 +220,6 @@ export function button(cls: string, text: string, onClick: () => void): HTMLButt
 
 const HOLD_MS = 900;
 
-/**
- * Stop needs a one-second hold, so a slip never kills an agent. A view holding one skips its
- * repaint while `.is-holding` is on the page, so the poll never drops a real hold.
- */
 export function holdButton(label: string, fire: () => void): HTMLButtonElement {
   const b = button("opt live-hold is-danger", label, () => undefined);
   let t: number | null = null;
@@ -276,7 +231,6 @@ export function holdButton(label: string, fire: () => void): HTMLButtonElement {
   b.addEventListener("pointerdown", () => {
     b.classList.add("is-holding");
     t = window.setTimeout(() => {
-      // A repaint that swapped the button out mid-hold took its pointerup with it: no fire.
       const held = b.isConnected && b.classList.contains("is-holding");
       cancel();
       if (held) fire();

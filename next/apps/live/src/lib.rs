@@ -274,6 +274,8 @@ pub(crate) struct Fx {
     pub count: Option<u32>,
     #[serde(default)]
     pub delay: Option<f32>,
+    #[serde(default)]
+    pub path: Option<Vec<[f32; 2]>>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]

@@ -94,7 +94,7 @@
 .side-head[hidden], .side-list[hidden] { display: none; }
 /* A section after a shown one starts under a hairline, so Fleet, Sessions, the squad and Ended
    read as four blocks. */
-.side-list:not([hidden]) ~ .side-head, .side-day:not([hidden]) ~ .side-head { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--l-line); }
+.side-list:not([hidden]) ~ .side-head { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--l-line); }
 .side-row {
   display: grid;
   grid-template-columns: 8px minmax(0, 1fr) auto auto;
@@ -149,8 +149,8 @@
 .side-bud.is-over { --bf: var(--l-stuck); }
 .side-row.is-unit:has(.side-bud.is-over) .side-where { color: color-mix(in srgb, var(--l-stuck) 80%, var(--l-ink-3)); }
 /* The day's table by class, under the lists. */
-.side-day { padding: 2px 8px 8px; }
-.side-day[hidden] { display: none; }
+.feed-day { margin: 0 2px 8px; padding: 8px 10px; border: 1px solid var(--l-line); border-radius: 8px; }
+.feed-day[hidden] { display: none; }
 .day-grid { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); column-gap: 12px; row-gap: 3px; font: 400 12px/1.4 var(--l-sans); font-variant-numeric: tabular-nums; color: var(--l-ink-2); }
 .day-h { font-size: 10.5px; color: var(--l-ink-3); }
 .day-h:not(:first-child), .day-n { text-align: right; }

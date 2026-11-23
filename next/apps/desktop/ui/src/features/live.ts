@@ -15,7 +15,7 @@ import { newHeard, talk, TALK, TO_HELPERS, type Talk } from "./live_talk";
 import { appName, button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
 import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
-import { lay, markAt, route, stationAt } from "./live_world";
+import { elbows, lay, markAt, route, stationAt } from "./live_world";
 import "./live.css";
 
 export type { LiveAgent, LiveEmber, LiveEvents, LiveJob, LiveWorld } from "./live_types";
@@ -529,20 +529,16 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   function routeFx(f: FxOut): FxOut[] {
     if ((f.kind !== "orb" && f.kind !== "beam") || f.x2 === undefined || f.y2 === undefined || !s.layout) return [f];
-    const path = route(s.layout, { x: f.x, y: f.y }, { x: f.x2, y: f.y2 });
-    const lens = path.slice(1).map((p, i) => Math.hypot(p.x - path[i].x, p.y - path[i].y));
-    const total = lens.reduce((a, l) => a + l, 0);
-    if (total < 1) return [f];
+    const [a, b] = [{ x: f.x, y: f.y }, { x: f.x2, y: f.y2 }];
     const ms = f.ms ?? (f.kind === "orb" ? 900 : 1200);
-    addLine(path, f.color, (f.delay ?? 0) + ms + LINE_LINGER_MS);
-    let at = f.delay ?? 0;
-    return lens.flatMap((len, i) => {
-      if (len < 1) return [];
-      const piece = f.kind === "orb" ? Math.max(60, (ms * len) / total) : ms;
-      const out = { ...f, x: path[i].x, y: path[i].y, x2: path[i + 1].x, y2: path[i + 1].y, ms: Math.round(piece), delay: Math.round(at) };
-      if (f.kind === "orb") at += piece;
-      return [out];
-    });
+    if (f.kind === "orb") {
+      const path = route(s.layout, a, b);
+      addLine(path, f.color, (f.delay ?? 0) + ms + LINE_LINGER_MS);
+      return [{ ...f, path: path.map((p) => [p.x, p.y]) }];
+    }
+    const path = elbows(s.layout, a, b);
+    addLine(route(s.layout, a, b), f.color, (f.delay ?? 0) + ms + LINE_LINGER_MS);
+    return path.slice(1).flatMap((p, i) => (Math.hypot(p.x - path[i].x, p.y - path[i].y) < 1 ? [] : [{ ...f, x: path[i].x, y: path[i].y, x2: p.x, y2: p.y }]));
   }
 
   function addLine(path: Pt[], color: string, ms: number): void {

@@ -1,23 +1,14 @@
-//! Effects: the moves animation scripts and the playbook are made of. Each `Fx` in a scene
-//! starts after its `delay`, plays for its `ms`, and despawns. Each effect owns its colour so it
-//! can fade alone. With reduced motion no effect plays.
-//!
-//! - `orb`: a glowing ball from x, y to x2, y2, easing in and out, shedding a trail.
-//! - `beam`: a line of light from x, y to x2, y2 with a head that runs along it, then fades.
-//! - `pulse`: a soft glow that swells to `size` and fades.
-//! - `ring`: a thin ring that grows to `size` and fades.
-//! - `burst`: `count` sparks fly out and slow down.
-//! - `sweep`: a radar arm of length `size` turning around the point, two turns a second.
-//! - `orbit`: `count` electrons circling the point at radius `size`.
 
 use crate::draw::{ease, line, srgba, Dice, Frame, Kit, Pace, Shape, MOVING};
 use crate::{Current, FxKind, Step};
 use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 
+const ORB_PTS: usize = 32;
+
 #[derive(Clone, Copy)]
 enum Kind {
-    Orb { a: Vec2, b: Vec2, size: f32 },
+    Orb { pts: [Vec2; ORB_PTS], n: usize, size: f32 },
     Trail { at: Vec2, size: f32 },
     BeamLine { a: Vec2, b: Vec2 },
     BeamHead { a: Vec2, b: Vec2 },
@@ -33,7 +24,6 @@ enum Kind {
 struct Effect {
     kind: Kind,
     began: f32,
-    /// Seconds it lasts.
     len: f32,
     hex: u32,
     paint: Handle<ColorMaterial>,
@@ -43,11 +33,8 @@ pub(crate) fn plugin(app: &mut App) {
     app.add_systems(Update, (start.run_if(resource_changed::<Current>), play).chain().in_set(Step::Draw));
 }
 
-/// Every effect's light, against the words on the map. Every step animates, so each one must
-/// stay a hint. Owner, 2026-11-06: "Every step, quieter".
 const QUIET: f32 = 0.6;
 
-/// What to spawn: a kind, its length, colour, mesh and start time.
 struct New {
     kind: Kind,
     len: f32,
@@ -77,7 +64,18 @@ fn start(mut commands: Commands, mut kit: ResMut<Kit>, mut dice: ResMut<Dice>, m
         let len = |default_ms: f32| (fx.ms.unwrap_or(default_ms).clamp(100.0, 8000.0)) / 1000.0;
         let mut add = |kind: Kind, len: f32, mesh: &Handle<Mesh>| spawn(&mut commands, &mut mats, New { kind, len, hex, mesh: mesh.clone(), began });
         match fx.kind {
-            FxKind::Orb => add(Kind::Orb { a: at, b: to, size: fx.size.unwrap_or(6.0) }, len(900.0), &glow),
+            FxKind::Orb => {
+                let mut pts = [to; ORB_PTS];
+                pts[0] = at;
+                let mut n = 2;
+                if let Some(path) = fx.path.as_ref().filter(|p| p.len() >= 2) {
+                    n = path.len().min(ORB_PTS);
+                    for (slot, p) in pts.iter_mut().zip(path) {
+                        *slot = Vec2::new(p[0], p[1]);
+                    }
+                }
+                add(Kind::Orb { pts, n, size: fx.size.unwrap_or(6.0) }, len(900.0), &glow)
+            }
             FxKind::Beam => {
                 add(Kind::BeamLine { a: at, b: to }, len(1200.0), &square);
                 add(Kind::BeamHead { a: at, b: to }, len(1200.0), &glow);
@@ -107,7 +105,6 @@ fn start(mut commands: Commands, mut kit: ResMut<Kit>, mut dice: ResMut<Dice>, m
     }
 }
 
-/// Fades in over the first tenth and out over the last third.
 fn envelope(u: f32) -> f32 {
     (u / 0.1).min(1.0) * ((1.0 - u) / 0.33).min(1.0)
 }
@@ -142,8 +139,8 @@ fn play(
         }
         let glow_at = |p: Vec2, r: f32, z: f32| Transform::from_translation(frame.at(p.x, p.y, z)).with_scale(Vec3::splat(r));
         let (alpha, t) = match fx.kind {
-            Kind::Orb { a, b, size } => {
-                let p = a.lerp(b, ease(u));
+            Kind::Orb { pts, n, size } => {
+                let p = along(&pts[..n], ease(u));
                 trails.push(New { kind: Kind::Trail { at: p, size: size * 1.6 }, len: 0.5, hex: fx.hex, mesh: glow.clone(), began: now });
                 (QUIET * 0.95 * (u / 0.08).min(1.0), glow_at(p, size * 2.2, 0.72))
             }
@@ -153,7 +150,6 @@ fn play(
             Kind::Pulse { at, size } => (QUIET * 0.6 * (1.0 - u), glow_at(at, size * (0.5 + u), 0.7)),
             Kind::Ring { at, size } => (QUIET * 0.8 * (1.0 - u), glow_at(at, size * (0.15 + 0.85 * ease(u)), 0.7)),
             Kind::Spark { pos, vel } => {
-                // Damped by 0.94 a frame at 60 frames a second.
                 let next = pos + vel * dt;
                 fx.kind = Kind::Spark { pos: next, vel: vel * 0.94f32.powf(dt * 60.0) };
                 (QUIET * (1.0 - u), glow_at(next, 5.0, 0.7))
@@ -181,4 +177,17 @@ fn play(
     for n in trails {
         spawn(&mut commands, &mut mats, n);
     }
+}
+
+fn along(pts: &[Vec2], k: f32) -> Vec2 {
+    let total: f32 = pts.windows(2).map(|w| w[0].distance(w[1])).sum();
+    let mut left = k.clamp(0.0, 1.0) * total;
+    for w in pts.windows(2) {
+        let len = w[0].distance(w[1]);
+        if left <= len && len > 0.0 {
+            return w[0].lerp(w[1], left / len);
+        }
+        left -= len;
+    }
+    pts[pts.len() - 1]
 }

@@ -1,106 +1,11 @@
-/**
- * Live's animation scripts, and the player that runs them.
- *
- * Every step an agent takes has a verb, like `git.push`, `search` or `spawn`
- * (src-tauri/src/live/verbs.rs). The catalog holds one script per verb in
- * `~/.appgeapanel/state/live-catalog/<verb>.json`. When an agent starts a step, its verb's
- * script plays on the map. A verb with no script gets one written by a headless model run that
- * reads this comment as its spec (src-tauri/src/live/catalog.rs). The owner deletes bad ones in
- * the catalog view, and the next sighting writes a new one.
- *
- * THE MAP. A dark field. This Mac, the hub, sits in a band on top with two testlock bays, a
- * GitHub card to its left and a Web card to its right. Under it each project with a running
- * agent is a plot, a rounded box with one row per agent. Agents are small glowing electrons
- * that never leave their row.
- *
- * QUIET. Every step of every agent may play its script, three at once at most, so each one is a
- * hint, never a show. Owner, 2026-11-06: "Every step, quieter". One glyph and one move is often
- * the whole script.
- *
- * WHAT A GOOD SCRIPT DOES. The owner glances at the map and must read what kind of work this is
- * without opening anything. Owner, 2026-11-06: "Animations must not be vague. Nothing must be
- * vague, while keeping screen not overpopulated."
- *   - It shows one thing moving from where it is to where it goes: a file into This Mac, a
- *     crate into GitHub, a question out to the web. A glow with no from and no to says nothing.
- *   - It names the thing with a glyph and, at most once, a tag of 1 to 3 words: "develop",
- *     "3 helpers". Never a whole sentence: the bubble already says the step.
- *   - Green and red belong to results. Live itself shows ✓ or ✗ when a test, build or push
- *     ends. A script plays while the step runs, before anyone knows how it went.
- *   - Two or three effects at once at most, and done in 2 to 5 seconds.
- *   - Anything that travels takes a clear way on its own: out of its plot, along the gaps between
- *     plots and the lane under This Mac, never over words, with its way drawn faint. So a script
- *     only names where a thing starts and where it goes.
- *
- * A SCRIPT is a JSON object:
- *   {
- *     "title": "Push to GitHub",                 what the owner reads in the catalog
- *     "about": "The agent carries ...",           one sentence: what the animation shows
- *     "by": "sonnet",                             who wrote it
- *     "glyphs": { "name": "M4 4h16v16H4z" },      optional: new glyphs this script draws
- *     "steps": [ moves, played in order ]
- *   }
- *
- * PLACES. Every "at", "from" and "to" is one of these names:
- *   "self"     the agent, where it stands now
- *   "home"     the middle of the agent's district
- *   "parent"   the agent that started this one, or "self"
- *   "helpers"  each agent this one started (repeats per helper, at most 8), or points around "self"
- *   "hub"      This Mac
- *   "bay"      the agent's testlock bay, or the first one
- *   "tower"    the GitHub card, 200 by 64. A trip ends at its bottom edge, and a tag fits
- *              under it at {"place": "tower", "dy": 50}
- *   "web"      the Web card, the same size, to the right of This Mac
- * Older scripts name "desk", "board", "sky", "file" and "files": they play at "hub", "tower",
- * "tower", "self" and "self". Never write them.
- * or an object with an offset in pixels, y growing down: {"place": "self", "dy": -22}
- *
- * COLOURS: "work" cyan, "think" blue, "turn" amber, "idle" grey, "ink" white. Each one means
- * that state. "done" green and "stuck" red are for results, which Live draws: in a script they
- * play as "work". Any other colour plays as "ink".
- *
- * GLYPHS. Small line icons in a 24 by 24 box: file, files, crate, branch, search, globe, chat,
- * flask, hammer, rocket, eye, gear, camera, film, book, people, lock, cloud, spark, list.
- * A script may draw a new one: add it under "glyphs" as an SVG path, lines only, in the 24 by
- * 24 box, and name it in a "glyph" move. Letters, digits, spaces, commas, dots and minus signs
- * only, at most 600 characters. Its name: lowercase letters and dashes.
- *
- * MOVES. Each move is an object with "do". Moves start one after another with no pause, except
- * "walk" and "wait", which hold the script until they end. Sizes are pixels, times are ms.
- *   {"do": "walk", "to": PLACE, "ms": 1200}         a spark flies from the agent to the place
- *   {"do": "wait", "ms": 600}
- *   {"do": "say", "text": "Pushing"}                 a bubble over the agent. "{label}" is the step's own words
- *   {"do": "orb", "from": P, "to": P, "color": C, "size": 6, "ms": 900}       a ball of light travels, with a trail
- *   {"do": "packets", "from": P, "to": P, "color": C, "count": 4, "ms": 800}  small balls stream one after another
- *   {"do": "beam", "from": P, "to": P, "color": C, "ms": 1200}                a line of light flashes and fades
- *   {"do": "pulse", "at": P, "color": C, "size": 30, "ms": 900}               a soft glow swells and fades
- *   {"do": "ring", "at": P, "color": C, "size": 60, "ms": 1200}               a thin ring grows and fades
- *   {"do": "burst", "at": P, "color": C, "count": 14, "size": 30}            sparks fly out
- *   {"do": "sweep", "at": P, "color": C, "size": 60, "ms": 2000}              a radar arm turns around the place
- *   {"do": "orbit", "at": P, "color": C, "count": 3, "size": 18, "ms": 2000}  electrons circle the place
- *   {"do": "carry", "color": C}                      the agent holds a glowing crate. With no colour it drops it
- *   {"do": "light", "at": "file", "color": C, "ms": 1500}                     the agent glows softly
- *   {"do": "glyph", "name": "crate", "at": P, "to": P, "color": C, "ms": 1400} an icon shows at the place, or travels to "to"
- *   {"do": "tag", "at": P, "text": "develop", "ms": 1800}                     a few words at the place. "{file}" is the step's file name
- * At most 24 moves and 8 seconds. Unknown moves and places are skipped. When the script ends,
- * the agent drops what it carries and its bubble goes back to the step's own words. A script
- * without "say" shows the step's words anyway, so an agent always tells what it does.
- */
 
 export type Pt = { x: number; y: number };
 export type Place = string | { place: string; dx?: number; dy?: number };
 export type Move = { do: string; [field: string]: unknown };
-/** `improving` and `improved` come from the catalog (src-tauri/src/live/catalog.rs), not from writers. */
 export type Script = { verb: string; title?: string; about?: string; by?: string; madeMs?: number; pending?: boolean; improving?: boolean; improved?: string; glyphs?: Record<string, unknown>; steps?: Move[] };
-/** An effect for Bevy, in world pixels (apps/live/src/fx.rs). */
-export type FxOut = { kind: string; x: number; y: number; x2?: number; y2?: number; color: string; size?: number; ms?: number; count?: number; delay?: number };
-/**
- * A glyph or a tag over the map, in world pixels. Words and icons are HTML, so they stay sharp.
- * `path` is the clear way a travelling glyph takes (live_world.ts `route`). A `line` mark is that
- * way drawn faint, so the eye can follow what went where.
- */
+export type FxOut = { kind: string; x: number; y: number; x2?: number; y2?: number; color: string; size?: number; ms?: number; count?: number; delay?: number; path?: [number, number][] };
 export type Mark = { glyph?: string; text?: string; at: Pt; to?: Pt; path?: Pt[]; line?: boolean; color: string; ms: number; xp?: boolean; talk?: boolean };
 
-/** Line icons in a 24 by 24 box. `check` and `cross` are Live's own, for results. */
 export const GLYPHS: Record<string, string> = {
   file: "M6 3h8l4 4v14H6z M14 3v4h4",
   files: "M8 3h7l3 3v12H8z M5 7v14h10",
@@ -125,11 +30,9 @@ export const GLYPHS: Record<string, string> = {
   check: "M5 12l5 5 9-10",
   cross: "M6 6l12 12 M18 6L6 18",
 };
-/** Results only: a script that draws a tick would claim an outcome nobody knows yet. */
 const RESULT_GLYPHS = new Set(["check", "cross"]);
 const PATH = /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]{1,600}$/;
 
-/** The path for a glyph name: the script's own first, then Live's. Null for an unknown or unsafe one. */
 export function glyphPath(script: Script, name: unknown): string | null {
   if (typeof name !== "string" || !/^[a-z-]{1,24}$/.test(name) || RESULT_GLYPHS.has(name)) return null;
   const own = script.glyphs?.[name];
@@ -137,9 +40,7 @@ export function glyphPath(script: Script, name: unknown): string | null {
   return GLYPHS[name] ?? null;
 }
 
-/** What the player needs from the map. live.ts provides it. */
 export type Stagehand = {
-  /** A named place for this agent. Several points for "files" and "helpers". Empty when unknown. */
   where(agentId: string, place: string): Pt[];
   fx(f: FxOut): void;
   walk(agentId: string, to: Pt | null): void;
@@ -147,11 +48,8 @@ export type Stagehand = {
   say(agentId: string, text: string | null): void;
   light(agentId: string, at: "file" | "files", color: string, ms: number): void;
   mark(agentId: string, m: Mark): void;
-  /** The step's own words. */
   label(agentId: string): string;
-  /** The name of the file the step touches, or "". */
   file(agentId: string): string;
-  /** Sends what changed to the view. */
   flush(): void;
 };
 
@@ -168,7 +66,6 @@ const MAX_MOVES = 24;
 const MAX_MS = 8000;
 const MAX_POINTS = 8;
 
-/** What plays when a verb has no script yet: the agent says what it does, with one soft pulse. */
 export const PLAIN: Script = {
   verb: "",
   title: "Working",
@@ -179,7 +76,6 @@ export const PLAIN: Script = {
   ],
 };
 
-/** A script's colour. Green and red mean a result, which no script knows while its step runs. */
 const colour = (c: unknown): string => (c === "done" || c === "stuck" ? COLOR.work : typeof c === "string" ? (COLOR[c] ?? COLOR.ink) : COLOR.ink);
 const num = (v: unknown, fallback: number, lo: number, hi: number): number => (typeof v === "number" && Number.isFinite(v) ? Math.min(hi, Math.max(lo, v)) : fallback);
 
@@ -191,17 +87,12 @@ function points(hand: Stagehand, agentId: string, p: unknown): Pt[] {
   return hand.where(agentId, spec.place).slice(0, MAX_POINTS).map((q) => ({ x: q.x + dx, y: q.y + dy }));
 }
 
-/** Pairs every start with an end: one to many, many to one, or many to many in order. */
 function pairs(from: Pt[], to: Pt[]): [Pt, Pt][] {
   if (!from.length || !to.length) return [];
   const n = Math.max(from.length, to.length);
   return Array.from({ length: n }, (_, i) => [from[Math.min(i, from.length - 1)], to[Math.min(i, to.length - 1)]]);
 }
 
-/**
- * Plays `script` for one agent. Returns a stop function. A stopped or finished script leaves the
- * agent with nothing carried and no script words in its bubble.
- */
 export function play(script: Script, agentId: string, hand: Stagehand, done: () => void): () => void {
   let stopped = false;
   let tagged = false;
@@ -259,7 +150,6 @@ export function play(script: Script, agentId: string, hand: Stagehand, done: () 
           break;
         }
         case "tag": {
-          // One tag per script: more words than that crowd the map.
           if (tagged || typeof m.text !== "string") break;
           const words = m.text.replace("{file}", hand.file(agentId)).replace("{label}", hand.label(agentId)).trim().slice(0, 28);
           const p = at()[0];
