@@ -30,6 +30,7 @@ export type FleetUnit = {
   app: string | null;
   /** A scout's routine, like `legal@TavlaSkor`. Empty for a builder. */
   scout?: string;
+  role?: "builder" | "scout" | "checker";
   issues: { number: number; title: string }[];
   minutes: number;
   budget: number;

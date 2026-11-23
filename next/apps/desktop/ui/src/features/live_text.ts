@@ -23,8 +23,9 @@ const PROMPT_ROLES: [RegExp, string][] = [
   [/^You review a diff before it is pushed/i, "Pre-push reviewer"],
   [/^You write one animation script/i, "Animation writer"],
   [/^You are Terra worker (\S+)/i, "Builder · $1"],
-  [/^You are fleet builder (\S+)/i, "Fleet builder · $1"],
-  [/^You are fleet scout (\S+)/i, "Fleet scout · $1"],
+  [/^You are fleet builder (\S+)/i, "Builder"],
+  [/^You are fleet scout (\S+)/i, "Scout"],
+  [/^You are fleet checker (\S+)/i, "Checker"],
 ];
 
 export type WhoInput = { name: string | null; harness: Harness; headless: boolean; task: string | null; via: string | null; model: string | null; helperKind?: string | null; fleet?: FleetTag | null };
@@ -33,6 +34,8 @@ export type UnitClass = { name: string; colour: string };
 
 const CLASSES: Record<string, UnitClass> = {
   terra: { name: "Terra", colour: "var(--l-terra)" },
+  sol: { name: "Sol", colour: "var(--l-sol)" },
+  astra: { name: "Astra", colour: "var(--l-astra)" },
   flash: { name: "Flash", colour: "var(--l-flash)" },
   sonnet: { name: "Sonnet", colour: "var(--l-sonnet)" },
   haiku: { name: "Haiku", colour: "var(--l-sonnet)" },
@@ -55,7 +58,7 @@ export function lensName(scout: string): string {
 
 function unitWho(f: FleetTag, harness: Harness, model: string | null): { title: string; sub: string; role: string } {
   const m = f.issues[0];
-  const role = f.scout ? "Fleet scout" : "Fleet builder";
+  const role = f.scout ? "Scout" : f.role === "checker" ? "Checker" : "Builder";
   const title = m ? `#${m.number} ${cap(m.title)}${f.issues.length > 1 ? ` +${f.issues.length - 1}` : ""}` : f.scout ? `${lensName(f.scout)} scout` : unitName(f.kind, f.unit);
   const engine = [HARNESS[harness], short(model)].filter(Boolean).join(" ");
   return { title, sub: [`${unitName(f.kind, f.unit)}`, engine].filter(Boolean).join(" · "), role };
@@ -94,7 +97,7 @@ export function who(a: WhoInput, parent: string | null = null): { title: string;
     else if (/board\.py|launch\.py|fleet/.test(a.via ?? "")) role = "Board worker";
     else if (parent) role = `Helper of ${parent}`;
     else if (a.via === "Codex app") role = "Codex app";
-    else role = a.headless ? "Background run" : "Terminal session";
+    else role = a.headless ? "Background run" : "Session";
   }
   const folk = a.name && !SLUG.test(a.name) ? a.name : null;
   const model = [HARNESS[a.harness], short(a.model)].filter(Boolean).join(" ");

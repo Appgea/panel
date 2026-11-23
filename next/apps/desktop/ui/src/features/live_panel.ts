@@ -1,13 +1,8 @@
-/**
- * The panel for a dot, an ember or a district. It takes the column beside the map while it is
- * open, so it never covers the map. Copied from the concept page: `agentHTML` line 1153,
- * `reportHTML` line 1162, `roomHTML` line 1172, and `.apanel` in its CSS. A district's panel
- * lists agents only: the board's issues are on the Board.
- */
 
 import { errorText } from "../errors";
-import { RESULTS } from "./live_playbook";
-import { ageOf, ago, button, div, doing, hhmm, holdButton, lensName, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, startedBy, STATE_RANK, STATE_WORD, taskLine, unitName } from "./live_text";
+import { trim } from "./live_history";
+import { kindOf, PHASE_WORD, phaseOf, ROLE, roleName, roleOf, workOf } from "./live_roles";
+import { ageOf, ago, appName, button, cap, div, doing, hhmm, holdButton, lensName, OUTCOME_COLOUR, OUTCOME_WORD, plural, since, span, startedBy, STATE_RANK, STATE_WORD, taskLine, unitName } from "./live_text";
 import type { LiveAgent, LiveCtx, LiveEmber, Step } from "./live_types";
 import "./live_panel.css";
 
@@ -25,7 +20,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     if (sel.kind === "agent") {
       const a = w.agents.find((x) => x.id === sel.id);
       if (!a) {
-        // The agent stopped while its panel was open: show its report instead.
         const report = w.embers.find((e) => e.id.startsWith(`${sel.id}@`));
         s.selection = report ? { kind: "ember", id: report.id } : null;
         return paint();
@@ -41,7 +35,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
   }
 
   function render(key: string, nodes: HTMLElement[]): void {
-    // A hand on Hold to Stop keeps this panel as it is until it lets go.
     if (key === shown && el.querySelector(".is-holding")) return;
     if (key !== shown) talking = false;
     shown = key;
@@ -112,45 +105,43 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     const ol = document.createElement("ol");
     ol.className = "pdone";
     if (!steps.length) ol.append(div("muted", "No steps read yet."));
-    for (const st of steps.slice(0, 30)) {
+    for (const r of trim(steps)) {
       const li = document.createElement("li");
+      if (r.folded) li.className = "is-folded";
       const t = document.createElement("time");
-      t.textContent = hhmm(st.atMs);
-      // Only steps whose ending is news get a mark, as on the map. A failed `grep` is not news.
-      const mark = st.ok !== undefined && st.verb && RESULTS[st.verb] ? span(`pres ${st.ok ? "is-ok" : "is-bad"}`, st.ok ? "✓" : "✗") : null;
-      if (mark) mark.title = RESULTS[st.verb!][st.ok ? 0 : 1];
-      li.append(t, st.file ? link(st.label, () => ctx.events.openFile(st.file!)) : span("", st.label));
-      if (mark) li.append(mark);
+      t.textContent = hhmm(r.atMs);
+      li.append(t, r.file ? link(r.text, () => ctx.events.openFile(r.file!)) : span("", r.text));
+      if (r.mark) li.append(span(`pres is-${r.mark}`, r.mark === "ok" ? "✓" : "✗"));
       ol.append(li);
     }
     return [div("psec", title), ol];
   }
 
+  const label = (a: LiveAgent): string => (a.fleet ? `${roleName(a)} ${a.fleet.unit}` : roleName(a));
+
   function agentPanel(a: LiveAgent): HTMLElement[] {
     const now = Date.now();
     const room = ctx.roomName(ctx.roomOf(a));
-    const me = ctx.whoOf(a);
-    const out: HTMLElement[] = [head(me.title, `${me.sub} · ${room}`, `var(--l-${a.state})`)];
-    out.push(chipRow(STATE_WORD[a.state], `var(--l-${a.state})`, a.startedMs ? `running ${since(a.startedMs, now)}` : ""));
+    const role = roleOf(a);
+    const work = workOf(a, ctx.issueOf(a), room);
+    const out: HTMLElement[] = [head(`${work.number ? `#${work.number} ` : ""}${work.title}`, [roleName(a), kindOf(a).name, room].join(" · "), `var(--l-${a.state})`)];
+    const phase = role === "scout" || role === "checker" ? "" : ` · ${PHASE_WORD[phaseOf(a)].toLowerCase()} phase`;
+    out.push(chipRow(STATE_WORD[a.state], `var(--l-${a.state})`, a.startedMs ? `running ${since(a.startedMs, now)}${phase}` : ""));
+    out.push(div("pnote", ROLE[role].what));
     const iss = ctx.issueOf(a);
-    const task: string | HTMLElement = iss ? link(`#${iss.number} ${iss.title}`, () => ctx.events.openUrl(iss.url)) : (taskLine(a.task) ?? (a.task ? me.role : "Not known"));
     const age = ageOf(a, now);
     const parent = ctx.agentById(a.parent);
-    const by: string | HTMLElement = parent ? link(ctx.nameOf(parent), () => ctx.select({ kind: "agent", id: parent.id })) : startedBy(a.via);
+    const by: string | HTMLElement = parent ? link(label(parent), () => ctx.select({ kind: "agent", id: parent.id })) : startedBy(a.via);
     const kids = s.world!.agents.filter((k) => k.parent === a.id);
     const jobs = s.world!.jobs.filter((j) => j.agent === a.id);
     const fam = div("pfam");
-    // A subagent reads as its job and what it does now, so the parent's panel shows its whole crew.
-    for (const k of kids) fam.append(link(k.helperKind ? `${k.task ?? ctx.nameOf(k)} · ${doing(k)}` : ctx.nameOf(k), () => ctx.select({ kind: "agent", id: k.id })));
+    for (const k of kids) fam.append(link(k.helperKind ? `${k.task ?? label(k)} · ${doing(k)}` : label(k), () => ctx.select({ kind: "agent", id: k.id })));
     if (a.helpers) fam.append(span("", `${a.helpers} ${plural(a.helpers, "helper")}`));
     for (const j of jobs) fam.append(span("", `${j.label}${j.bay ? " in a test bay" : ""}`));
-    // A unit's issues are its mission card's, below.
-    const list: [string, string | HTMLElement][] = [...(a.fleet ? [] : [["Task", task] as [string, string | HTMLElement]]), ["Now", `${doing(a)}${age ? ` · ${a.state === "turn" ? `waiting ${age}` : age}` : ""}`]];
-    // Stuck or waiting, its own last words are the best clue to why.
+    const list: [string, string | HTMLElement][] = [["Now", `${doing(a)}${age ? ` · ${a.state === "turn" ? `waiting ${age}` : age}` : ""}`]];
     if ((a.state === "stuck" || a.state === "turn") && a.lastText && a.lastText !== doing(a)) list.push(["Last said", a.lastText]);
     const res = s.results.get(a.id);
     if (res && res.until > now) list.push(["Result", `${res.ok ? "✓" : "✗"} ${res.text}`]);
-    // A unit's class and id are its subtitle already. Its mission card says the rest.
     if (!a.fleet) list.push(["Started by", by]);
     if (a.commander) list.push(["Commands", `${s.world!.agents.filter((x) => x.fleet).length} fleet units`]);
     if (fam.childElementCount) list.push(["Helpers", fam]);
@@ -162,7 +153,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       input.className = "reply";
       input.type = "text";
       input.autocomplete = "off";
-      input.placeholder = `Talk to ${ctx.nameOf(a)}. Enter sends.`;
+      input.placeholder = `Talk to ${label(a)}. Enter sends.`;
       input.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           talking = false;
@@ -173,7 +164,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
           if (!words) return;
           void ctx.events.sendToAgent(a.panel!, words).then((ok) => {
             if (ok) input.value = "";
-            ctx.toast(ok ? `Sent to ${ctx.nameOf(a)}.` : `${ctx.nameOf(a)}'s terminal did not take the text.`, !ok);
+            ctx.toast(ok ? `Sent to ${label(a)}.` : `${label(a)}'s terminal did not take the text.`, !ok);
           });
         }
       });
@@ -181,7 +172,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     }
     const acts = div("pact");
     if (a.panel) {
-      // Waiting for you, talking is the one thing to do, so it says so.
       acts.append(button(a.state === "turn" ? "opt is-primary" : "opt", a.state === "turn" ? "Answer" : "Talk", () => {
         talking = !talking;
         paint();
@@ -190,8 +180,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     }
     if (!a.panel && iss) acts.append(button("opt", `Open #${iss.number}`, () => ctx.events.openUrl(iss.url)));
     if (a.session && a.harness === "claude") acts.append(button("opt", "History", () => ctx.events.openHistory(a.session!)));
-    // A unit ends through its commander, whose `fleet end` hands its issue on. A killed process
-    // would leave the issue held.
     if (a.fleet) {
       const attach = `tmux -L fleet attach -t ${a.fleet.kind}-${a.fleet.unit}`;
       acts.append(
@@ -202,7 +190,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
           ),
         ),
       );
-    } else if (a.pid) acts.append(holdButton("Hold to Stop", () => void stopPid(a.pid!, ctx.nameOf(a))));
+    } else if (a.pid) acts.append(holdButton("Hold to Stop", () => void stopPid(a.pid!, label(a))));
     out.push(acts);
     if (a.fleet) out.push(div("pnote", "It runs in tmux. Copy attach and paste it in a terminal to watch it live. Ctrl-b d leaves it running."));
     else if (!a.panel)
@@ -219,11 +207,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     return out;
   }
 
-  /**
-   * A unit's mission card: its issues, its time against the budget, what it read, its flags, the
-   * last lines of its screen, and a line to its commander. Owner, 2026-11-18: he steers the fleet
-   * through its commander, so the words go there, never to the unit.
-   */
   function unitParts(a: LiveAgent): HTMLElement[] {
     const f = a.fleet!;
     const now = Date.now();
@@ -237,7 +220,13 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
         miss.append(link(`#${m.number} ${m.title}`, () => ctx.events.openUrl(url)));
       }
       out.push(miss);
-    } else if (f.scout) out.push(div("presult", `${lensName(f.scout)}${f.scout.includes("@") ? ` in ${f.scout.split("@")[1]}` : ""}. It files what it finds and builds nothing.`));
+    } else if (f.scout) {
+      const facts: [string, string][] = [["Lens", lensName(f.scout)]];
+      if (f.ability) facts.push(["Ability", cap(f.ability.replace(/-/g, " "))]);
+      if (f.scout.includes("@")) facts.push(["App", appName(f.scout.split("@")[1])]);
+      if (f.question) facts.push(["Asks", f.question]);
+      out.push(rows(facts));
+    }
     const used = f.startedMs ? (now - f.startedMs) / 60_000 : 0;
     const over = f.flags.includes("OVER") || (f.budget > 0 && used > f.budget);
     const meter = div(`pbudget${over ? " is-over" : ""}`);
@@ -256,7 +245,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       for (const fl of f.flags) flags.append(span("chip is-flag", fl === "OVER" ? "Over budget" : fl === "STUCK" ? "Stuck" : fl));
       out.push(flags);
     }
-    // The screen's last lines, without the TUI's rules and boxes.
     const lines = (view?.screen ?? "").split("\n").map((l) => l.replace(/\s+$/, "")).filter((l) => l && !/^[\s╹╻▀▄█■⬝─│┃━┏┓┗┛╭╮╰╯═║▔▁·.]*$/.test(l));
     if (lines.length) {
       out.push(div("psec", "Screen"));
@@ -269,7 +257,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     input.className = "reply";
     input.type = "text";
     input.autocomplete = "off";
-    // Short enough for the column at its narrowest. The Enter hint is in the tooltip.
     input.placeholder = "Tell the commander about it";
     input.title = "Your words go to the commander, naming this unit. Enter sends.";
     input.addEventListener("keydown", (e) => {
@@ -287,12 +274,6 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     return out;
   }
 
-  /**
-   * His words to the commander: into the commander's own Panel terminal when it has one. A
-   * commander that runs outside Panel gets them on the clipboard: Panel cannot type into it, and
-   * a second commander would fight the first over the same units. With no commander on the map,
-   * the Board's Overview way starts one.
-   */
   async function steer(words: string): Promise<"sent" | "copied" | "failed"> {
     const order = `The owner steers the fleet from Panel's Live: "${words}"`;
     const boss = s.world?.agents.find((x) => x.commander);
@@ -308,9 +289,8 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
     const now = Date.now();
     const o = e.outcome;
     const me = ctx.emberWho(e);
-    const out: HTMLElement[] = [head(me.title, `${me.sub} · ${ctx.roomName(e.room)}`, OUTCOME_COLOUR[o])];
+    const out: HTMLElement[] = [head(taskLine(e.task) ?? me.role, `${me.role} · ${ctx.roomName(e.room)}`, OUTCOME_COLOUR[o])];
     out.push(chipRow(OUTCOME_WORD[o], OUTCOME_COLOUR[o], `ended ${ago(e.endedMs, now)}`));
-    // With no result written, the step it was on is the clue to what went wrong.
     if (e.result) out.push(div("presult", e.result));
     else if (o !== "done" && e.steps[0]) out.push(div("presult", `Its last step: ${e.steps[0].label}`));
     out.push(...doneList(`What it did · ${e.stepCount} ${plural(e.stepCount, "step")}`, e.steps));
@@ -358,7 +338,7 @@ export function mountPanel(ctx: LiveCtx, el: HTMLElement): Panel {
       r.append(i, bold, span("", text));
       return r;
     };
-    out.push(div("psec", "Now"), list(here.map((a) => rowBtn(`var(--l-${a.state})`, ctx.nameOf(a), doing(a), () => ctx.select({ kind: "agent", id: a.id }))), "Nobody here now"));
+    out.push(div("psec", "Now"), list(here.map((a) => rowBtn(`var(--l-${a.state})`, label(a), doing(a), () => ctx.select({ kind: "agent", id: a.id }))), "Nobody here now"));
     out.push(div("psec", "Recently"), list(embers.slice(0, 5).map((e) => rowBtn(OUTCOME_COLOUR[e.outcome], ctx.emberWho(e).title, e.result ?? OUTCOME_WORD[e.outcome], () => ctx.select({ kind: "ember", id: e.id }))), "Nothing yet today"));
     return out;
   }

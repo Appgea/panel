@@ -1,26 +1,11 @@
-/**
- * Dev harness for the Live screen. NOT part of the app build — index.html never loads this.
- * It mounts the REAL module (mountLive) against fixture data that changes every few seconds, so
- * the map, the scripts and the card can be looked at without Tauri. ?real=1 reads
- * live.real.json (a saved `live_world`) and board.real.json, which are never committed.
- * ?calm=1 shows an empty queue. The catalog is the seed scripts, as on a first run.
- *
- * The fixture plays the three scenes the owner asked for: Hacivat ships Panel with a git push,
- * Karagöz hunts a bug in Tavla, and Pişekar orchestrates helpers in Interbellum. Zenne's eight
- * helpers in Pillow show a swarm.
- */
 import "./style.css";
-// Side-effect import: it fills the view registry, so an Inbox message draws as it does in the app.
 import "./views";
 import { mountForYou } from "./features/foryou";
 import type { InboxPost } from "./features/inbox_feed";
 import { renderView } from "./registry";
 import { mountLive, type LiveAgent, type LiveEmber, type LiveJob, type LiveWorld } from "./features/live";
-import type { OverviewData } from "./features/board";
 import type { FleetView } from "./features/fleet";
 import type { BoardFeed } from "./features/live_cards";
-import type { Script } from "./features/live_script";
-import seeds from "./features/live_seeds.json";
 
 const params = new URLSearchParams(location.search);
 const T = Date.now();
@@ -55,7 +40,6 @@ const agent = (a: Partial<LiveAgent> & Pick<LiveAgent, "id" | "name" | "harness"
   ...a,
 });
 
-/** What each working fixture agent does, in a loop: verb, words, file. */
 const PLAYS: Record<string, [string, string, string?][]> = {
   "pid:106": [
     ["edit", "Edited live_world.ts", `${ROOT}/panel/ui/src/features/live_world.ts`],
@@ -73,7 +57,6 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["test", "Run the dice tests again"],
     ["git.push", "Push the dice fix"],
   ],
-  // The commander: its words name the units it talks to (live_talk.ts).
   "pid:101": [
     ["read", "Read the fleet news"],
     ["message", "Ask the helpers for their counts"],
@@ -82,7 +65,6 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["think", "Weigh the land and sea numbers"],
     ["cmd.fleet", "Check the fleet reports"],
   ],
-  // The pre-push reviewer reads what Hacivat wrote: each read is a handoff.
   "pid:131": [
     ["read", "Read live_world.ts", `${ROOT}/panel/ui/src/features/live_world.ts`],
     ["review", "Review the Live map diff"],
@@ -102,7 +84,6 @@ const PLAYS: Record<string, [string, string, string?][]> = {
     ["message", "Collect the helpers' findings"],
     ["render", "Render the sleep timer clip"],
   ],
-  // Zenne's eight helpers: each step they take flies a spark in along Zenne's orbit.
   ...Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`pid:12${i}`, [["search", "Search the timer code"], ["read", "Read sleep_timer.dart", `${ROOT}/pillow_app/lib/sleep_timer.dart`]]])),
 };
 
@@ -123,7 +104,6 @@ const agents: LiveAgent[] = [
   agent({ id: "pid:108", name: "Sol 77aa", harness: "codex", room: "tavla", state: "stuck", headless: true, via: "fleet", model: "gpt-6.1-sol", stateMs: min(41), now: step(41, "Run the store build", "check", "build"), steps: [step(41, "Run the store build", "check", "build")], issue: 742, task: "#742 Tavla: store build fails", fleet: { unit: "77aa01", kind: "terra", scout: null, issues: [{ number: 742, title: "Tavla: store build fails" }], budget: 30, startedMs: min(44), flags: ["OVER", "STUCK"] } }),
   agent({ id: "pid:109", name: "Karagöz", harness: "claude", room: "tavla", state: "work", panel: "s4", task: "Dice repeat the same roll after a restart" }),
   agent({ id: "pid:110", name: "Zenne", harness: "claude", room: "pillow_app", state: "work", panel: "s5", helpers: 0, task: "Sleep timer forgets its value" }),
-  // Background runs named the way Claude names them, which say nothing: Live must say what they are.
   agent({ id: "pid:131", name: "cardly-e7", harness: "claude", room: "panel", state: "work", headless: true, via: null, model: "claude-sonnet-5-5", task: "You review a diff before it is pushed. Report only. You never edit, commit or push.", now: step(0.2, "Read live_world.ts", "check", "read", `${ROOT}/panel/ui/src/features/live_world.ts`) }),
   agent({ id: "pid:132", name: "Tuzsuz Deli Bekir", harness: "claude", room: "panel", state: "work", headless: true, via: "Appgea Panel", model: "claude-sonnet-5-5", task: "You write one animation script for Panel Live, a dark map where coding agents are small glowing electrons." }),
   ...Array.from({ length: 8 }, (_, i) =>
@@ -153,17 +133,16 @@ const embers: LiveEmber[] = [
 ];
 
 const rooms = [
-  { key: "hq", name: "HQ", order: 0, weight: 1 },
-  { key: "tavla", name: "Tavla", order: 2, weight: 3 },
-  { key: "pillow_app", name: "Pillow", order: 5, weight: 2 },
-  { key: "videokit", name: "VideoKit", order: 20, weight: 1 },
-  { key: "interbellum", name: "Interbellum", order: 32, weight: 2 },
-  { key: "panel", name: "Panel", order: 33, weight: 1 },
+  { key: "hq", group: "hq", name: "HQ", order: 0, weight: 1 },
+  { key: "tavla", group: "games", name: "Tavla", order: 2, weight: 3 },
+  { key: "pillow_app", group: "apps", name: "Pillow", order: 5, weight: 2 },
+  { key: "videokit", group: "tools", name: "VideoKit", order: 20, weight: 1 },
+  { key: "interbellum", group: "games", name: "Interbellum", order: 32, weight: 2 },
+  { key: "panel", group: "tools", name: "Panel", order: 33, weight: 1 },
   { key: "home", name: "Home folder", order: 9000, weight: 1 },
   { key: "elsewhere", name: "Elsewhere", order: 9001, weight: 1 },
 ];
 
-const catalog: Script[] = [...Object.entries(seeds as Record<string, Omit<Script, "verb">>).map(([verb, x]) => ({ verb, ...x, madeMs: min(30) })), { verb: "cmd.magick", pending: true }];
 
 let world: LiveWorld = {
   agents,
@@ -171,7 +150,6 @@ let world: LiveWorld = {
   embers,
   rooms,
   mac: { load: 11.2, cores: 14, hot: false, bays: [{ agent: "pid:105", holder: "vk make" }, { agent: null, holder: null }], quota: [{ harness: "Claude", used: 46 }] },
-  catalog,
   scannedMs: T,
 };
 
@@ -194,33 +172,28 @@ const fixtureBoard: BoardFeed = {
 };
 
 let tick = 0;
-/** Every poll some agents start their next step, so scripts keep playing. */
 function move(): void {
   tick++;
   const now = Date.now();
   const list = world.agents.map((a, i) => {
     const plays = PLAYS[a.id];
-    // A step lasts about three polls, staggered so the map never plays all at once.
     if (!plays || a.state !== "work" || (tick + i) % 3 !== 0) return a;
     const n = Math.floor((tick + i) / 3) % plays.length;
     const [verb, label, file] = plays[n];
     const s = { atMs: now, label, station: "build" as St, verb, file };
-    // `files` are the files an agent wrote, as the scan reports them.
     const files = file && verb === "edit" && !a.files.includes(file) ? [file, ...a.files] : a.files;
     const helpers = a.id === "pid:101" ? 2 : a.helpers;
-    // The step before ends with a result, as a tool result says it: the first dice test run fails.
     const ended = a.now ? [{ ...a.now, ok: a.now.label !== "Run the dice tests" }] : [];
     const rest = a.steps.filter((x) => x !== a.now);
     return { ...a, stepCount: a.stepCount + 1, now: s, stateMs: now, steps: [s, ...ended, ...rest].slice(0, 20), files, helpers };
   });
   const bayHolder = list.find((a) => a.now && (a.now.verb === "test" || a.now.verb === "build") && a.state === "work");
-  // Twelve seconds in the fleet starts a unit for #1172: the commander's orders fly to it.
   if (now - T > 12_000 && !list.some((a) => a.id === "pid:150"))
     list.push(agent({ id: "pid:150", name: "Flash c0ffee", harness: "opencode", room: "tavla", state: "work", headless: true, via: "fleet", model: "gemini-3-flash", issue: 1172, task: "#1172 Tavla: dice sound plays twice", fleet: { unit: "c0ffee", kind: "flash", scout: null, issues: [{ number: 1172, title: "Tavla: dice sound plays twice" }], budget: 30, startedMs: now, flags: [] }, now: step(0, "Read the sound player", "plan", "read") }));
   world = {
     ...world,
     agents: list,
-    mac: { ...world.mac, bays: [world.mac.bays[0], bayHolder ? { agent: bayHolder.id, holder: bayHolder.now!.verb === "test" ? "flutter test" : "build-live.mjs" } : { agent: null, holder: null }] },
+    mac: { ...world.mac, bays: [world.mac.bays[0], bayHolder ? { agent: bayHolder.id, holder: bayHolder.now!.verb === "test" ? "flutter test" : "vite build" } : { agent: null, holder: null }] },
     scannedMs: now,
   };
 }
@@ -237,8 +210,6 @@ const readWorld = async () => {
 };
 const readBoard = async () => (params.has("real") ? ((await (await fetch("/board.real.json")).json()) as BoardFeed) : fixtureBoard);
 
-// The fleet and the day. Twelve seconds in, Terra 8d17f4 closes #1104 and a new unit deploys, so
-// the banner, the burst and the feed's new line can be seen.
 const hm = (m: number) => {
   const d = new Date(min(m));
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -265,32 +236,11 @@ const fixtureFleet = (): FleetView => {
     ],
   };
 };
-const card = (number: number, title: string, kind: "done" | "new", app: string, m: number) => ({ number, title, url: `https://github.com/Appgea/ops/issues/${number}`, kind, apps: [app], priority: 2, who: "", at: iso(m), created: iso(m) });
-const fixtureDay = (): OverviewData => ({
-  since: iso(48 * 60),
-  limit: 300,
-  cards: [
-    // Yesterday, before this hour: the pace to beat.
-    ...[1001, 1002, 1003, 1004, 1005, 1006, 1007].map((n) => card(n, `Tavla: yesterday's fix ${n}`, "done" as const, "tavla", 24 * 60 + 30 + n - 1000)),
-    { ...card(1176, "VideoKit: the privacy policy names no ad network", "new", "videokit", 3), scout: "legal@VideoKit" },
-    card(1150, "Interbellum: darker overhead map, B target", "done", "interbellum", 25),
-    card(1124, "Pillow: sleep timer forgets its value", "done", "pillow_app", 70),
-    card(1125, "Pillow: rain loop has no licence", "done", "pillow_app", 70),
-    card(1128, "Tavla: undo after a double", "done", "tavla", 70),
-    ...[1127, 1134, 1135, 1136, 1137].map((n) => card(n, `Interbellum: front polish ${n}`, "done" as const, "interbellum", 95)),
-    card(1173, "VideoKit: privacy policy names no processor", "new", "videokit", 8),
-    card(1174, "Tavla: store text promises online play", "new", "tavla", 40),
-    card(1175, "Pillow: onboarding skips the notification ask", "new", "pillow_app", 90),
-    ...(Date.now() - T > 12_000 ? [card(1104, "Interbellum: front line drift at zoom", "done" as const, "interbellum", 0)] : []),
-  ],
-});
 const readFleet = async () => (params.has("real") ? ((await (await fetch("/fleet.real.json")).json()) as FleetView) : fixtureFleet());
-const readDay = async () => (params.has("real") ? ((await (await fetch("/day.real.json")).json()) as OverviewData) : fixtureDay());
 const openUrl = (url: string) => console.log("[live harness] open", url);
 const openTerminal = (panel: string) => (console.log("[live harness] terminal", panel), true);
 const sendToAgent = async (panel: string, text: string) => (console.log("[live harness] send", panel, text), true);
 
-// ?foryou=1 shows the Inbox instead of the map, with one of each source it folds in.
 if (params.has("foryou")) {
   const ago = (min: number) => Date.now() - min * 60_000;
   const post = (id: string, project: string, projectName: string, author: string, agentKind: string, min: number, payload: InboxPost["payload"], flowFiles: string[] = []): InboxPost => ({
@@ -364,19 +314,12 @@ if (params.has("foryou")) {
     openFile: (path) => console.log("[live harness] file", path),
     openHistory: (session) => console.log("[live harness] history", session),
     stop: async (pid) => console.log("[live harness] stop", pid),
-    deleteAnimation: async (verb) => {
-      world = { ...world, catalog: (world.catalog ?? []).filter((x) => x.verb !== verb) };
-    },
-    improveAnimation: async (verb, note) => {
-      world = { ...world, catalog: (world.catalog ?? []).map((x) => (x.verb === verb ? { ...x, improving: true, improved: note } : x)) };
-    },
     fleet: readFleet,
-    day: readDay,
     tellCommander: async (words) => (console.log("[live harness] commander", words), true),
   });
   document.getElementById("liveScreen")!.hidden = false;
   live.open();
   if (params.has("select")) {
-    setTimeout(() => document.querySelector<HTMLButtonElement>(".live-agent")?.click(), 600);
+    setTimeout(() => document.querySelector<HTMLButtonElement>(".unit")?.click(), 600);
   }
 }

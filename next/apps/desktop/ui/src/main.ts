@@ -4487,11 +4487,7 @@ async function boot(): Promise<void> {
     openFile: (path) => void openFullPath({ path }, false, null).catch((error: unknown) => console.warn("[panel] live", error)),
     openHistory: (session) => showHistory({ session }),
     stop: (pid) => invoke("live_stop", { pid }),
-    deleteAnimation: (verb) => invoke("live_catalog_delete", { verb }),
-    improveAnimation: (verb, note) => invoke("live_catalog_improve", { verb, note }),
-    // The fleet and the board's day feed Live's score. Without their modules Live runs as before.
     fleet: () => (moduleInstalled("fleet") ? moduleGet<FleetView>("/m/fleet/view").catch(() => null) : Promise.resolve(null)),
-    day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
     tellCommander: (words) => tellCommander(words, "Live"),
   });
   forYou = mountForYou(el("forYouScreen"), {

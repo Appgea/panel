@@ -145,6 +145,7 @@ pub(crate) struct PortfolioApp {
     pub in_store: bool,
     /// Sells something: in-app purchases, a subscription or a RevenueCat project.
     pub earns: bool,
+    pub game: bool,
 }
 
 impl PortfolioApp {
@@ -156,6 +157,7 @@ impl PortfolioApp {
             "status" => self.status = value,
             "notes" => self.notes = value,
             "kind" => self.kind = value,
+            "game" => self.game = value == "true",
             "depends_on" => self.depends_on = list_field(&value),
             "serves" => self.serves = list_field(&value),
             "stores" | "bundle_id" => self.in_store |= given,

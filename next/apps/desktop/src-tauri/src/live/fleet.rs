@@ -1,13 +1,3 @@
-//! The fleet: cheap builders and scouts that ops `runbooks/fleet.py` runs, each an interactive CLI
-//! in a tmux session of its own, and the commander who sends them out.
-//!
-//! fleet.py keeps every running unit in `~/.appgeapanel/state/fleet/units.json`, and each unit's
-//! shell runs `<state>/fleet/<id>.sh`, whose prompt starts "You are fleet builder <id>" or "You are
-//! fleet scout <id>". So an agent whose own command line or ancestors say so is that unit. Without
-//! this every unit showed on Live as a nameless OpenCode dot, idle, in Elsewhere.
-//!
-//! The commander is the session that last commanded the fleet: fleet.py writes `commander.json`
-//! with its agent's pid on every command a unit does not run.
 
 use super::Proc;
 use serde::{Deserialize, Serialize};
@@ -15,25 +5,19 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// A commander quiet this long has handed the fleet back: Live stops crowning it.
 const COMMANDER_FRESH_S: f64 = 45.0 * 60.0;
 
-/// One unit as fleet.py writes it. Only the fields Live reads.
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Unit {
     pub id: String,
     pub kind: String,
-    /// The Claude session id it was started with.
     pub sid: Option<String>,
-    /// The OpenCode session that holds its prompt, once fleet.py found it.
     pub oc: Option<String>,
-    /// The Codex or Claude transcript it writes, once fleet.py found it.
     pub log: Option<String>,
-    /// A scout's routine, like `legal@TavlaSkor`. Empty for a builder.
     pub scout: String,
-    /// The issues `fleet build` gave it, like `1900,1901`.
     pub build: String,
+    pub shape: String,
     pub held: Vec<u32>,
     pub titles: HashMap<String, String>,
     pub budget: Option<u32>,
@@ -41,21 +25,18 @@ pub struct Unit {
     pub flags: Vec<String>,
 }
 
-/// What Live shows of a unit, on the agent it runs as.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tag {
     pub unit: String,
-    /// `terra`, `flash`, `sonnet`: its class on the map.
     pub kind: String,
-    /// A scout's routine, like `legal@TavlaSkor`. None for a builder.
     pub scout: Option<String>,
-    /// What it holds now, else what it was sent for.
+    pub role: &'static str,
+    pub ability: Option<String>,
+    pub question: Option<String>,
     pub issues: Vec<Mission>,
-    /// Minutes it may take before it counts as slow.
     pub budget: u32,
     pub started_ms: u64,
-    /// `OVER`, `STUCK`, as `fleet status` prints them.
     pub flags: Vec<String>,
 }
 
@@ -72,7 +53,6 @@ pub fn units(home: &Path) -> HashMap<String, Unit> {
         .unwrap_or_default()
 }
 
-/// The unit an agent's process runs, from its prompt or the unit script an ancestor sources.
 pub fn unit_of(pid: u32, procs: &HashMap<u32, Proc>) -> Option<String> {
     let mut cur = pid;
     for _ in 0..12 {
@@ -93,7 +73,7 @@ fn named_in(args: &str) -> Option<String> {
         let id: String = s.chars().take_while(|c| c.is_ascii_hexdigit()).collect();
         (id.len() == 6).then_some(id)
     };
-    for lead in ["You are fleet builder ", "You are fleet scout "] {
+    for lead in ["You are fleet builder ", "You are fleet scout ", "You are fleet checker "] {
         if let Some(rest) = args.split_once(lead).map(|(_, r)| r) {
             return id(rest);
         }
@@ -104,14 +84,24 @@ fn named_in(args: &str) -> Option<String> {
 }
 
 impl Unit {
-    pub fn tag(&self) -> Tag {
+    pub fn tag(&self, home: &Path) -> Tag {
         let title = |n: u32| self.titles.get(&n.to_string()).cloned().unwrap_or_default();
-        let sent: Vec<u32> = self.build.split(',').filter_map(|n| n.trim().parse().ok()).collect();
+        let sent: Vec<u32> = [&self.build, &self.shape].iter().flat_map(|s| s.split(',')).filter_map(|n| n.trim().parse().ok()).collect();
         let numbers = if self.held.is_empty() { sent } else { self.held.clone() };
+        let scouts = home.join(".appgeapanel/ops/scouts");
+        let ability = Some(&self.scout).filter(|s| !s.is_empty()).and_then(|run| ability_of(home, run));
+        let lens = self.scout.split('@').next().unwrap_or_default();
+        let question = match &ability {
+            Some(a) => title_of(&scouts.join("abilities").join(format!("{a}.md"))),
+            None => Some(lens).filter(|l| !l.is_empty()).and_then(|l| title_of(&scouts.join(format!("{l}.md")))),
+        };
         Tag {
             unit: self.id.clone(),
             kind: self.kind.clone(),
             scout: Some(self.scout.clone()).filter(|s| !s.is_empty()),
+            role: if !self.scout.is_empty() { "scout" } else if !self.shape.is_empty() { "checker" } else { "builder" },
+            ability,
+            question,
             issues: numbers.into_iter().map(|number| Mission { number, title: title(number) }).collect(),
             budget: self.budget.unwrap_or(30),
             started_ms: (self.started * 1000.0) as u64,
@@ -119,12 +109,10 @@ impl Unit {
         }
     }
 
-    /// The app a scout was sent to, as its routine names it: `legal@TavlaSkor` is `TavlaSkor`.
     pub fn target(&self) -> Option<&str> {
         self.scout.split_once('@').map(|(_, app)| app).filter(|a| !a.is_empty())
     }
 
-    /// The session id Live reads its steps by. A Codex rollout is named `rollout-<time>-<id>.jsonl`.
     pub fn session(&self) -> Option<String> {
         if let Some(oc) = &self.oc {
             return Some(oc.clone());
@@ -136,7 +124,17 @@ impl Unit {
     }
 }
 
-/// The pid of the agent that commands the fleet, while it commanded lately.
+fn ability_of(home: &Path, run: &str) -> Option<String> {
+    let raw = fs::read(home.join(".appgeapanel/state/scout/runs.json")).ok()?;
+    let log: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    log[run]["ability"].as_str().filter(|a| *a != "own" && a.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).map(str::to_string)
+}
+
+fn title_of(page: &Path) -> Option<String> {
+    let raw = fs::read_to_string(page).ok()?;
+    raw.lines().skip(1).take_while(|l| l.trim() != "---").find_map(|l| l.strip_prefix("title:")).map(|t| t.trim().trim_matches('"').to_string()).filter(|t| !t.is_empty())
+}
+
 pub fn commander(home: &Path, now_s: f64) -> Option<u32> {
     let raw = fs::read(home.join(".appgeapanel/state/fleet/commander.json")).ok()?;
     let v: serde_json::Value = serde_json::from_slice(&raw).ok()?;

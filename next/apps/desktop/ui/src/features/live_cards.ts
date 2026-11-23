@@ -1,20 +1,3 @@
-/**
- * The cards of the Inbox: the business the board and the agents raise for the owner.
- *
- * Five kinds, each answering one need. Decide is a call only he can make (his board agenda).
- * Your Turn is a session he runs that waits for him. Done is what got finished since he last
- * looked. Decided is calls agents made in his place. Better is a step that keeps losing time.
- * Permission prompts never come here. The Inbox adds three more kinds from the screens it
- * replaced: see inbox_cards.ts.
- *
- * A card is one message in the Inbox's feed (inbox_feed.ts), beside what the agents sent. Until
- * 2026-11-15 the cards were a queue, one at a time, ordered by value per minute. The owner found
- * it unusable: "It should be just something like slack." So the order is time now, and `KIND`
- * says which kinds wait for an answer.
- *
- * Pure: no DOM, no clock of its own. foryou.ts feeds it the board, the agents and what he has seen.
- * A new kind is one line in `KIND` and a builder that makes its cards.
- */
 
 export type CardKind = "decide" | "turn" | "done" | "decided" | "better" | "review" | "support" | "ended";
 
@@ -23,14 +6,10 @@ export type Act =
   | { do: "seen" }
   | { do: "terminal"; panel: string }
   | { do: "url"; url: string }
-  /** Look at what an agent made, in the review deck over the Inbox. */
   | { do: "review"; project: string; paths: string[] }
-  /** Pick a finished conversation back up. */
   | { do: "resume"; session: string }
-  /** The whole support log, with its setup when a form cannot be read. */
   | { do: "support" };
 
-// The Manager was a third place to talk. Owner, 2026-11-05: "its no more needed".
 export type Talk = { to: "board"; number: number } | { to: "agent"; panel: string; name: string };
 
 export type Card = {
@@ -41,19 +20,14 @@ export type Card = {
   lines: string[];
   options: { label: string; act: Act }[];
   talk: Talk | null;
-  /** When the card's reason began: the ask, the first unseen close, the end of a turn. */
   arrivedMs: number;
-  /** Keys a Seen tap marks, so the same items never come back. */
   seenKeys: string[];
   number?: number;
   url?: string;
   pictures?: string[];
   agent?: string;
-  /** Done and Decided list what they cover, newest first. The card shows four. */
   items?: string[];
-  /** A picture the webview can show as it is, with no trip through the scout module. */
   pictureSrc?: string;
-  /** What Seen also clears at its source: support message ids, or review file paths. */
   refs?: string[];
 };
 
@@ -75,6 +49,8 @@ export type BoardIssue = {
   closed_at?: string | null;
   dropped?: boolean;
   holder?: string;
+  work?: string;
+  unchecked?: boolean;
 };
 
 export type BoardFeed = {
@@ -97,7 +73,6 @@ export type CardAgent = {
   lastText: string | null;
 };
 
-/** `needsYou`: the card waits for an answer or a look. The rest are read, and then gone. */
 export const KIND: Record<CardKind, { label: string; needsYou: boolean }> = {
   decide: { label: "Decide", needsYou: true },
   turn: { label: "Your Turn", needsYou: true },
@@ -109,7 +84,6 @@ export const KIND: Record<CardKind, { label: string; needsYou: boolean }> = {
   ended: { label: "Ended", needsYou: false },
 };
 
-/** With nothing seen yet, Done looks back one day. */
 const DONE_LOOKBACK_MS = 24 * 3600_000;
 const BETTER_MAX = 3;
 
@@ -120,7 +94,6 @@ const ms = (iso: string | null | undefined, fallback: number): number => {
 
 const clip = (text: string, n: number): string => (text.length > n ? `${text.slice(0, n - 1).trimEnd()}…` : text);
 
-/** Every card the board and the agents give right now. `seen` maps a seen key to when he saw it. */
 export function buildCards(
   board: BoardFeed | null,
   agents: CardAgent[],
@@ -139,7 +112,6 @@ export function buildCards(
       kind: "decide",
       room,
       title: i.ask?.trim() || i.title,
-      // The card's who line already names the issue number.
       lines: [i.why ? clip(i.why, 600) : i.ask ? i.title : ""].filter(Boolean),
       options,
       talk: { to: "board", number: i.number },
@@ -210,8 +182,6 @@ export function buildCards(
       items: list.map((i) => `#${i.number} ${clip(i.decided!.trim(), 400)}`),
       options: [{ label: "Open First", act: { do: "url", url: list[0].url } }],
       talk: null,
-      // The board does not say when the call was made, and the issue's age overstates it: an
-      // old issue's note would jump ahead of a decision agents wait on. So it never ages.
       arrivedMs: now,
       seenKeys: list.map((i) => `decided:${i.number}`),
     });

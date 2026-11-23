@@ -109,17 +109,29 @@ The right-hand panel that used to sit beside these is gone. Asks float in the as
   output and caches are skipped. Files one project makes within a few minutes form one batch. Flip
   through a batch and send your verdict to that project's agent, or mark it done.
 - **Terminal** is the agent. A real PTY. No tmux, no ttyd, no iframe. One per project, all alive.
-- **Live** is a dark map of this Mac you drag and zoom. Agents are small electrons that act out
-  each step from a catalog of animation scripts, one per verb (`ui/src/features/live_script.ts`).
-  A verb with no script gets one written by a headless model, untested. The owner deletes bad
-  ones in the catalog view and the next sighting writes a new one. Silent projects are not drawn.
-  Why: owner, 2026-11-04, "Untested is fine, current models don't need testing on everything.
-  And if it is bad, I will delete ofc. So we will need a catalog of animations."
-  Each project is a compact plot with one fixed row per agent, and every agent always shows a
-  bubble with its name and what it does now. Agents never walk across the map: a walk in a
-  script is a spark. Helpers ride on their parent as electrons (`ui/src/features/live_world.ts`).
-  Why: owner, 2026-11-05, "not space efficient. Hard for me to track. I like the bubbles that
-  we show what they are doing."
+- **Live** answers one question: who works on what. It is a plain page, no map
+  (`ui/src/features/live.ts`). The Fleet band on top is the fleet's loop as six counts: Scouts
+  find, Checkers confirm, Queue, Builders build, Closed today, Your asks. Under it, projects sit
+  in groups from `portfolio.yaml`: Games, Apps, Channels, Tools, HQ. A project card lists who
+  works there, its last finished work and its next ready issue. Silent projects are one line.
+  Why: owner, 2026-11-23, "My problem is rather on visualization and what is working on what."
+  Every name on the page is a real fleet term (`ui/src/features/live_roles.ts`): the roles
+  Commander, Scout, Checker, Builder from `fleet.py`, the lens and ability of a scout run from
+  `ops/scouts`, the work kind from the issue's `kind:` label, the model class as the unit kind.
+  "What is what" explains each one. No character names on Live.
+  Why: owner, 2026-11-24, "The agent types, abilities and lenses must come from real fleet
+  terms." And 2026-11-23, "Pişekar Kavuklu etc don't mean a lot to me."
+  Helpers hang under their parent as lines. The bar under a role icon is the phase: plan, build,
+  check, ship. A click opens the side panel with the trimmed history
+  (`ui/src/features/live_history.ts`): results, messages and failures stay, repeated edits merge,
+  reads and searches fold into one counted line.
+  Why: owner, 2026-11-23, "We can also trim the history of agents to something useful."
+  This Mac is a thin strip in the top bar: the two build and test slots with their holder, heat,
+  and the Claude week. GitHub and Web cards are gone. Why: owner, 2026-11-23, "I don't
+  particularly think web or github are useful."
+  Motion is only for real events: a test, build or push result, a message, an agent ending.
+  The Bevy map and its animation catalog were removed on 2026-11-24. Why: a headless model wrote
+  one script per verb and spent quota on motion that said nothing about the work.
 
 ## Reuse, not rewrite
 
