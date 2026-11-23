@@ -1,6 +1,3 @@
-//! Shared drawing parts every module uses: colours, the page-to-world mapping, lines, dashes,
-//! rounded boxes, curves and the frame-rate request. Modules read this file. Only a change to
-//! the whole view edits it.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{Indices, PrimitiveTopology};
@@ -8,7 +5,6 @@ use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 use std::time::Duration;
 
-/// The concept page's tokens, as hex.
 pub const NIGHT: u32 = 0x0A0D13;
 pub const DECK: u32 = 0x0E121A;
 pub const WALL: u32 = 0x11161F;
@@ -16,18 +12,19 @@ pub const RAISE: u32 = 0x171D29;
 pub const LINE: u32 = 0x232B3A;
 pub const LINE_2: u32 = 0x333D50;
 pub const INK: u32 = 0xE6EAF1;
-pub const INK_3: u32 = 0x717C90;
 pub const WORK: u32 = 0x6FE7FF;
 pub const THINK: u32 = 0x93B4FF;
 pub const WAIT: u32 = 0xFFB23F;
 pub const IDLE: u32 = 0x6B7689;
 pub const FAIL: u32 = 0xFF5A6A;
+pub const GOLD: u32 = 0xFFE27A;
+pub const HULL: u32 = 0xDDE4EF;
+pub const VOID: u32 = 0x05070B;
 
 pub fn srgb(hex: u32) -> Color {
     Color::srgb_u8((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
 }
 
-/// A token at a canvas alpha. See `seen`.
 pub fn srgba(hex: u32, alpha: f32) -> Color {
     srgb(hex).with_alpha(seen(hex, alpha))
 }
@@ -40,16 +37,11 @@ fn to_linear(c: f32) -> f32 {
     }
 }
 
-/// The alpha that makes Bevy's blend look like the concept's canvas. Bevy blends in linear
-/// light and the canvas blends sRGB values, so the same alpha looks far brighter here: a 12%
-/// amber thread showed at nearly 40%. This solves for the alpha whose linear blend over the
-/// night stage lands where the canvas blend lands, on the colour's strongest channel.
 pub fn seen(hex: u32, alpha: f32) -> f32 {
     let ch = |s: u32| ((hex >> s) & 0xFF) as f32 / 255.0;
     seen_rgb([ch(16), ch(8), ch(0)], alpha)
 }
 
-/// `color` at a canvas alpha, for paints that animate their alpha each frame.
 pub fn fade(color: Color, alpha: f32) -> Color {
     let c = color.to_srgba();
     color.with_alpha(seen_rgb([c.red, c.green, c.blue], alpha))
@@ -74,7 +66,6 @@ pub fn flat(mats: &mut Assets<ColorMaterial>, color: Color) -> Handle<ColorMater
     mats.add(ColorMaterial { color, alpha_mode: AlphaMode2d::Blend, ..default() })
 }
 
-/// The stage size of the last scene.
 #[derive(Resource, Default, Clone, Copy)]
 pub struct Frame {
     pub w: f32,
@@ -82,13 +73,11 @@ pub struct Frame {
 }
 
 impl Frame {
-    /// The page's world has y growing down. Bevy's has y up. The camera does the rest.
     pub fn at(&self, x: f32, y: f32, z: f32) -> Vec3 {
         Vec3::new(x, -y, z)
     }
 }
 
-/// A unit square laid along a line from `a` to `b`, in page pixels.
 pub fn line(frame: Frame, a: Vec2, b: Vec2, z: f32, width: f32) -> Transform {
     let (a, b) = (frame.at(a.x, a.y, z), frame.at(b.x, b.y, z));
     let d = b - a;
@@ -97,7 +86,6 @@ pub fn line(frame: Frame, a: Vec2, b: Vec2, z: f32, width: f32) -> Transform {
         .with_scale(Vec3::new(d.truncate().length(), width, 1.0))
 }
 
-/// The pieces of a dashed line, like canvas `setLineDash([dash, gap])`.
 pub fn dashes(frame: Frame, a: Vec2, b: Vec2, z: f32, width: f32, dash: f32, gap: f32) -> Vec<Transform> {
     let len = a.distance(b);
     if len < 0.5 {
@@ -115,7 +103,6 @@ pub fn dashes(frame: Frame, a: Vec2, b: Vec2, z: f32, width: f32, dash: f32, gap
 }
 
 
-/// Ease in and out, as the concept's flights use.
 pub fn ease(u: f32) -> f32 {
     if u < 0.5 {
         2.0 * u * u
@@ -141,7 +128,6 @@ fn corner_points(w: f32, h: f32, r: f32) -> Vec<Vec2> {
     pts
 }
 
-/// A filled box with round corners, `w` by `h` pixels, centred on the origin.
 pub fn rounded_rect(w: f32, h: f32, r: f32) -> Mesh {
     let pts = corner_points(w, h, r);
     let mut pos: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0]];
@@ -154,7 +140,6 @@ pub fn rounded_rect(w: f32, h: f32, r: f32) -> Mesh {
     mesh(pos, idx)
 }
 
-/// Only the edge of a box with round corners: a band `width` wide, inside the box's outline.
 pub fn rounded_edge(w: f32, h: f32, r: f32, width: f32) -> Mesh {
     let outer = corner_points(w, h, r);
     let inner = corner_points(w - width * 2.0, h - width * 2.0, (r - width).max(0.0));
@@ -169,7 +154,7 @@ pub fn rounded_edge(w: f32, h: f32, r: f32, width: f32) -> Mesh {
     mesh(pos, idx)
 }
 
-fn mesh(pos: Vec<[f32; 3]>, idx: Vec<u32>) -> Mesh {
+pub fn mesh(pos: Vec<[f32; 3]>, idx: Vec<u32>) -> Mesh {
     let count = pos.len();
     Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default())
         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, pos)
@@ -178,10 +163,6 @@ fn mesh(pos: Vec<[f32; 3]>, idx: Vec<u32>) -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
-/// The concept's glow sprite: a disc of radius 1 whose alpha falls 0.85, 0.42, 0.1, 0 at
-/// radius 0, 0.18, 0.5 and 1. Its material gives the colour and the overall alpha.
-/// Over a near-black stage a canvas alpha `a` shows like a linear alpha of about a^2.2 (see
-/// `seen`), and that power splits over the stop and the material, so the stops carry it here.
 pub fn glow_disc() -> Mesh {
     const STOPS: [(f32, f32); 4] = [(0.0, 0.85), (0.18, 0.42), (0.5, 0.1), (1.0, 0.0)];
     let stops = STOPS.map(|(r, a)| (r, a.powf(2.2)));
@@ -209,7 +190,6 @@ pub fn glow_disc() -> Mesh {
     mesh(pos, idx).with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
 }
 
-/// The outline of an ellipse with radii `rx` and `ry`, `width` pixels thick, inside the radii.
 pub fn ellipse_edge(rx: f32, ry: f32, width: f32) -> Mesh {
     const SIDES: u32 = 48;
     let mut pos: Vec<[f32; 3]> = Vec::new();
@@ -226,25 +206,115 @@ pub fn ellipse_edge(rx: f32, ry: f32, width: f32) -> Mesh {
     mesh(pos, idx)
 }
 
-/// A circle outline of radius 1 whose band is `width` of the radius. Scale it to the radius you
-/// want, and pick `width` as pixels divided by that radius.
+pub fn arc(rx: f32, ry: f32, width: f32, from: f32, to: f32) -> Mesh {
+    let sides = (((to - from).abs() / std::f32::consts::TAU) * 48.0).ceil().max(2.0) as u32;
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    for i in 0..=sides {
+        let t = from + (to - from) * i as f32 / sides as f32;
+        pos.push([t.cos() * rx, t.sin() * ry, 0.0]);
+        pos.push([t.cos() * (rx - width), t.sin() * (ry - width), 0.0]);
+    }
+    let mut idx = Vec::new();
+    for i in 0..sides {
+        idx.extend([2 * i, 2 * i + 2, 2 * i + 1, 2 * i + 2, 2 * i + 3, 2 * i + 1]);
+    }
+    mesh(pos, idx)
+}
+
+pub fn parts(polys: &[(Vec<(f32, f32)>, f32)]) -> Mesh {
+    let mut pos: Vec<[f32; 3]> = Vec::new();
+    let mut col: Vec<[f32; 4]> = Vec::new();
+    let mut idx: Vec<u32> = Vec::new();
+    for (pts, g) in polys {
+        let base = pos.len() as u32;
+        for (x, y) in pts {
+            pos.push([*x, *y, 0.0]);
+            col.push([*g, *g, *g, 1.0]);
+        }
+        for i in 1..pts.len() as u32 - 1 {
+            idx.extend([base, base + i, base + i + 1]);
+        }
+    }
+    mesh(pos, idx).with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
+pub fn lit_pair(pts: &[(f32, f32)], g: f32) -> [(Vec<(f32, f32)>, f32); 2] {
+    [(pts.to_vec(), g), (pts.iter().map(|(x, y)| (*x, -*y)).collect(), g * 0.55)]
+}
+
+pub fn shaded_disc() -> Mesh {
+    const RINGS: [f32; 4] = [0.45, 0.75, 0.93, 1.0];
+    const SIDES: u32 = 48;
+    let light = Vec2::new(-0.6, 0.7).normalize();
+    let shade = |p: Vec2| {
+        let lit = 0.5 + 0.5 * p.dot(light);
+        let g = (0.05 + 0.95 * lit * lit) * (1.0 - 0.3 * p.length().powi(3));
+        [g, g, g, 1.0]
+    };
+    let mut pos: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0]];
+    let mut col: Vec<[f32; 4]> = vec![shade(Vec2::ZERO)];
+    for r in RINGS {
+        for i in 0..SIDES {
+            let t = i as f32 / SIDES as f32 * std::f32::consts::TAU;
+            let p = Vec2::new(t.cos(), t.sin()) * r;
+            pos.push([p.x, p.y, 0.0]);
+            col.push(shade(p));
+        }
+    }
+    let mut idx = Vec::new();
+    for i in 0..SIDES {
+        idx.extend([0, 1 + i, 1 + (i + 1) % SIDES]);
+    }
+    for ring in 0..RINGS.len() as u32 - 1 {
+        let (a, b) = (1 + ring * SIDES, 1 + (ring + 1) * SIDES);
+        for i in 0..SIDES {
+            let j = (i + 1) % SIDES;
+            idx.extend([a + i, b + i, a + j, a + j, b + i, b + j]);
+        }
+    }
+    mesh(pos, idx).with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
+pub fn slab(a: f32, b: f32) -> Mesh {
+    const STEPS: u32 = 10;
+    let ys: Vec<f32> = (0..=STEPS).map(|i| a + (b - a) * i as f32 / STEPS as f32).collect();
+    let x = |y: f32| (1.0 - y * y).max(0.0).sqrt();
+    let mut pts: Vec<(f32, f32)> = ys.iter().map(|y| (x(*y), *y)).collect();
+    pts.extend(ys.iter().rev().map(|y| (-x(*y), *y)));
+    parts(&[(pts, 1.0)])
+}
+
+pub fn soft_disc() -> Mesh {
+    const SIDES: u32 = 40;
+    let mut pos: Vec<[f32; 3]> = vec![[0.0, 0.0, 0.0]];
+    let mut col: Vec<[f32; 4]> = vec![[1.0, 1.0, 1.0, 1.0]];
+    for (r, a) in [(0.5f32, 0.3f32), (1.0, 0.0)] {
+        for i in 0..SIDES {
+            let t = i as f32 / SIDES as f32 * std::f32::consts::TAU;
+            pos.push([t.cos() * r, t.sin() * r, 0.0]);
+            col.push([1.0, 1.0, 1.0, a]);
+        }
+    }
+    let mut idx = Vec::new();
+    for i in 0..SIDES {
+        let j = (i + 1) % SIDES;
+        idx.extend([0, 1 + i, 1 + j, 1 + i, 1 + SIDES + i, 1 + j, 1 + j, 1 + SIDES + i, 1 + SIDES + j]);
+    }
+    mesh(pos, idx).with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, col)
+}
+
 pub fn circle_edge(width: f32) -> Mesh {
     ellipse_edge(1.0, 1.0, width)
 }
 
-/// What a shape cache entry is. Sizes are kept to a tenth of a pixel.
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub enum Shape {
     Square,
     Circle,
     Glow,
-    /// A filled rounded box: width, height, corner radius.
     Rect(i32, i32, i32),
-    /// A rounded box's edge: width, height, corner radius, line width.
     Edge(i32, i32, i32, i32),
-    /// An ellipse outline: x radius, y radius, line width.
     Ellipse(i32, i32, i32),
-    /// A circle outline of radius 1 with a band of this many thousandths.
     Ring(i32),
 }
 
@@ -252,13 +322,11 @@ pub fn tenth(v: f32) -> i32 {
     (v * 10.0).round() as i32
 }
 
-/// Meshes and flat colours shared by every module, made once and kept. Colours are cached by
-/// hex and alpha in hundredths, so a module never leaks a material per frame. A colour that
-/// animates on its own needs its own material, which its module owns and removes.
 #[derive(Resource, Default)]
 pub struct Kit {
     shapes: std::collections::HashMap<Shape, Handle<Mesh>>,
     paints: std::collections::HashMap<(u32, u8), Handle<ColorMaterial>>,
+    named: std::collections::HashMap<&'static str, Handle<Mesh>>,
 }
 
 impl Kit {
@@ -281,13 +349,16 @@ impl Kit {
         h
     }
 
+    pub fn named(&mut self, meshes: &mut Assets<Mesh>, name: &'static str, make: impl FnOnce() -> Mesh) -> Handle<Mesh> {
+        self.named.entry(name).or_insert_with(|| meshes.add(make())).clone()
+    }
+
     pub fn paint(&mut self, mats: &mut Assets<ColorMaterial>, hex: u32, alpha: f32) -> Handle<ColorMaterial> {
         let a = (alpha.clamp(0.0, 1.0) * 100.0).round() as u8;
         self.paints.entry((hex, a)).or_insert_with(|| flat(mats, srgba(hex, a as f32 / 100.0))).clone()
     }
 }
 
-/// A rounded box's edge as a shape, sized in pixels.
 pub fn edge_shape(w: f32, h: f32, r: f32, width: f32) -> Shape {
     Shape::Edge(tenth(w), tenth(h), tenth(r), tenth(width))
 }
@@ -296,7 +367,6 @@ pub fn rect_shape(w: f32, h: f32, r: f32) -> Shape {
     Shape::Rect(tenth(w), tenth(h), tenth(r))
 }
 
-/// A small fast random number source for sparks. Not for anything that matters.
 #[derive(Resource)]
 pub struct Dice(pub u64);
 
@@ -312,7 +382,6 @@ impl Dice {
     }
 }
 
-/// A stable phase from an id, so each dot blinks a little out of step with the others.
 pub fn phase(id: &str) -> f32 {
     let mut h: u32 = 2166136261;
     for b in id.bytes() {
@@ -321,17 +390,13 @@ pub fn phase(id: &str) -> f32 {
     (h % 1000) as f32 / 1000.0 * std::f32::consts::TAU
 }
 
-/// Each module asks for the frame rate it needs this frame. The fastest ask wins.
 #[derive(Resource)]
 pub struct Pace {
     pub want: Duration,
 }
 
-/// A still world draws four frames a second, to pick up a new scene.
 pub const STILL: Duration = Duration::from_millis(250);
-/// A blink is slow, so ten frames a second draw it smoothly enough.
 pub const BLINKING: Duration = Duration::from_millis(100);
-/// Gliding dots, effects and circling helpers move: about 30 frames a second.
 pub const MOVING: Duration = Duration::from_millis(33);
 
 impl Pace {

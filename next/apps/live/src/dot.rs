@@ -1,38 +1,22 @@
-//! The agents, as small electrons.
-//!
-//! A dot lives as long as its agent, keyed by id, so it can glide: each frame it moves toward
-//! its target by k = 1 − e^(−dt × 3.2), leaving a short trail of light. Its glow follows its
-//! state: Working 0.8, Planning 0.55, Idle 0.2 and smaller, Wants to talk blinks, Stuck blinks
-//! slower. A white core sits in each. Helpers circle it on tilted orbits, like electrons around
-//! a nucleus, each in its own state's colour. A crate it carries floats over it. With reduced
-//! motion nothing blinks, glides, trails or circles.
-//!
-//! A working dot shows what it does, close around it: sparks fly off it while it makes
-//! something, a light scans around it while it reads, a ring opens while it checks, and three
-//! dots bob over it while it thinks or writes to someone. What its helpers report flies in along
-//! the orbit to its core, and what it sends them flies out. Owner, 2026-11-19: "So I see dots
-//! communicating, collaborating, doing things in the project."
-
-use crate::draw::{ease, fade, phase, srgba, Frame, Kit, Pace, Shape, BLINKING, FAIL, IDLE, INK, MOVING, THINK, WAIT, WORK};
+use crate::draw::{ease, fade, lit_pair, parts, phase, srgba, Frame, Kit, Pace, Shape, BLINKING, FAIL, HULL, IDLE, INK, MOVING, THINK, WAIT, WORK};
 use crate::{Current, Dot, State, Step};
 use bevy::prelude::*;
 use bevy::sprite_render::AlphaMode2d;
 use std::collections::HashMap;
+use std::f32::consts::{PI, TAU};
 
-/// One agent's dot. Its children draw it.
 #[derive(Component)]
 struct Agent {
     target: Vec2,
     look: Look,
     phase: f32,
-    /// This dot's own glow colour, so its blink is its own.
     glow: Handle<ColorMaterial>,
-    /// The scene's `pings` and `calls` last seen. A rise sends sparks along the orbit.
     pings: u32,
     calls: u32,
+    hull: Entity,
+    heading: f32,
 }
 
-/// What a dot looks like apart from where it stands. A change rebuilds its children.
 #[derive(Clone, PartialEq)]
 struct Look {
     r: f32,
@@ -43,9 +27,117 @@ struct Look {
     carry: Option<u32>,
     act: Act,
     crew: Vec<State>,
+    ship: Ship,
+    tint: u32,
 }
 
-/// What a working dot is seen doing (live_scene.ts `act`).
+#[derive(Clone, Copy, PartialEq)]
+enum Ship {
+    Flag,
+    Cruiser,
+    Builder,
+    Scout,
+    Drone,
+}
+
+fn ship_of(word: Option<&str>) -> Ship {
+    match word {
+        Some("flag") => Ship::Flag,
+        Some("builder") => Ship::Builder,
+        Some("scout") => Ship::Scout,
+        Some("drone") => Ship::Drone,
+        _ => Ship::Cruiser,
+    }
+}
+
+type Poly = (Vec<(f32, f32)>, f32);
+
+impl Ship {
+    fn names(self) -> (&'static str, &'static str) {
+        match self {
+            Ship::Flag => ("flag-hull", "flag-trim"),
+            Ship::Cruiser => ("cruiser-hull", "cruiser-trim"),
+            Ship::Builder => ("builder-hull", "builder-trim"),
+            Ship::Scout => ("scout-hull", "scout-trim"),
+            Ship::Drone => ("drone-hull", "drone-trim"),
+        }
+    }
+
+    fn tail(self) -> f32 {
+        match self {
+            Ship::Flag | Ship::Builder => -10.5,
+            Ship::Cruiser => -8.5,
+            Ship::Scout => -3.6,
+            Ship::Drone => -4.6,
+        }
+    }
+
+    fn reach(self) -> f32 {
+        match self {
+            Ship::Flag => 17.0,
+            Ship::Cruiser | Ship::Builder => 14.0,
+            Ship::Scout => 12.0,
+            Ship::Drone => 9.0,
+        }
+    }
+
+    fn hull(self) -> Mesh {
+        let glass = 0.1;
+        let mut p: Vec<Poly> = Vec::new();
+        match self {
+            Ship::Flag => {
+                p.extend(lit_pair(&[(4.5, 3.6), (2.5, 7.6), (-9.0, 8.2), (-10.5, 6.0), (-7.0, 4.2)], 0.74));
+                p.extend(lit_pair(&[(14.5, 0.0), (8.0, 3.3), (-7.0, 4.3), (-10.5, 2.6), (-10.5, 0.0)], 1.0));
+                p.push((vec![(4.5, 0.0), (1.5, 2.0), (-4.0, 2.0), (-5.5, 0.0), (-4.0, -2.0), (1.5, -2.0)], glass));
+            }
+            Ship::Cruiser => {
+                p.extend(lit_pair(&[(1.5, 2.7), (-7.0, 8.2), (-9.8, 8.2), (-6.0, 3.1)], 0.76));
+                p.extend(lit_pair(&[(11.5, 0.0), (5.0, 2.8), (-6.0, 3.2), (-8.5, 1.7), (-8.5, 0.0)], 1.0));
+                p.push((vec![(7.0, 0.0), (4.2, 1.35), (1.4, 0.0), (4.2, -1.35)], glass));
+            }
+            Ship::Builder => {
+                p.extend(lit_pair(&[(-8.0, 4.3), (-10.5, 3.7), (-10.5, 1.2), (-8.0, 0.8)], 0.5));
+                p.extend(lit_pair(&[(3.5, 5.2), (-8.0, 5.2), (-8.0, 0.0), (3.5, 0.0)], 0.62));
+                p.extend(lit_pair(&[(10.0, 0.0), (8.2, 3.1), (3.5, 3.9), (3.5, 0.0)], 1.0));
+                p.push((vec![(8.4, 0.0), (7.0, 1.6), (5.0, 1.6), (5.0, -1.6), (7.0, -1.6)], glass));
+            }
+            Ship::Scout => {
+                p.extend(lit_pair(&[(10.5, 0.0), (-5.8, 4.3), (-3.2, 0.0)], 1.0));
+                p.push((vec![(4.6, 0.0), (1.4, 1.1), (-0.4, 0.0), (1.4, -1.1)], glass));
+            }
+            Ship::Drone => {
+                p.extend(lit_pair(&[(4.8, 0.0), (2.4, 4.2), (-2.4, 4.2), (-4.8, 0.0)], 0.92));
+            }
+        }
+        parts(&p)
+    }
+
+    fn trim(self) -> Mesh {
+        let mut p: Vec<Poly> = Vec::new();
+        match self {
+            Ship::Flag => {
+                p.extend(lit_pair(&[(2.3, 6.3), (2.5, 7.6), (-9.0, 8.2), (-9.7, 7.1)], 1.0));
+                p.push((vec![(14.5, 0.0), (10.6, 1.9), (9.4, 0.0), (10.6, -1.9)], 1.0));
+            }
+            Ship::Cruiser => {
+                p.extend(lit_pair(&[(-5.4, 6.3), (-7.0, 8.2), (-9.8, 8.2), (-8.0, 5.6)], 1.0));
+                p.push((vec![(0.2, 0.8), (-7.6, 1.0), (-7.6, -1.0), (0.2, -0.8)], 0.9));
+            }
+            Ship::Builder => {
+                p.extend(lit_pair(&[(2.2, 3.9), (-1.9, 3.9), (-1.9, 0.0), (2.2, 0.0)], 1.0));
+                p.extend(lit_pair(&[(-2.9, 3.9), (-6.9, 3.9), (-6.9, 0.0), (-2.9, 0.0)], 0.86));
+            }
+            Ship::Scout => {
+                p.extend(lit_pair(&[(-3.2, 0.0), (-5.8, 4.3), (-8.0, 4.3), (-5.4, 0.0)], 1.0));
+            }
+            Ship::Drone => {
+                p.push((vec![(2.2, 0.0), (0.0, 2.2), (-2.2, 0.0), (0.0, -2.2)], 1.0));
+            }
+        }
+        parts(&p)
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Act {
     None,
@@ -67,7 +159,14 @@ fn act_of(word: Option<&str>) -> Act {
     }
 }
 
-/// A helper circling its agent, the `i`th of `n`.
+#[derive(Component)]
+struct Hull;
+
+#[derive(Component)]
+struct Flame {
+    tail: f32,
+}
+
 #[derive(Component)]
 struct Helper {
     i: u32,
@@ -75,8 +174,6 @@ struct Helper {
     r: f32,
 }
 
-/// One part of a dot's act, the `i`th. `lift` is how far over the core the bobbing dots sit.
-/// `paint` is its own colour when it fades alone.
 #[derive(Component)]
 struct Motion {
     act: Act,
@@ -86,7 +183,6 @@ struct Motion {
     paint: Option<Handle<ColorMaterial>>,
 }
 
-/// A spark between a helper on its orbit and the core: in for a report, out for an order.
 #[derive(Component)]
 struct Ping {
     born: f32,
@@ -97,19 +193,17 @@ struct Ping {
 }
 
 const PING_LIFE: f32 = 0.55;
-/// Most sparks one rise sends. A burst of ten steps still reads as busy, not as a blizzard.
 const MAX_PINGS: u32 = 4;
 
-/// A bit of trail left by a moving dot. It shrinks away.
 #[derive(Component)]
 struct Puff {
     born: f32,
     size: f32,
 }
 
-/// Most helpers drawn as electrons. A bigger swarm still reads as a swarm.
 const MAX_HELPERS: u32 = 12;
-const PUFF_LIFE: f32 = 0.45;
+const PUFF_LIFE: f32 = 0.5;
+const SIZE: f32 = 1.2 / 3.8;
 
 #[derive(Resource, Default)]
 struct Dots(HashMap<String, Entity>);
@@ -118,7 +212,7 @@ const Z: f32 = 0.4;
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<Dots>()
-        .add_systems(Update, (sync.run_if(resource_changed::<Current>), glide, fade_puffs, shine, circle, work, fly).chain().in_set(Step::Draw));
+        .add_systems(Update, (sync.run_if(resource_changed::<Current>), glide, fade_puffs, shine, circle, work, burn, fly).chain().in_set(Step::Draw));
 }
 
 fn colour(s: State) -> u32 {
@@ -131,18 +225,33 @@ fn colour(s: State) -> u32 {
     }
 }
 
-/// The glow radius and alpha at time `t`, by state.
 fn glow(look: &Look, phase: f32, t: f32, reduced: bool) -> (f32, f32) {
-    let gr = look.r * 4.0;
+    let gr = look.ship.reach() * size(look) * 1.9;
     if reduced {
-        return (if look.state == State::Idle { gr * 0.75 } else { gr }, if look.state == State::Idle { 0.2 } else { 0.7 });
+        return (if look.state == State::Idle { gr * 0.75 } else { gr }, if look.state == State::Idle { 0.15 } else { 0.6 });
     }
     match look.state {
-        State::Work => (gr, 0.8),
-        State::Think => (gr, 0.55),
-        State::Turn => (gr * 1.15, 0.55 + 0.4 * (0.5 + 0.5 * (t * 4.5 + phase).sin())),
-        State::Idle => (gr * 0.75, 0.2),
-        State::Stuck => (gr, 0.35 + 0.45 * (0.5 + 0.5 * (t * 2.2 + phase).sin())),
+        State::Work => (gr, 0.62),
+        State::Think => (gr, 0.48),
+        State::Turn => (gr * 1.15, 0.5 + 0.45 * (0.5 + 0.5 * (t * 4.5 + phase).sin())),
+        State::Idle => (gr * 0.75, 0.12),
+        State::Stuck => (gr, 0.35 + 0.5 * (0.5 + 0.5 * (t * 2.2 + phase).sin())),
+    }
+}
+
+fn look_of(d: &Dot, reduced: bool) -> Look {
+    let n = d.helpers.min(MAX_HELPERS);
+    Look {
+        r: d.r,
+        state: d.state,
+        helpers: n,
+        selected: d.selected,
+        hovered: d.hovered,
+        carry: d.carry.as_deref().map(|c| crate::hex(Some(c))),
+        act: if reduced { Act::None } else { act_of(d.act.as_deref()) },
+        crew: d.crew.iter().take(n as usize).copied().collect(),
+        ship: ship_of(d.ship.as_deref()),
+        tint: d.tint.as_deref().map(|c| crate::hex(Some(c))).unwrap_or(INK),
     }
 }
 
@@ -161,23 +270,17 @@ fn sync(
     let frame = *frame;
     let reduced = current.0.reduced;
     let seen: std::collections::HashSet<&str> = current.0.dots.iter().map(|d| d.id.as_str()).collect();
-    index.0.retain(|id, e| {
-        if seen.contains(id.as_str()) {
-            return true;
-        }
-        if let Ok((a, _)) = agents.get(*e) {
+    let gone: Vec<(String, Entity)> = index.0.iter().filter(|(id, _)| !seen.contains(id.as_str())).map(|(id, e)| (id.clone(), *e)).collect();
+    for (id, e) in gone {
+        index.0.remove(&id);
+        if let Ok((a, _)) = agents.get(e) {
             mats.remove(&a.glow);
         }
-        commands.entity(*e).despawn();
-        false
-    });
+        commands.entity(e).despawn();
+    }
     for d in &current.0.dots {
-        let carry = d.carry.as_deref().map(|c| crate::hex(Some(c)));
-        let n = d.helpers.min(MAX_HELPERS);
-        // With reduced motion a dot shows no act: every part of one moves.
-        let act = if reduced { Act::None } else { act_of(d.act.as_deref()) };
-        let crew = d.crew.iter().take(n as usize).copied().collect();
-        let look = Look { r: d.r, state: d.state, helpers: n, selected: d.selected, hovered: d.hovered, carry, act, crew };
+        let look = look_of(d, reduced);
+        let n = look.helpers;
         let target = Vec2::new(d.x, d.y);
         if let Some(&e) = index.0.get(&d.id) {
             if let Ok((mut a, mut tf)) = agents.get_mut(e) {
@@ -193,9 +296,8 @@ fn sync(
                     }
                     let glow_mat = a.glow.clone();
                     commands.entity(e).despawn_related::<Children>();
-                    build(&mut commands, e, &mut kit, &mut meshes, &mut mats, d, &look, glow_mat, gr);
+                    a.hull = build(&mut commands, e, &mut kit, &mut meshes, &mut mats, &look, glow_mat, gr);
                 }
-                // What the helpers said since the last scene, and what it told them.
                 let (ins, outs) = (d.pings.saturating_sub(a.pings), d.calls.saturating_sub(a.calls));
                 (a.pings, a.calls) = (d.pings, d.calls);
                 if !reduced && n > 0 && ins + outs > 0 {
@@ -206,7 +308,7 @@ fn sync(
                     for (inward, i) in sends.collect::<Vec<_>>() {
                         let hue = if inward { WORK } else { THINK };
                         commands.entity(e).with_children(|p| {
-                            p.spawn((Transform::from_xyz(0.0, 0.0, 0.02), Visibility::default(), Ping { born: born + if inward { 0.0 } else { 0.08 * i as f32 }, i, n, r: d.r, inward }))
+                            p.spawn((Transform::from_xyz(0.0, 0.0, 0.02), Visibility::default(), Ping { born: born + if inward { 0.0 } else { 0.08 * i as f32 }, i, n, r: orbit_r(&look), inward }))
                                 .with_children(|s| {
                                     s.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(&mut mats, hue, 0.7)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(6.0))));
                                     s.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(&mut mats, 0xFFFFFF, 0.95)), Transform::from_scale(Vec3::splat(1.2))));
@@ -220,77 +322,108 @@ fn sync(
         let ph = phase(&d.id);
         let (gr, al) = glow(&look, ph, time.elapsed_secs(), reduced);
         let glow_mat = mats.add(ColorMaterial { color: srgba(colour(d.state), al), alpha_mode: AlphaMode2d::Blend, ..default() });
-        let e = commands.spawn((Transform::from_translation(frame.at(d.x, d.y, Z)), Visibility::default(), Agent { target, look: look.clone(), phase: ph, glow: glow_mat.clone(), pings: d.pings, calls: d.calls })).id();
-        build(&mut commands, e, &mut kit, &mut meshes, &mut mats, d, &look, glow_mat, gr);
+        let e = commands.spawn((Transform::from_translation(frame.at(d.x, d.y, Z)), Visibility::default())).id();
+        let hull = build(&mut commands, e, &mut kit, &mut meshes, &mut mats, &look, glow_mat.clone(), gr);
+        commands.entity(e).insert(Agent { target, look, phase: ph, glow: glow_mat, pings: d.pings, calls: d.calls, hull, heading: 0.0 });
         index.0.insert(d.id.clone(), e);
     }
 }
 
+fn orbit_r(look: &Look) -> f32 {
+    look.ship.reach() * size(look) - 9.0
+}
+
+fn size(look: &Look) -> f32 {
+    look.r * SIZE * match look.ship {
+        Ship::Drone => 1.5,
+        Ship::Scout | Ship::Builder => 1.2,
+        Ship::Flag | Ship::Cruiser => 1.0,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
-fn build(commands: &mut Commands, e: Entity, kit: &mut Kit, meshes: &mut Assets<Mesh>, mats: &mut Assets<ColorMaterial>, d: &Dot, look: &Look, glow_mat: Handle<ColorMaterial>, gr: f32) {
-    let col = colour(d.state);
+fn build(commands: &mut Commands, e: Entity, kit: &mut Kit, meshes: &mut Assets<Mesh>, mats: &mut Assets<ColorMaterial>, look: &Look, glow_mat: Handle<ColorMaterial>, gr: f32) -> Entity {
+    let col = colour(look.state);
     let glow = kit.shape(meshes, Shape::Glow);
     let circle = kit.shape(meshes, Shape::Circle);
-    let mut parts: Vec<(Handle<Mesh>, Handle<ColorMaterial>, Transform)> = vec![
-        // Glows sit under every core, so a neighbour's glow never covers a dot.
-        (glow.clone(), glow_mat, Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(gr))),
-        (circle.clone(), kit.paint(mats, col, 1.0), Transform::from_scale(Vec3::splat(d.r))),
-    ];
-    parts.push((circle.clone(), kit.paint(mats, 0xFFFFFF, 0.8), Transform::from_xyz(0.0, 0.0, 0.01).with_scale(Vec3::splat(d.r * 0.4))));
-    if let Some(c) = d.carry.as_deref().map(|c| crate::hex(Some(c))) {
+    let scale = size(look);
+    let reach = look.ship.reach() * scale;
+    let (hull_name, trim_name) = look.ship.names();
+    let ship = look.ship;
+    let hull_mesh = kit.named(meshes, hull_name, || ship.hull());
+    let trim_mesh = kit.named(meshes, trim_name, || ship.trim());
+    let idle = look.state == State::Idle;
+    let hull_paint = kit.paint(mats, HULL, if idle { 0.5 } else { 1.0 });
+    let trim_paint = kit.paint(mats, look.tint, if idle { 0.55 } else { 1.0 });
+    let lit = matches!(look.state, State::Work | State::Think);
+    let flame = kit.named(meshes, "flame", || parts(&[(vec![(0.0, 1.7), (-6.5, 0.0), (0.0, -1.7)], 1.0)]));
+    let flame_paint = kit.paint(mats, col, 0.95);
+    let core_paint = kit.paint(mats, 0xFFFFFF, 0.9);
+    let mut hull = Entity::PLACEHOLDER;
+    let mut parts_list: Vec<(Handle<Mesh>, Handle<ColorMaterial>, Transform)> = vec![(glow.clone(), glow_mat, Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(gr)))];
+    if let Some(c) = look.carry {
         let square = kit.shape(meshes, Shape::Square);
-        let lift = d.r + 9.0;
+        let lift = reach * 0.6 + 6.0;
         let tilt = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
-        parts.push((glow.clone(), kit.paint(mats, c, 0.6), Transform::from_xyz(0.0, lift, -0.05).with_scale(Vec3::splat(16.0))));
-        parts.push((square, kit.paint(mats, c, 1.0), Transform::from_xyz(0.0, lift, 0.03).with_rotation(tilt).with_scale(Vec3::new(6.0, 6.0, 1.0))));
+        parts_list.push((glow.clone(), kit.paint(mats, c, 0.6), Transform::from_xyz(0.0, lift, -0.05).with_scale(Vec3::splat(16.0))));
+        parts_list.push((square, kit.paint(mats, c, 1.0), Transform::from_xyz(0.0, lift, 0.03).with_rotation(tilt).with_scale(Vec3::new(6.0, 6.0, 1.0))));
     }
-    if d.selected || d.hovered {
-        let rr = d.r + 5.0;
+    if look.selected || look.hovered {
+        let rr = reach + 5.0;
         let ring = kit.shape(meshes, Shape::Ring((1.5 / rr * 1000.0).round() as i32));
-        parts.push((ring, kit.paint(mats, INK, if d.selected { 0.9 } else { 0.5 }), Transform::from_xyz(0.0, 0.0, 0.02).with_scale(Vec3::splat(rr + 0.75))));
+        parts_list.push((ring, kit.paint(mats, INK, if look.selected { 0.9 } else { 0.5 }), Transform::from_xyz(0.0, 0.0, 0.02).with_scale(Vec3::splat(rr + 0.75))));
     }
+    let orbit = orbit_r(look);
     commands.entity(e).with_children(|p| {
-        for (mesh, mat, tf) in parts {
+        hull = p
+            .spawn((Hull, Transform::from_scale(Vec3::splat(scale)), Visibility::default()))
+            .with_children(|h| {
+                h.spawn((Mesh2d(hull_mesh), MeshMaterial2d(hull_paint), Transform::from_xyz(0.0, 0.0, 0.0)));
+                h.spawn((Mesh2d(trim_mesh), MeshMaterial2d(trim_paint), Transform::from_xyz(0.0, 0.0, 0.004)));
+                if lit {
+                    h.spawn((Mesh2d(flame.clone()), MeshMaterial2d(flame_paint), Transform::from_xyz(ship.tail(), 0.0, -0.004), Flame { tail: ship.tail() }));
+                    h.spawn((Mesh2d(flame), MeshMaterial2d(core_paint), Transform::from_xyz(ship.tail(), 0.0, -0.002).with_scale(Vec3::new(0.45, 0.5, 1.0))));
+                }
+            })
+            .id();
+        for (mesh, mat, tf) in parts_list {
             p.spawn((Mesh2d(mesh), MeshMaterial2d(mat), tf));
         }
-        let n = d.helpers.min(MAX_HELPERS);
-        // Three orbit planes, like the shells drawn around an atom.
-        let shells = kit.shape(meshes, Shape::Ellipse(crate::draw::tenth(d.r + 11.0), crate::draw::tenth((d.r + 11.0) * 0.36), 6));
+        let n = look.helpers.min(MAX_HELPERS);
+        let shells = kit.shape(meshes, Shape::Ellipse(crate::draw::tenth(orbit + 11.0), crate::draw::tenth((orbit + 11.0) * 0.36), 6));
         for s in 0..n.min(3) {
-            p.spawn((Mesh2d(shells.clone()), MeshMaterial2d(kit.paint(mats, col, 0.22)), Transform::from_xyz(0.0, 0.0, -0.02).with_rotation(Quat::from_rotation_z(s as f32 * std::f32::consts::FRAC_PI_3))));
+            p.spawn((Mesh2d(shells.clone()), MeshMaterial2d(kit.paint(mats, col, 0.2)), Transform::from_xyz(0.0, 0.0, -0.02).with_rotation(Quat::from_rotation_z(s as f32 * std::f32::consts::FRAC_PI_3))));
         }
         for i in 0..n {
-            // A helper the scan sees has its own state: one waiting on the owner blinks amber
-            // in a cyan swarm. Helpers inside a session take their agent's colour.
             let hue = look.crew.get(i as usize).map_or(col, |s| colour(*s));
-            p.spawn((Transform::from_xyz(0.0, 0.0, 0.005), Visibility::default(), Helper { i, n, r: d.r })).with_children(|h| {
+            p.spawn((Transform::from_xyz(0.0, 0.0, 0.005), Visibility::default(), Helper { i, n, r: orbit })).with_children(|h| {
                 h.spawn((Mesh2d(glow.clone()), MeshMaterial2d(kit.paint(mats, hue, 0.4)), Transform::from_xyz(0.0, 0.0, -0.1).with_scale(Vec3::splat(5.0))));
                 h.spawn((Mesh2d(circle.clone()), MeshMaterial2d(kit.paint(mats, hue, 0.85)), Transform::from_scale(Vec3::splat(1.4))));
             });
         }
-        // The act's parts, each moved by `work`. The bobbing dots clear the orbits when there are any.
-        let lift = d.r + if n > 0 { 15.0 } else { 8.0 };
+        let lift = reach * 0.62 + if n > 0 { 9.0 } else { 5.0 };
         let ring = kit.shape(meshes, Shape::Ring(110));
         let mut part = |p: &mut ChildSpawnerCommands, i: u32, hex: u32, alpha: f32, size: f32, own: bool, mesh: &Handle<Mesh>| {
             let paint = if own { mats.add(ColorMaterial { color: srgba(hex, alpha), alpha_mode: AlphaMode2d::Blend, ..default() }) } else { kit.paint(mats, hex, alpha) };
-            p.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(paint.clone()), Transform::from_xyz(0.0, 0.0, 0.015).with_scale(Vec3::splat(size)), Motion { act: look.act, i, r: d.r, lift, paint: own.then_some(paint) }));
+            p.spawn((Mesh2d(mesh.clone()), MeshMaterial2d(paint.clone()), Transform::from_xyz(0.0, 0.0, 0.015).with_scale(Vec3::splat(size)), Motion { act: look.act, i, r: reach, lift, paint: own.then_some(paint) }));
         };
         match look.act {
-            Act::Make => (0..4).for_each(|i| part(p, i, WORK, 0.95, 1.3, false, &circle)),
-            // A bright head with a fading tail, like a radar's sweep.
-            Act::Look => (0..4).for_each(|i| part(p, i, WORK, 0.9 - 0.2 * i as f32, 1.3 - 0.18 * i as f32, false, &circle)),
-            Act::Check => part(p, 0, WORK, 0.5, d.r + 2.0, true, &ring),
-            Act::Say | Act::Think => (0..3).for_each(|i| part(p, i, if look.act == Act::Say { WORK } else { THINK }, 0.95, 1.15, false, &circle)),
+            Act::Make => (0..5).for_each(|i| part(p, i, GOLDEN, 0.95, 1.4, false, &circle)),
+            Act::Look => (0..5).for_each(|i| part(p, i, WORK, 0.9 - 0.17 * i as f32, 1.4 - 0.16 * i as f32, false, &circle)),
+            Act::Check => part(p, 0, WORK, 0.5, reach, true, &ring),
+            Act::Say | Act::Think => (0..3).for_each(|i| part(p, i, if look.act == Act::Say { WORK } else { THINK }, 0.95, 1.25, false, &circle)),
             Act::None => {}
         }
     });
+    hull
 }
 
-/// Where helper `i` of `n` is on its orbit at time `t`, around its agent's core.
+const GOLDEN: u32 = 0xFFD98A;
+
 fn orbit(i: u32, n: u32, r: f32, phase: f32, t: f32) -> Vec2 {
     let shell = i % 3;
     let per_shell = n.div_ceil(3).max(1);
-    let an = t * (2.4 - 0.3 * shell as f32) + (i / 3) as f32 * std::f32::consts::TAU / per_shell as f32 + phase + shell as f32;
+    let an = t * (2.4 - 0.3 * shell as f32) + (i / 3) as f32 * TAU / per_shell as f32 + phase + shell as f32;
     let (rx, ry) = (r + 11.0, (r + 11.0) * 0.36);
     let p = Vec2::new(an.cos() * rx, an.sin() * ry);
     let tilt = shell as f32 * std::f32::consts::FRAC_PI_3;
@@ -298,13 +431,10 @@ fn orbit(i: u32, n: u32, r: f32, phase: f32, t: f32) -> Vec2 {
     Vec2::new(p.x * c - p.y * s, p.x * s + p.y * c)
 }
 
-/// A number in 0..1 that looks random but is the same for the same `x`.
 fn hash(x: f32) -> f32 {
     (x.sin() * 43_758.547).fract().abs()
 }
 
-/// Moves each dot's act. Sparks leave at their own angle over the dot and shrink as they fly. The
-/// scan turns about once a second and a half. The ring opens every 1.2 s. The three dots bob in turn.
 fn work(time: Res<Time>, mut pace: ResMut<Pace>, mut mats: ResMut<Assets<ColorMaterial>>, agents: Query<&Agent>, mut parts: Query<(&Motion, &ChildOf, &mut Transform)>) {
     let t = time.elapsed_secs();
     for (m, parent, mut tf) in &mut parts {
@@ -313,34 +443,46 @@ fn work(time: Res<Time>, mut pace: ResMut<Pace>, mut mats: ResMut<Assets<ColorMa
         let i = m.i as f32;
         match m.act {
             Act::Make => {
-                let k = t / 0.55 + i / 4.0 + ph;
+                let k = t / 0.5 + i / 5.0 + ph;
                 let u = k.fract();
-                let a = 0.35 + 2.45 * hash(k.floor() * 7.13 + i * 1.7 + ph);
-                let at = Vec2::from_angle(a) * (m.r + 2.0 + 10.0 * u);
+                let a = -0.9 + 1.8 * hash(k.floor() * 7.13 + i * 1.7 + ph);
+                let at = Vec2::new(m.r * 0.72, 0.0) + Vec2::from_angle(a) * (2.0 + 13.0 * u);
                 tf.translation = at.extend(0.015);
-                tf.scale = Vec3::splat(1.3 * (1.0 - u));
+                tf.scale = Vec3::splat(1.5 * (1.0 - u));
             }
             Act::Look => {
-                let at = Vec2::from_angle(t * 4.2 + ph - i * 0.32) * (m.r + 5.5);
+                let sweep = 0.75 * (t * 2.6 + ph).sin();
+                let at = Vec2::from_angle(sweep) * (m.r + 3.0 + 4.5 * i);
                 tf.translation = at.extend(0.015);
             }
             Act::Check => {
                 let u = (t / 1.2 + ph).fract();
-                tf.scale = Vec3::splat(m.r + 2.0 + 12.0 * u);
+                tf.scale = Vec3::splat(m.r * 0.7 + 12.0 * u);
                 if let Some(mut mat) = m.paint.as_ref().and_then(|p| mats.get_mut(p)) {
                     mat.color = fade(mat.color, 0.55 * (1.0 - u));
                 }
             }
             Act::Say | Act::Think => {
                 let bob = (t * 6.0 - i * 0.9 + ph).sin().max(0.0);
-                tf.translation = Vec3::new((i - 1.0) * 3.6, m.lift + 1.8 * bob, 0.015);
+                tf.translation = Vec3::new((i - 1.0) * 4.0, m.lift + 1.8 * bob, 0.015);
             }
             Act::None => {}
         }
     }
 }
 
-/// Each spark rides between a helper and the core, following the helper as it circles.
+fn burn(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, mut flames: Query<(&Flame, &mut Transform)>) {
+    if current.0.reduced {
+        return;
+    }
+    let t = time.elapsed_secs();
+    for (f, mut tf) in &mut flames {
+        pace.ask(MOVING);
+        let flicker = 0.75 + 0.35 * hash((t * 14.0).floor() + f.tail * 3.1 + tf.translation.x);
+        tf.scale = Vec3::new(flicker, 1.0, 1.0);
+    }
+}
+
 fn fly(mut commands: Commands, time: Res<Time>, mut pace: ResMut<Pace>, agents: Query<&Agent>, mut pings: Query<(Entity, &Ping, &ChildOf, &mut Transform)>) {
     let t = time.elapsed_secs();
     for (e, p, parent, mut tf) in &mut pings {
@@ -356,13 +498,10 @@ fn fly(mut commands: Commands, time: Res<Time>, mut pace: ResMut<Pace>, agents: 
         let k = ease(u);
         let at = if p.inward { helper.lerp(Vec2::ZERO, k) } else { Vec2::ZERO.lerp(helper, k) };
         tf.translation = at.extend(0.02);
-        // It swells on the way and is gone as it lands.
         tf.scale = Vec3::splat(0.6 + 0.8 * (1.0 - (2.0 * u - 1.0).abs()));
     }
 }
 
-/// Each dot moves toward its target, leaving puffs of light. While any moves, frames come at
-/// 33 ms.
 #[allow(clippy::too_many_arguments)]
 fn glide(
     mut commands: Commands,
@@ -373,26 +512,43 @@ fn glide(
     frame: Res<Frame>,
     current: Res<Current>,
     mut pace: ResMut<Pace>,
-    mut agents: Query<(&Agent, &mut Transform)>,
+    mut agents: Query<(&mut Agent, &mut Transform), Without<Hull>>,
+    mut hulls: Query<&mut Transform, With<Hull>>,
 ) {
     let reduced = current.0.reduced;
-    let k = if reduced { 1.0 } else { 1.0 - (-time.delta_secs() * 3.2).exp() };
+    let dt = time.delta_secs();
+    let t = time.elapsed_secs();
+    let k = if reduced { 1.0 } else { 1.0 - (-dt * 2.6).exp() };
     let glow = kit.shape(&mut meshes, Shape::Glow);
-    for (a, mut tf) in &mut agents {
+    for (mut a, mut tf) in &mut agents {
         let to = frame.at(a.target.x, a.target.y, Z);
         let d = to - tf.translation;
-        if d.truncate().length() < 0.2 {
+        let dist = d.truncate().length();
+        if dist < 0.2 {
             tf.translation = to;
-            continue;
+        } else {
+            let step = d * k;
+            if !reduced && step.truncate().length() > 0.8 {
+                let size = a.look.r * 3.0;
+                let paint = kit.paint(&mut mats, colour(a.look.state), 0.5);
+                commands.spawn((Mesh2d(glow.clone()), MeshMaterial2d(paint), Transform::from_translation(tf.translation.with_z(Z - 0.05)).with_scale(Vec3::splat(size)), Puff { born: t, size }));
+            }
+            tf.translation += step;
+            pace.ask(MOVING);
         }
-        let step = d * k;
-        if !reduced && step.truncate().length() > 0.8 {
-            let size = a.look.r * 3.2;
-            let paint = kit.paint(&mut mats, colour(a.look.state), 0.5);
-            commands.spawn((Mesh2d(glow.clone()), MeshMaterial2d(paint), Transform::from_translation(tf.translation.with_z(Z - 0.05)).with_scale(Vec3::splat(size)), Puff { born: time.elapsed_secs(), size }));
+        let stuck = a.look.state == State::Stuck;
+        let rest = if stuck && !reduced { -0.5 + 0.1 * (t * 1.3 + a.phase).sin() } else { 0.0 };
+        let want = if dist > 4.0 { d.y.atan2(d.x) } else { rest };
+        let diff = (want - a.heading + PI).rem_euclid(TAU) - PI;
+        a.heading = if reduced { want } else { a.heading + diff * (1.0 - (-dt * 7.0).exp()) };
+        if diff.abs() > 0.01 && !reduced {
+            pace.ask(MOVING);
         }
-        tf.translation += step;
-        pace.ask(MOVING);
+        let live = matches!(a.look.state, State::Work | State::Think) && !reduced;
+        if let Ok(mut h) = hulls.get_mut(a.hull) {
+            h.rotation = Quat::from_rotation_z(a.heading);
+            h.translation.y = if live && dist < 4.0 { 1.1 * (t * 1.4 + a.phase).sin() } else { 0.0 };
+        }
     }
 }
 
@@ -409,7 +565,6 @@ fn fade_puffs(mut commands: Commands, time: Res<Time>, mut pace: ResMut<Pace>, m
     }
 }
 
-/// Wants to talk and Stuck blink. Each dot keeps its own phase.
 fn shine(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, mut mats: ResMut<Assets<ColorMaterial>>, agents: Query<&Agent>) {
     if current.0.reduced {
         return;
@@ -422,12 +577,11 @@ fn shine(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, mut mat
         pace.ask(BLINKING);
         let (_, al) = glow(&a.look, a.phase, t, false);
         if let Some(mut m) = mats.get_mut(&a.glow) {
-            m.color = crate::draw::fade(m.color, al);
+            m.color = fade(m.color, al);
         }
     }
 }
 
-/// Helpers circle on three tilted ellipses, 2.4 radians a second.
 fn circle(time: Res<Time>, current: Res<Current>, mut pace: ResMut<Pace>, agents: Query<&Agent>, mut helpers: Query<(&Helper, &ChildOf, &mut Transform)>) {
     let reduced = current.0.reduced;
     let t = if reduced { 0.0 } else { time.elapsed_secs() };

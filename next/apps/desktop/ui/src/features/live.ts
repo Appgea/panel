@@ -1,34 +1,3 @@
-/**
- * Live — a dark map of this Mac where every agent is a small electron that acts out what it is
- * doing, and a column beside it that says who each agent is. The owner drags and zooms the map
- * like a game scene.
- *
- * Live shows activity and nothing else. The decisions that wait for the owner are in For you
- * (foryou.ts), the issues on the Board, what agents made in Review. Owner, 2026-11-05: "no
- * review, no boards, tasks. They must be a separate section."
- *
- * The map (live_world.ts): This Mac with its testlock bays, the GitHub tower left and the web
- * gate right, in a band on top. Under it each project with a running agent is a plot with one row
- * per agent, and each agent's bubble always says what it does now.
- *
- * Each step an agent takes has a verb, and each verb has an animation script in the catalog
- * (live_script.ts). A git push carries a crate up the tower. A search sweeps a radar. A verb
- * with no script yet gets one written on its own (src-tauri/src/live/catalog.rs), and the owner
- * deletes bad ones in the catalog view (live_catalog.ts).
- *
- * Agents talk to each other on the map (live_talk.ts): the commander's orders and looks, the
- * reports that come back, and a file handed from the agent that wrote it to the one that reads
- * it, each as a token flying between the two dots. Bevy draws what each dot is doing around it.
- *
- * Bevy, built to WebAssembly from apps/live, draws every shape from the scene in live_scene.ts.
- * Words are HTML on top: live_labels on the map, live_side, live_panel and live_catalog in the
- * column, and live_top over both.
- *
- * This file mounts, polls, keeps the state, moves the camera and starts scripts. Polled every
- * 2 s, the fleet every 5 s, and the board and today's closes every 60 s, only while the screen is
- * open. Bevy sleeps while it is closed. The game over it is live_game.ts and live_hud.ts.
- * If Bevy cannot start, everything else still works and the stage says why.
- */
 
 import { errorText } from "../errors";
 import type { BoardFeed } from "./live_cards";
@@ -46,7 +15,7 @@ import { newHeard, talk, TALK, TO_HELPERS, type Talk } from "./live_talk";
 import { appName, button, doing } from "./live_text";
 import { mountTop, TOP_HTML } from "./live_top";
 import type { BevyView, LiveCtx, LiveEvents, LiveState, Selection } from "./live_types";
-import { lay, route } from "./live_world";
+import { lay, markAt, route, stationAt } from "./live_world";
 import "./live.css";
 
 export type { LiveAgent, LiveEmber, LiveEvents, LiveJob, LiveWorld } from "./live_types";
@@ -54,37 +23,18 @@ export type LiveHandle = { open(): void; clear(): void };
 
 const POLL_MS = 2000;
 const BOARD_MS = 60_000;
-/** The fleet's view is a local read, the day's board a GitHub search. */
 const FLEET_MS = 5000;
 const DAY_MS = 60_000;
-/** Celebrations at once. A wave that ends ten runs in one read bursts four plots, not ten. */
 const MAX_CHEERS = 4;
 const GOLD = "#ffe27a";
-/**
- * More scripts at once than this is noise. A step that finds no room just shows its words.
- * Owner, 2026-11-06: every step animates, but quieter. Six at once was too busy to follow.
- */
 const MAX_SCRIPTS = 3;
-/** Glyphs and tags on the map at once. Past this a new one is dropped: a crowd says nothing. */
 const MAX_MARKS = 12;
-/**
- * Talks flying between dots at once, apart from the scripts (live_talk.ts). Decided: their own
- * cap, since the owner asked to see the crew talk (2026-11-19), and a talk is one small glyph.
- */
 const MAX_TALKS = 3;
-/** The same talk between the same two dots plays once in this long. */
 const TALK_EVERY_MS = 12_000;
-/** A trip's faint way stays this long after the trip ends, so the eye can follow it back. */
 const LINE_LINGER_MS = 500;
-/** Trips shorter than this, in world pixels, draw no way. */
 const LINE_MIN = 48;
-/**
- * Below 0.3 a district is a speck and every word is hidden to keep the rest apart. Above 1.6 the
- * map's lines turn thick and soft.
- */
 const ZOOM_MIN = 0.3;
 const ZOOM_MAX = 1.6;
-/** One press of + or −. */
 const ZOOM_STEP = 1.25;
 
 export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
@@ -150,23 +100,17 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   let boardAt = 0;
   let fleetAt = 0;
   let dayAt = 0;
-  /** The date whose two-day read was cut at its limit: the rest of that day reads today alone. */
   let shortDay = "";
   let open = false;
   const played = new Map<string, number>();
   let lastSeen: Seen | null = null;
   let knownEmbers: Set<string> | null = null;
-  /** The stop function of each running script, by agent. */
   const running = new Map<string, () => void>();
-  /** The last step each agent acted out, as verb@time, so a step plays once. */
   const acted = new Map<string, string>();
-  /** The last finished step with a result each agent had, as verb@time, so a result shows once. */
   const judged = new Map<string, string>();
-  /** Results found by this poll, for the playbook's ✓ and ✗. */
   let freshResults: { agentId: string; ok: boolean }[] = [];
   let markId = 0;
   const heard = newHeard();
-  /** When each talk last played, by kind and pair, and when each one in flight lands. */
   const spoke = new Map<string, number>();
   let talking: number[] = [];
 
@@ -209,7 +153,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       try {
         mod.start("#liveCanvas");
       } catch (e) {
-        // winit leaves Rust's start-up by throwing on the web. That throw is how it says "running".
         if (!String(e).includes("control flow")) throw e;
       }
       view = mod;
@@ -220,7 +163,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   }
 
   async function poll(): Promise<void> {
-    // A scan slower than the interval must not stack up `ps` and `lsof` runs.
     if (polling) return;
     polling = true;
     try {
@@ -237,37 +179,30 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
-  /** The board names each worker's issue and project, and its closes ring their district. */
   async function readBoard(): Promise<void> {
     boardAt = Date.now();
     try {
       const b = (await events.board(false)) as (BoardFeed & { error?: string }) | null;
       if (b && !b.error) s.board = b;
     } catch {
-      // Without the board an agent shows its own task instead of its issue.
     }
     paint();
   }
 
-  /** The fleet's own view: its units' screens and budgets, and what ended today. */
   async function readFleet(): Promise<void> {
     fleetAt = Date.now();
     try {
       const f = await events.fleet();
       s.fleet = f && !f.error ? f : null;
     } catch {
-      // Without the fleet module the units still show from the scan, with no score.
       s.fleet = null;
     }
     score();
   }
 
-  /** Today's closes and finds on the board, for the score and the feed. */
   async function readDay(): Promise<void> {
     dayAt = Date.now();
     try {
-      // Back to yesterday's midnight: yesterday up to this hour is the pace to beat. A read cut at
-      // its limit loses issues, so on such a day Live asks for today alone and drops the pace.
       const short = shortDay === new Date(dayAt).toDateString();
       const d = await events.day(hoursBack(dayAt, short ? 0 : 1));
       if (d && !d.error) s.day = d;
@@ -277,7 +212,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
         dayAt = 0;
       }
     } catch {
-      // The score then counts the fleet's own closes.
       score();
     }
   }
@@ -299,10 +233,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paint();
   }
 
-  /**
-   * News lands on the map where it happened: a close bursts at its unit, or its plot when the
-   * unit has gone, and its XP floats up; a report flies to the commander. A find pulses its plot.
-   */
   function celebrate(items: FeedItem[]): void {
     const l = s.layout;
     if (!l || !items.length) return;
@@ -315,20 +245,17 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const fx = (...f: FxOut[]) => {
       if (!s.reduced) s.pendingFx.push(...f);
     };
-    // A lens names its app as people write it, "VillagesTown"; a district by its key, "villagestown".
     const flat = (k: string) => k.toLowerCase().replace(/[^a-z0-9]/g, "");
     let n = 0;
     for (const it of items) {
       if (n >= MAX_CHEERS) break;
       const d = it.room ? l.districts.find((x) => x.key === it.room || flat(x.key) === flat(it.room!)) : undefined;
-      // A promotion is the commander's: it goes off where the squad answers to.
       const at = it.kind === "rank" ? bossAt : (dotOf(it.unit) ?? d);
       if (!at) continue;
       n++;
       if (it.kind === "rank") {
         fx({ kind: "burst", x: at.x, y: at.y, color: GOLD, size: 60, count: 40 }, { kind: "ring", x: at.x, y: at.y, color: GOLD, size: 110, ms: 1800 }, { kind: "ring", x: at.x, y: at.y, color: GOLD, size: 70, ms: 1400, delay: 300 });
       } else if ((it.kind === "scout" || it.kind === "end") && bossAt && (bossAt.x !== at.x || bossAt.y !== at.y)) {
-        // A unit coming home: one quiet orb from where it worked back to its commander.
         fx({ kind: "orb", x: at.x, y: at.y, x2: bossAt.x, y2: bossAt.y, color: it.kind === "scout" ? COLOR.think : COLOR.idle, size: 4, ms: 1300 });
       } else if (it.kind === "close") {
         fx({ kind: "burst", x: at.x, y: at.y, color: COLOR.done, size: 40, count: 26 }, { kind: "ring", x: at.x, y: at.y, color: COLOR.done, size: 70, ms: 1400 });
@@ -344,9 +271,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
-  // ---------------------------------------------------------------- scripts
 
-  /** The verb's own script, else its family's: `cmd.echo` plays `cmd` (src-tauri/src/live/catalog.rs). */
   const scriptFor = (verb: string): Script | undefined => {
     const find = (v: string) => s.world?.catalog?.find((x) => x.verb === v && !x.pending);
     const dot = verb.lastIndexOf(".");
@@ -367,7 +292,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
           return [self];
         case "home":
           return district ? [district] : [self];
-        // The file squares left the map (owner, 2026-11-06). A file move happens at the agent.
         case "file":
         case "files":
           return [self];
@@ -381,8 +305,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
             return d && d.swarm >= 0 ? [d] : [];
           });
           if (kids.length) return kids;
-          // Helpers that are not on the map, or a swarm: points on an arc left of the agent,
-          // where nothing is written. Its bubble is on the right.
           const n = Math.max(3, Math.min(8, (a?.helpers ?? 0) + spot.swarm));
           return Array.from({ length: n }, (_, i) => {
             const t = Math.PI / 2 + (Math.PI * (i + 0.5)) / n;
@@ -390,12 +312,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
           });
         }
         case "hub":
-        // The desk and the board left the map. Scripts written before still name them: the
-        // owner sits at This Mac, and the board is GitHub's.
         case "desk":
-          return [w.hub];
-        // Its own bay, else a free one, else none, and the moves aimed there are skipped. A glyph
-        // flying into a bay another agent holds would say that agent's job is this one's.
+          return [stationAt(w.hub)];
         case "bay": {
           const bays = s.world?.mac.bays ?? [];
           const own = bays.findIndex((b) => b.agent === id);
@@ -403,11 +321,11 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
           return i >= 0 && w.hub.bays[i] ? [w.hub.bays[i]] : [];
         }
         case "board":
-          return [L.tower];
+          return [markAt(L.tower)];
         case "tower":
         case "sky":
         case "web":
-          return [L[place]];
+          return [markAt(L[place])];
         default:
           return [];
       }
@@ -415,9 +333,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     fx(f) {
       if (!s.reduced) s.pendingFx.push(f);
     },
-    // An agent never leaves its row, so the owner finds it where it was on every look. A walk
-    // sends a spark to the place instead, in the colour of what the agent carries. The way home,
-    // to the agent's own dot or the middle of its plot, sends nothing.
     walk(id, to) {
       const w = s.layout;
       const from = w?.dots.get(id);
@@ -433,7 +348,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       if (text) s.bubbles.set(id, text);
       else s.bubbles.delete(id);
     },
-    // Files lit up in their squares. With the squares gone, the agent itself glows softly.
     light(id, _at, color, ms) {
       const spot = s.layout?.dots.get(id);
       if (spot && !s.reduced) s.pendingFx.push({ kind: "pulse", x: spot.x, y: spot.y, color, size: 22, ms: Math.min(ms, 1400) });
@@ -441,11 +355,9 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     mark(_id, m) {
       if (s.marks.filter((x) => !x.line).length >= MAX_MARKS) return;
       const path = m.to && s.layout ? route(s.layout, m.at, m.to) : undefined;
-      // A mark that stays put inside a plot belongs to it (live_labels.ts `follow`).
       const d = !m.to ? s.layout?.districts.find((x) => Math.abs(m.at.x - x.x) <= x.w / 2 + 12 && Math.abs(m.at.y - x.y) <= x.h / 2 + 12) : undefined;
       const room = d && { key: d.key, x: d.x - d.w / 2, y: d.y - d.h / 2 };
       s.marks.push({ ...m, path, room, id: ++markId, born: Date.now() });
-      // Reduced motion: the glyph shows where it ends, so there is no trip to draw.
       if (path && !s.reduced) addLine(path, m.color, m.ms + LINE_LINGER_MS);
     },
     label(id) {
@@ -467,7 +379,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     );
   }
 
-  /** Each new step of a working agent plays its verb's script, or the plain one. */
   function act(): void {
     const w = s.world!;
     for (const id of running.keys()) if (!w.agents.some((a) => a.id === id)) running.get(id)?.();
@@ -483,10 +394,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
-  /**
-   * Each agent's newest finished step with a result: a test, build or push shows ✓ or ✗ in its
-   * bubble. The first look at an agent only remembers, so opening Live replays nothing old.
-   */
   function judge(): void {
     const w = s.world!;
     const now = Date.now();
@@ -506,11 +413,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     }
   }
 
-  /**
-   * The crew's talk this poll (live_talk.ts): orders, looks, reports and handoffs fly between
-   * dots. A helper riding on its agent has no way to fly: each step it takes, and each talk with
-   * that agent, sends a spark along the agent's orbit instead.
-   */
   function chat(): void {
     const { talks, stepped } = talk(s.world!.agents, heard, freshResults);
     const l = s.layout;
@@ -518,10 +420,8 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     for (const a of stepped) {
       const on = l.dots.get(a.id)?.on;
       const st = a.now ?? a.steps[0];
-      // A riding helper's step, or one a helper inside the session took, is news for its agent.
       if (on) bump(s.pings, on);
       else if (st?.helper) bump(s.pings, a.id);
-      // An agent that starts the helpers inside its session, or writes to them, sends them a spark.
       if (!on && a.helpers > 0 && (st?.verb === "spawn" || (st?.verb === "message" && TO_HELPERS.test(st.label)))) bump(s.calls, a.id);
     }
     for (const t of talks)
@@ -536,7 +436,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
 
   const bump = (m: Map<string, number>, id: string) => m.set(id, (m.get(id) ?? 0) + 1);
 
-  /** One talk: its glyph flies the clear way from one dot to the other, and a ring marks where it lands. */
   function speak(t: Talk): void {
     const l = s.layout;
     const a = l?.dots.get(t.from);
@@ -544,7 +443,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     if (!l || !a || !b || s.reduced) return;
     const top = a.on === t.to ? t.to : b.on === t.from ? t.from : a.on && a.on === b.on ? a.on : null;
     if (top) {
-      // Between a helper and the agent it rides on, or two helpers of one: a spark on the orbit.
       bump(t.kind === "order" ? s.calls : s.pings, top);
       return;
     }
@@ -558,14 +456,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     const path = route(l, a, b);
     s.marks.push({ glyph: k.glyph, talk: true, at: a, to: b, path, color: k.color, ms: k.ms, id: ++markId, born: now });
     addLine(path, k.color, k.ms + LINE_LINGER_MS);
-    // The glyph lands at four fifths of its time (live_labels.ts).
     const lands = Math.round(k.ms * 0.8);
     s.pendingFx.push({ kind: "pulse", x: a.x, y: a.y, color: k.color, size: 22, ms: 600 }, { kind: "ring", x: b.x, y: b.y, color: k.color, size: 28, ms: 800, delay: lands });
     const tag = t.tag;
     if (tag) window.setTimeout(() => hand.mark(t.to, { text: tag, at: { x: b.x, y: b.y - 16 }, color: k.color, ms: 1800 }), lands);
   }
 
-  /** The catalog's Play: on the open agent, or on the busiest one. */
   function playOn(verb: string): boolean {
     const x = scriptFor(verb);
     const w = s.world;
@@ -577,7 +473,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     return true;
   }
 
-  // ---------------------------------------------------------------- paint
 
   function paint(): void {
     if (!s.world) return;
@@ -585,7 +480,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     hud.paint();
     judge();
     draw();
-    // After the layout, so a unit the fleet just started has a dot to receive its orders.
     chat();
     freshResults = [];
     act();
@@ -596,7 +490,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintColumn();
   }
 
-  /** The column shows one thing: the catalog, else the open panel, else the list of agents. */
   function paintColumn(): void {
     listEl.hidden = catalog.isOpen() || !panelEl.hidden;
   }
@@ -604,7 +497,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   function fit(): void {
     const b = s.layout?.bounds;
     const W = stage.clientWidth;
-    // The feed sits over the stage's foot, so the fitted map stops above it.
     const foot = Math.min(hud.height(), stage.clientHeight * 0.3);
     const H = stage.clientHeight - foot;
     if (!b || !W || H <= 40) return;
@@ -630,17 +522,11 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     s.pendingFx.push(...direct(lastSeen, snapshot, endings, freshResults, played, now));
     lastSeen = snapshot;
     s.pendingFx = s.pendingFx.flatMap(routeFx);
-    // After the routing, so the faint ways it adds are painted with this frame.
     labels.paint();
-    // Effects are for this moment only. Without a view they are dropped, not saved up.
     if (view) view.set_scene(JSON.stringify(scene(ctx, width, stage.clientHeight)));
     s.pendingFx = [];
   }
 
-  /**
-   * An orb or a beam from one place to another, along the clear way between them: one piece per
-   * straight run, each starting when the one before ends, and the way drawn faint underneath.
-   */
   function routeFx(f: FxOut): FxOut[] {
     if ((f.kind !== "orb" && f.kind !== "beam") || f.x2 === undefined || f.y2 === undefined || !s.layout) return [f];
     const path = route(s.layout, { x: f.x, y: f.y }, { x: f.x2, y: f.y2 });
@@ -652,7 +538,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     let at = f.delay ?? 0;
     return lens.flatMap((len, i) => {
       if (len < 1) return [];
-      // A beam flashes its whole way at once. An orb runs it, the same speed on every piece.
       const piece = f.kind === "orb" ? Math.max(60, (ms * len) / total) : ms;
       const out = { ...f, x: path[i].x, y: path[i].y, x2: path[i + 1].x, y2: path[i + 1].y, ms: Math.round(piece), delay: Math.round(at) };
       if (f.kind === "orb") at += piece;
@@ -660,9 +545,7 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     });
   }
 
-  /** The faint line under a trip. Packets share one way, so the same way is drawn once. */
   function addLine(path: Pt[], color: string, ms: number): void {
-    // A hop to a helper beside the dot is plain to see. A line under it is only clutter.
     if (path.slice(1).reduce((sum, p, i) => sum + Math.hypot(p.x - path[i].x, p.y - path[i].y), 0) < LINE_MIN) return;
     const key = path.map((p) => `${Math.round(p.x)},${Math.round(p.y)}`).join(" ");
     const now = Date.now();
@@ -686,7 +569,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     return { dots, districts, closed };
   }
 
-  // The tools are made once. A drag repaints them on every move, so a repaint only sets states.
   const zoomOut = button("live-tool is-icon", "−", () => zoomBy(1 / ZOOM_STEP));
   zoomOut.setAttribute("aria-label", "Zoom out");
   zoomOut.title = "Zoom out (−)";
@@ -694,7 +576,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   zoomIn.setAttribute("aria-label", "Zoom in");
   zoomIn.title = "Zoom in (+)";
   const fitBtn = button("live-tool", "Fit", () => refit());
-  // The hint used to take a line under the map. It lives here now, where a hand already is.
   fitBtn.title = "Fit the map (0). Drag to move, scroll or pinch to zoom. Click an agent to follow it.";
   const anim = button("live-tool", "Animations", () => {
     if (!catalog.isOpen() && s.selection) select(null);
@@ -706,7 +587,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     zoomOut.disabled = s.camera.zoom <= ZOOM_MIN + 0.001;
     zoomIn.disabled = s.camera.zoom >= ZOOM_MAX - 0.001;
     fitBtn.disabled = !s.cameraHeld;
-    // The count and "1 writing" meant nothing beside a zoom button. The catalog says both.
     anim.title = `${catalog.count()} animations. Open the catalog to play, improve or delete one.`;
     anim.classList.toggle("is-on", catalog.isOpen());
   }
@@ -734,15 +614,12 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintTools();
   }
 
-  /** Zooms around the stage's centre, for the buttons and keys. */
   function zoomBy(f: number): void {
     s.camera.zoom = clamp(s.camera.zoom * f, ZOOM_MIN, ZOOM_MAX);
     moveCamera();
   }
 
-  // ---------------------------------------------------------------- camera, pointer and keys
 
-  /** Words jump with a camera move instead of sliding, for this paint and a moment after. */
   let stillEnd = 0;
   function still(): void {
     root.classList.add("is-moving");
@@ -750,7 +627,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     stillEnd = window.setTimeout(() => root.classList.remove("is-moving"), 150);
   }
 
-  /** Moves the camera without a new scene, so a drag stays smooth. */
   function moveCamera(): void {
     still();
     view?.set_camera(s.camera.x, s.camera.y, s.camera.zoom);
@@ -759,7 +635,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
     paintTools();
   }
 
-  // The open feed scrolls and takes its own clicks: no drag or zoom starts on it.
   const OVER = ".live-tools, button, input, .live-feed.is-open";
   let drag: { x: number; y: number; moved: boolean; id: number } | null = null;
   stage.addEventListener("pointerdown", (e) => {
@@ -782,7 +657,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
   });
   const endDrag = (e: PointerEvent) => {
     if (!drag || e.pointerId !== drag.id) return;
-    // A click on empty map closes the open panel.
     if (!drag.moved && s.selection) select(null);
     drag = null;
     root.classList.remove("is-panning");
@@ -797,7 +671,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       const r = stage.getBoundingClientRect();
       const at = { x: e.clientX - r.left, y: e.clientY - r.top };
       const before = toWorld(at);
-      // A pinch on a trackpad comes as a wheel with ctrl held, and moves faster.
       s.camera.zoom = clamp(s.camera.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015)), ZOOM_MIN, ZOOM_MAX);
       s.camera.x = before.x - (at.x - stage.clientWidth / 2) / s.camera.zoom;
       s.camera.y = before.y - (at.y - stage.clientHeight / 2) / s.camera.zoom;
@@ -847,7 +720,6 @@ export function mountLive(root: HTMLElement, events: LiveEvents): LiveHandle {
       if (timer !== null) window.clearInterval(timer);
       timer = null;
       for (const stop of [...running.values()]) stop();
-      // Bevy sleeps until the canvas reappears, so a closed Live costs no frames.
       view?.set_paused(true);
     },
   };

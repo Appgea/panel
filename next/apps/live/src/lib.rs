@@ -1,44 +1,3 @@
-//! Panel Live's view: a dark map you drag and zoom, where coding agents are small electrons.
-//! Panel's TypeScript lays the world out and hands it over with `set_scene`. Bevy only draws
-//! it. Every word is HTML on top, so nothing here draws text.
-//!
-//! # The scene contract
-//!
-//! `live_scene.ts` writes this JSON and `Scene` below reads it. Change both together.
-//! Positions are world pixels with y growing down. The hub, This Mac, sits at the origin.
-//! Colours are hex strings like `#6fe7ff`.
-//!
-//! - `w`, `h`: the stage size in CSS pixels. `reduced`: the owner asked for reduced motion.
-//!   Nothing blinks or glides then, and no effect plays.
-//! - `camera`: the world point at the stage's centre and the `zoom`, 1 for one world pixel per
-//!   CSS pixel. The owner drags and zooms it.
-//! - `districts`: one rounded box per project with a running agent, `x`, `y` its centre and `w`,
-//!   `h` its size, with its `edge` (`quiet`, `card`
-//!   when an agent there waits for the owner, `stuck`) and `selected`. Other projects are not on
-//!   the map.
-//! - `hub`: This Mac's box, `hot` when macOS slowed the CPU, and its testlock `bays`.
-//! - `landmarks`: GitHub (`tower`) and the `web`, each a card `w` by `h` beside This Mac, lit
-//!   at the edge when it had news lately. A kind this build does not know draws nothing.
-//! - `links`: lines from the hovered or selected dot to its parent and children.
-//! - `dots`: the agents. Each keeps its id across scenes and glides to its new `x`, `y`. `r`
-//!   is its core size, `state` its colour and blink, `helpers` the electrons circling it,
-//!   `carry` the colour of a crate it holds, if any. `act` is what it is doing, drawn around it
-//!   while it works: `make` sparks, `look` a scan, `check` a ring, `say` and `think` three
-//!   bobbing dots. Another word draws nothing. `crew` is the state of each helper riding on it,
-//!   for its electron's colour. `pings` and `calls` count what its helpers sent it and what it
-//!   sent them: each rise flies a spark along the orbit, in or out.
-//! - `fx`: effects starting now, from the playbook (live_playbook.ts) and the animation scripts
-//!   (live_script.ts): `orb`, `beam`, `pulse`, `ring`, `burst`, `sweep`, `orbit`. Each has `x`,
-//!   `y`, and `x2`, `y2` where it travels, a `color`, a `size`, a length `ms`, a `count` and a
-//!   `delay` in ms. An unknown kind draws nothing.
-//!
-//! # Modules
-//!
-//! Each draws one part and owns its own entities. `bg` the dot grid, `district` the districts,
-//! `hub` This Mac, its bays and the landmarks, `link` family lines, `dot`
-//! the agents, `fx` the effects. `draw` holds the shared parts. A module redraws when `Current`
-//! changes, and asks `Pace` for the frame rate it needs. A still world draws four frames a
-//! second at most, to pick up a new scene. A closed section draws nothing (`set_paused`).
 
 mod bg;
 mod district;
@@ -59,12 +18,8 @@ use std::sync::Mutex;
 use std::time::Duration;
 use wasm_bindgen::prelude::*;
 
-/// The newest scene from the page, taken by the next frame. Older ones are simply replaced.
 static INBOX: Mutex<Option<String>> = Mutex::new(None);
-/// The newest camera from the page. A drag sends many, each without the rest of the scene.
 static CAMERA: Mutex<Option<Camera>> = Mutex::new(None);
-/// Set while the Live section is closed. The loop then sleeps until a window event, and the
-/// canvas growing back from zero size when the section reopens is that event.
 static PAUSED: AtomicBool = AtomicBool::new(false);
 const ASLEEP: Duration = Duration::from_secs(24 * 60 * 60);
 
@@ -75,7 +30,6 @@ pub fn set_scene(json: String) {
     }
 }
 
-/// Moves the view only. Cheap enough to call on every pointer move of a drag.
 #[wasm_bindgen]
 pub fn set_camera(x: f32, y: f32, zoom: f32) {
     if let Ok(mut c) = CAMERA.lock() {
@@ -88,8 +42,6 @@ pub fn set_paused(paused: bool) {
     PAUSED.store(paused, Ordering::Relaxed);
 }
 
-/// The order of a frame: take the new scene, draw, then set the next frame's wait.
-/// A module adds its systems `.in_set(Step::Draw)`.
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum Step {
     Take,
@@ -97,7 +49,6 @@ pub(crate) enum Step {
     Pace,
 }
 
-/// Starts drawing into the canvas the selector names, like `#liveCanvas`.
 #[wasm_bindgen]
 pub fn start(canvas: String) {
     App::new()
@@ -128,7 +79,6 @@ pub fn start(canvas: String) {
         .run();
 }
 
-/// The last scene the page sent. It changes only when a new one arrives.
 #[derive(Resource, Default)]
 pub(crate) struct Current(pub Scene);
 
@@ -176,6 +126,18 @@ pub(crate) struct District {
     pub edge: Edge,
     #[serde(default)]
     pub selected: bool,
+    #[serde(default)]
+    pub px: f32,
+    #[serde(default)]
+    pub py: f32,
+    #[serde(default)]
+    pub hue: Option<String>,
+    #[serde(default)]
+    pub ringed: bool,
+    #[serde(default)]
+    pub bands: u32,
+    #[serde(default)]
+    pub trophies: u32,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]
@@ -198,6 +160,15 @@ pub(crate) struct Hub {
     pub bays: Vec<Bay>,
 }
 
+pub(crate) const STATION: Vec2 = Vec2::new(36.0, 34.0);
+pub(crate) const MARK_DX: f32 = 28.0;
+
+impl Hub {
+    pub fn station(&self) -> Vec2 {
+        Vec2::new(self.x - self.w / 2.0 + STATION.x, self.y - self.h / 2.0 + STATION.y)
+    }
+}
+
 #[derive(Deserialize, Clone, Copy)]
 pub(crate) struct Bay {
     pub x: f32,
@@ -215,7 +186,6 @@ pub(crate) struct Landmark {
     pub y: f32,
     pub w: f32,
     pub h: f32,
-    /// No news here lately: a plain edge, so the map's light is where work happens.
     #[serde(default)]
     pub quiet: bool,
 }
@@ -269,6 +239,10 @@ pub(crate) struct Dot {
     pub pings: u32,
     #[serde(default)]
     pub calls: u32,
+    #[serde(default)]
+    pub ship: Option<String>,
+    #[serde(default)]
+    pub tint: Option<String>,
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq)]
@@ -281,7 +255,6 @@ pub(crate) enum State {
     Stuck,
 }
 
-/// One effect, starting `delay` ms from now.
 #[derive(Deserialize, Clone)]
 pub(crate) struct Fx {
     pub kind: FxKind,
@@ -306,32 +279,21 @@ pub(crate) struct Fx {
 #[derive(Deserialize, Clone, Copy, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum FxKind {
-    /// A glowing ball that travels from x, y to x2, y2 with a trail.
     Orb,
-    /// A line of light from x, y to x2, y2 that fades.
     Beam,
-    /// A soft glow that swells and fades.
     Pulse,
-    /// A thin ring that grows and fades.
     Ring,
-    /// Sparks flying out.
     Burst,
-    /// A light that turns around the point, like a radar.
     Sweep,
-    /// Small electrons circling the point.
     Orbit,
-    /// A kind this build does not know yet. It draws nothing, and the rest of the scene stays.
     #[serde(other)]
     Unknown,
 }
 
-/// `#rrggbb` as a number, or white.
 pub(crate) fn hex(s: Option<&str>) -> u32 {
     s.and_then(|s| u32::from_str_radix(s.trim_start_matches('#'), 16).ok()).unwrap_or(draw::INK)
 }
 
-/// No bloom and no tone mapping: the glow is our own soft disc (`draw::glow_disc`), and every
-/// colour lands on screen exactly as its token.
 fn camera(mut commands: Commands) {
     commands.spawn((Camera2d, Tonemapping::None));
 }
@@ -341,7 +303,6 @@ fn take_scene(mut current: ResMut<Current>, mut frame: ResMut<draw::Frame>) {
     let scene = match serde_json::from_str::<Scene>(&json) {
         Ok(scene) => scene,
         Err(e) => {
-            // live_scene.ts and `Scene` drifted apart. The stage keeps the last good scene.
             error!("Live scene rejected: {e}");
             return;
         }
@@ -353,8 +314,6 @@ fn take_scene(mut current: ResMut<Current>, mut frame: ResMut<draw::Frame>) {
     current.0 = scene;
 }
 
-/// One world pixel is `zoom` CSS pixels of the stage, whatever the screen's pixel density says,
-/// so the HTML words on top line up.
 fn take_camera(mut pace: ResMut<Pace>, frame: Res<draw::Frame>, mut cams: Query<(&mut Transform, &mut Projection), With<Camera2d>>) {
     pace.want = STILL;
     let Some(c) = CAMERA.lock().ok().and_then(|mut c| c.take()) else { return };
@@ -366,7 +325,6 @@ fn take_camera(mut pace: ResMut<Pace>, frame: Res<draw::Frame>, mut cams: Query<
     }
 }
 
-/// The frame rate follows what moves. Still glow costs nothing.
 fn pace(mut settings: ResMut<WinitSettings>, pace: Res<Pace>, mut was: Local<Option<Duration>>) {
     let wait = if PAUSED.load(Ordering::Relaxed) { ASLEEP } else { pace.want };
     if *was == Some(wait) {
