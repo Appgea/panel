@@ -15,7 +15,6 @@ from unittest.mock import patch
 HOST = Path(__file__).parent / "bin/host.py"
 spec = importlib.util.spec_from_file_location("scout_host", HOST)
 host = importlib.util.module_from_spec(spec)
-# Loading the host in tests must also work in a read-only module bundle.
 with patch.object(sys, "dont_write_bytecode", True):
     spec.loader.exec_module(host)
 
@@ -123,7 +122,7 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual((result["found"], result["note"], result["status"]), (1, "all good", "done"))
         arguments = json.loads(self.args_file.read_text().strip())
-        self.assertEqual(arguments, ["file", "A thing", "--body", "why\nFound by scout sample."])
+        self.assertEqual(arguments, ["file", "A thing", "--body", "why\nFound by scout sample.\nScout: sample"])
 
     def test_failed_script(self):
         self.scout(fields="run: printf 'bad news\\n' >&2; exit 2")
@@ -140,7 +139,6 @@ class ScoutTests(unittest.TestCase):
         self.assertEqual([c[1] for c in calls], ["Scout sample keeps failing"])
         self.assertIn("failed 2 runs in a row. Last error: bad news", calls[0][3])
         self.assertEqual(calls[0][4:], ["--label", "P1", "--label", "app:ops"])
-        # A good run clears the count, so one later failure files nothing.
         self.scout(fields="run: true")
         self.call("POST", "/run", {"id": "sample"})
         filed = len(self.args_file.read_text().splitlines())

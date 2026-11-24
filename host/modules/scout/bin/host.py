@@ -65,19 +65,14 @@ def record(scout_id, status, found=0, note="", session=None, when=None):
         raise ValueError("found must be a non-negative integer and note must be text")
     state = state_path()
     state.mkdir(parents=True, exist_ok=True)
-    # A short lock, waited for, so two writers never lose each other's result.
     with (state / "runs.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         records = read_json(state / "runs.json", {})
         previous = records.get(scout_id) or {}
-        # `when` checks the last run under the lock, so two sessions never both take one scout.
         if when and not when(records.get(scout_id)):
             return None
         stamp = now().isoformat()
-        # `fails` counts failed runs in a row, so `run_scout` can tell a broken scout from one bad run.
         fails = previous.get("fails", 0) + 1 if status == "failed" else 0 if status == "done" else previous.get("fails", 0)
-        # `started` is when the run began. The due rules read it, so a run that ends after
-        # midnight still counts for the day it started, not the next one.
         result = {"at": stamp, "started": stamp if status == "running" else previous.get("started", stamp),
                   "status": status, "found": found, "note": note, "fails": fails,
                   "session": session if status == "running" else previous.get("session")}
@@ -143,8 +138,6 @@ def schedule(scout, last, current):
         return False, None
     began = last and (last.get("started") or last["at"])
     if scout["every"] == "routine":
-        # A routine has no day or hour: it is due once a round, and a round ends when every routine has run.
-        # Owner, 2026-11-18: "we must not specify days for the routines, that are just things to do".
         return (not began or datetime.fromisoformat(began) < datetime.fromisoformat(round_since())), None
     at = datetime.fromisoformat(began).astimezone(current.tzinfo) if began else None
     every = scout["every"]
@@ -158,7 +151,6 @@ def schedule(scout, last, current):
     if eligible and not ran_today and current >= target:
         return True, None
     if day is not None and at is not None:
-        # Missed its day because Panel was closed: catch up on the next open, not a week later.
         last_day = target - timedelta(days=(current.weekday() - day) % 7)
         if last_day > current:
             last_day -= timedelta(days=7)
@@ -182,13 +174,8 @@ def listing():
     for scout in items:
         scout.pop("run")
         last = records.get(scout["id"])
-        # An agent scout is a routine. It is due here, never filed on GitHub: a free session takes it from
-        # `board next`, and the Slack feed pings when one is missed. Owner, 2026-11-18: "Routines must not be filed
-        # though ... agents must ping me that we are missing out on that routine, or when I trigger a free session,
-        # agents must do them". Nothing starts a session by itself.
         scout["due"], scout["next_at"] = schedule(scout, last, current)
         if last and last["status"] == "running":
-            # A script cannot outlive Panel's 60 s call. An agent gets two hours.
             limit = 120 if scout["kind"] == "script" else 7200
             if current.timestamp() - datetime.fromisoformat(last["at"]).timestamp() > limit:
                 last = dict(last, status="stale")
@@ -205,7 +192,6 @@ def board_command():
 
 def command(args, timeout, env=None):
     state_path().mkdir(parents=True, exist_ok=True)
-    # Files avoid pipe deadlocks when a shell leaves descendants holding stdout.
     with tempfile.TemporaryFile(dir=state_path()) as out, tempfile.TemporaryFile(dir=state_path()) as err:
         process = subprocess.Popen(args, cwd=ops_path(), env=env, stdin=subprocess.DEVNULL,
                                    stdout=out, stderr=err, start_new_session=True)
@@ -215,7 +201,6 @@ def command(args, timeout, env=None):
         except subprocess.TimeoutExpired:
             timed_out = True
         finally:
-            # Scouts are one-shot jobs; descendants must not outlive the request.
             try:
                 os.killpg(process.pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -232,10 +217,8 @@ def last_line(text):
 
 def file_finding(scout_id, title, body, labels, deadline):
     """`board file` one finding. Returns why it failed, or None."""
-    # A FOUND line is one line, but `board file` reads each field only at a line start. Mid-line `Why:` failed
-    # every main-build P0 and the keeps-failing issue (2026-11-03).
     body = re.sub(r"(?<=[.!?`)])[ \t]+(Why|Checked):", r"\n\1:", body.strip())
-    body = (body + "\n" if body else "") + "Found by scout %s." % scout_id
+    body = (body + "\n" if body else "") + "Found by scout %s.\nScout: %s" % (scout_id, scout_id)
     flags = [arg for label in labels if label.strip() for arg in ("--label", label.strip())]
     filed, _, error, expired = command(
         board_command() + ["file", title.strip(), "--body", body, *flags], deadline - time.monotonic())
@@ -264,7 +247,6 @@ def report_broken(scout, last, deadline):
 
 
 def run_scout(scout):
-    # Board filing shares the budget so Panel never kills us before saving the result.
     deadline = time.monotonic() + 49.5
     scout_id = scout["id"]
     unreported = report_broken(scout, read_json(state_path() / "runs.json", {}).get(scout_id), deadline)
@@ -272,7 +254,6 @@ def run_scout(scout):
     found, note, status = 0, "", "done"
     try:
         code, stdout, stderr, expired = command(
-            # A login shell puts /usr/bin/python3 (3.9) first; scouts need Homebrew's.
             ["bash", "-lc", "export PATH=/opt/homebrew/bin:$PATH; " + scout["run"]], deadline - time.monotonic(),
             dict(os.environ, SCOUT_ID=scout_id))
         findings = [line[6:] for line in stdout.splitlines() if line.startswith("FOUND ")]
@@ -285,7 +266,6 @@ def run_scout(scout):
             if time.monotonic() >= deadline:
                 status, note = "failed", "timed out after 50 s"
                 break
-            # FOUND <title> | <body> | <labels, comma separated>
             title, _, rest = finding.partition("|")
             body, _, labels = rest.partition("|")
             if error := file_finding(scout_id, title, body, labels.split(","), deadline):
@@ -303,7 +283,6 @@ def board(fresh):
     try:
         if not fresh and cache.exists() and time.time() - cache.stat().st_mtime < 60:
             return read_json(cache, {})
-        # One gh call per claimed issue, so this grows with the board. Panel's limit is 60 s.
         code, stdout, stderr, expired = command(board_command() + ["json"], 40)
         if code or expired:
             return {"error": last_line(stderr) or ("board timed out" if expired else "board exited %d" % code)}
@@ -399,7 +378,6 @@ def builds():
         if not line.strip():
             continue
         cells = line.split("\t")
-        # Old rows stop at 7 columns. A missing cell reads as "-".
         cells += ["-"] * (len(BUILD_COLUMNS) - len(cells))
         recent.append(dict(zip(BUILD_COLUMNS, cells[:len(BUILD_COLUMNS)])))
     return {"running": running, "recent": recent[-12:][::-1], "at": now().isoformat()}
@@ -437,8 +415,6 @@ def main():
     if method == "GET" and path == "/board":
         return _respond(200, board(qs("fresh") == "1"))
     if method == "GET" and path == "/routines":
-        # The Board's Routines band: each routine's state and its last reports, from `ops/runbooks/routines.py`.
-        # Owner, 2026-11-18: "I want to be involving in more, understand more what is going on so I can decide".
         code, stdout, stderr, expired = command(["python3", str(ops_path() / "runbooks/routines.py"), "json"], 30)
         if code or expired:
             return _respond(200, {"error": last_line(stderr) or ("routines timed out" if expired else "routines exited %d" % code)})
@@ -452,7 +428,6 @@ def main():
         if not scout:
             return _respond(400, {"error": "unknown id"})
         scout_id = scout["id"]
-        # A routine closes through `routines.py done`, which finds what it filed and posts the report he reads.
         close = ('`python3 %s done %s --note "<one Turkish line: what you looked at and found>"`' %
                  (shlex.quote(str(ops_path() / "runbooks/routines.py")), shlex.quote(scout_id))
                  if scout["every"] == "routine" else
@@ -485,7 +460,6 @@ def main():
             return _respond(400, {"error": str(error)})
         return _respond(404, {"error": "no route"})
     if method == "POST" and path == "/live/answer":
-        # Live's Decide card: the owner's tap or words, recorded the way a Slack tap is.
         try:
             d = json.loads(sys.stdin.buffer.read() or b"{}")
             return _respond(200, live_answer(d if isinstance(d, dict) else {}))
@@ -513,7 +487,6 @@ def main():
                 return _respond(200, run_scout(scout))
             if scout["kind"] != "agent" or not isinstance(d.get("session"), str) or not d["session"].strip():
                 raise ValueError("/start requires an agent scout and session")
-            # `board next` sends if_due: of two sessions asking at once, only the first gets it.
             due = (lambda last: schedule(scout, last, now())[0]) if d.get("if_due") else None
             began = record(scout["id"], "running", session=d["session"], when=due)
             return _respond(200, began) if began else _respond(409, {"error": "not due"})
