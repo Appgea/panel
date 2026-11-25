@@ -440,8 +440,8 @@ export function mountDashboard(
   });
 
   productSpine.body.innerHTML = `
-    <p class="dash-lede">Trace product behavior, decision history, and failure paths in one
-    view.</p>`;
+    <p class="dash-lede">Every part of the product, how wide and deep it is, and where it
+    should grow.</p>`;
 
   /* -------------------------------------------------------------- workshop */
 
