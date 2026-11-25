@@ -46,8 +46,8 @@ pub struct ProjectSurface {
     pub glyph: String,
     pub roles: Vec<String>,
     pub types: Vec<String>,
-    /// Module route. `{id}` and `{path}` are resolved by the UI.
     pub mount: String,
+    pub every_project: bool,
 }
 
 #[derive(Clone)]
@@ -401,6 +401,7 @@ pub fn describe(panel_home: &Path) -> Vec<Module> {
                                     .to_string(),
                                 roles: strings("roles"),
                                 types: strings("types"),
+                                every_project: surface["everyProject"].as_bool().unwrap_or(false),
                                 id,
                                 mount,
                             })

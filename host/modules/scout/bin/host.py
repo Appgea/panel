@@ -423,6 +423,11 @@ def main():
         return _respond(200, builds())
     if method == "GET" and path == "/picture":
         return _respond(*picture(qs("path")))
+    if method == "GET" and path == "/tree":
+        sys.path.insert(0, str(ops_path() / "runbooks"))
+        import tree_page
+        sys.stdout.buffer.write(b"200\ntext/html\n\n" + tree_page.page(qs("root")).encode())
+        return
     if method == "GET" and path == "/prompt":
         scout = next((s for s in scouts() if s["id"] == qs("id")), None)
         if not scout:

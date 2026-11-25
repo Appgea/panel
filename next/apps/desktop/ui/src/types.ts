@@ -93,6 +93,7 @@ export type ProjectSurface = {
   roles: string[];
   types: string[];
   mount: string;
+  every_project: boolean;
 };
 
 export type PanelModule = {

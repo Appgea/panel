@@ -681,7 +681,7 @@ function tabEnabled(here: ProjectState, tab: Tab): boolean {
   if (extension) {
     return (
       activeExtensionModules.has(extension.module) &&
-      here.project.extension_id === extension.module &&
+      (extension.every ? here.project.role === "leaf" : here.project.extension_id === extension.module) &&
       (!extension.roles.length || extension.roles.includes(here.project.role)) &&
       (!extension.types.length || extension.types.includes(here.project.type))
     );
@@ -3625,6 +3625,7 @@ type TabEntry = {
     mount: string;
     roles: string[];
     types: string[];
+    every: boolean;
     frame: HTMLIFrameElement;
   };
 };
@@ -3645,6 +3646,13 @@ const extensionTabs = new Map<Tab, NonNullable<TabEntry["extension"]>>();
 const activeExtensionModules = new Set<string>();
 /** One answer for every screen that shows a module's card: is it installed right now. */
 const moduleInstalled = (name: string): boolean => activeExtensionModules.has(name);
+
+addEventListener("message", (event) => {
+  const url = (event.data as { open?: unknown } | null)?.open;
+  if (typeof url !== "string") return;
+  if (![...extensionTabs.values()].some((entry) => entry.frame.contentWindow === event.source)) return;
+  void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] extension link", error));
+});
 
 function registerProjectSurfaces(modules: PanelModule[]): void {
   activeExtensionModules.clear();
@@ -3688,6 +3696,7 @@ function registerProjectSurfaces(modules: PanelModule[]): void {
         mount: surface.mount,
         roles: surface.roles ?? [],
         types: surface.types ?? [],
+        every: surface.every_project ?? false,
         frame,
       };
       extensionTabs.set(tab, extension);

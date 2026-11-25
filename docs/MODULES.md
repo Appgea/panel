@@ -37,7 +37,7 @@ Fields the Rust host reads (verified in `modules.rs`):
 | `title`, `icon`, `summary` | Extensions screen and rail |
 | `requires` | commands that must be on `PATH` for the row to read "available" — reported, never enforced |
 | `chatAsset.js` / `.css` | inlined into the page; this is how a module supplies its own renderers/animations (`git-manager` draws the animated commit graph this way) |
-| `projectSurfaces` | `[{id, title, glyph?, roles[], types[], mount}]` — typed project tabs. `mount` e.g. `/project?root={path}`; `{id}`/`{path}` are URL-encoded from the selected project. Panel owns the tab + iframe lifecycle, the module owns the route and page |
+| `projectSurfaces` | `[{id, title, glyph?, roles[], types[], everyProject?, mount}]` — typed project tabs. `mount` e.g. `/project?root={path}`; `{id}`/`{path}` are URL-encoded from the selected project. Panel owns the tab + iframe lifecycle, the module owns the route and page. A tab shows on the module's own project, or with `everyProject: true` on every app project (scout's Readiness tab). The page opens a web link with `parent.postMessage({open: url}, "*")` |
 
 Read by the **build**, not the app: `visibility` (`"public"` ships in release builds; anything else, or missing, stays home — fail-closed; `PANEL_PRIVATE=1` ships all).
 
