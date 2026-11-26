@@ -283,6 +283,12 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
   /** Files unticked on a card, per card id. Ticked is the default, so only exclusions are kept. */
   const leftOut = new Map<string, Set<string>>();
   const drafts = new Map<string, string>();
+  const HISTORY_FIRST = 8;
+  const HISTORY_STEP = 20;
+  const FILES_FIRST = 5;
+  let historyShown = HISTORY_FIRST;
+  let visibleStones = HISTORY_FIRST;
+  const filesOpen = new Set<string>();
   let branchQuery = "";
   let refreshSerial = 0;
   let refreshTask: Promise<void> | null = null;
@@ -311,7 +317,7 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
 
   const isBrowseAction = (act: string): boolean =>
     ["refresh", "drawer", "atlas", "previous-file", "next-file", "focus-conflicts", "retry-diff", "retry-focus"].includes(act)
-    || act.startsWith("review-card:");
+    || act === "more-history" || act.startsWith("review-card:") || act.startsWith("more-files:");
 
   function syncBusyControls(): void {
     const busy = mutating || busyRepos.has(repo);
@@ -609,6 +615,8 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     cards = [];
     spine = { stones: [], incoming: [], lineAt: 0, upstream: null };
     pick = null;
+    historyShown = HISTORY_FIRST;
+    filesOpen.clear();
     leftOut.clear();
     drafts.clear();
     window.clearTimeout(safetyTimer);
@@ -830,11 +838,18 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
     const ghosts = spine.incoming
       .map((commit) => stoneNode(commit, { ghost: true }))
       .join("");
-    const stones = spine.stones.map((commit, index) => {
+    const pickedSha = pick?.kind === "stone" ? pick.sha : "";
+    const pickedAt = pickedSha ? spine.stones.findIndex((commit) => commit.sha === pickedSha) : -1;
+    const visible = Math.min(spine.stones.length, Math.max(historyShown, pickedAt + 1));
+    visibleStones = visible;
+    const lineShown = spine.lineAt < visible || spine.lineAt >= spine.stones.length;
+    const stones = spine.stones.slice(0, visible).map((commit, index) => {
       const before = index === spine.lineAt ? lineNode() + ghosts : "";
       return before + stoneNode(commit, { unsent: index < spine.lineAt, head: index === 0 });
     });
-    if (spine.lineAt >= spine.stones.length) stones.push(lineNode() + ghosts);
+    const hidden = spine.stones.length - visible;
+    if (hidden > 0) stones.push(`<button class="spine-more" type="button" data-act="more-history">Show ${Math.min(hidden, HISTORY_STEP)} more of ${hidden} earlier</button>`);
+    if (!lineShown || spine.lineAt >= spine.stones.length) stones.push(lineNode() + ghosts);
     parts.push(`<div class="spine-section is-history">${stones.join("")}${graph.error ? `<div class="spine-empty">${esc(graph.error)}</div>` : ""}</div>`);
     const scroll = spineScroll.scrollTop;
     spineScroll.innerHTML = parts.join("");
@@ -844,7 +859,11 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
   function cardNode(card: Card): string {
     const picked = pick?.kind === "card" && pick.id === card.id;
     const out = leftOut.get(card.id);
-    const rows = card.changes
+    const pickedKey = pick?.kind === "file" ? pick.key : "";
+    const expanded = filesOpen.has(card.id) || (pickedKey !== "" && card.changes.some((change) => change.key === pickedKey));
+    const shownChanges = expanded ? card.changes : card.changes.slice(0, FILES_FIRST);
+    const more = card.changes.length - shownChanges.length;
+    const rows = shownChanges
       .map((change) => {
         const filePicked = pick?.kind === "file" && pick.key === change.key;
         const off = out?.has(change.path);
@@ -863,7 +882,7 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
         <span class="card-title"><b>${esc(card.title)}</b><small>${card.kind === "turn" ? esc(card.agent ?? "agent") + " · " : ""}${card.live ? "still writing · " : ""}${plural(uniquePaths(card.changes).length, "file")}</small></span>
         ${card.live ? '<i class="card-live mo-pulse"></i>' : ""}
       </button>
-      <div class="card-files">${rows}</div>
+      <div class="card-files">${rows}${more > 0 ? `<button class="spine-more" type="button" data-act="more-files:${esc(card.id)}">${more} more ${more === 1 ? "file" : "files"}</button>` : ""}</div>
     </article>`;
   }
 
@@ -1630,6 +1649,14 @@ function mountProjectGit(host: HTMLElement, events: GitEvents, busyRepos: Set<st
   function runAct(act: string, target: HTMLElement): void {
     if (target instanceof HTMLButtonElement && target.disabled) return;
     if ((mutating || busyRepos.has(repo)) && !isBrowseAction(act)) return;
+    if (act === "more-history") {
+      historyShown = visibleStones + HISTORY_STEP;
+      return renderSpine();
+    }
+    if (act.startsWith("more-files:")) {
+      filesOpen.add(act.slice("more-files:".length));
+      return renderSpine();
+    }
     if (act.startsWith("review-card:")) {
       return doPick({ kind: "card", id: act.slice("review-card:".length) });
     }

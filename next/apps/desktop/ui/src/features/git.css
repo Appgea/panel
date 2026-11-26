@@ -325,6 +325,22 @@
 .card-title small { display: block; margin-top: 1px; color: var(--ink-faint); font-size: var(--text-xs); }
 .card-live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
 .card-files { border-top: 1px solid var(--line-soft); }
+.spine-more {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  padding: 0 12px;
+  color: var(--ink-dim);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.spine-more:hover { color: var(--ink); background: var(--hover); transform: none; }
+.spine-more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.is-history > .spine-more { margin: 4px 0 0; border-radius: 7px; }
 .card-file {
   width: 100%;
   display: flex;
