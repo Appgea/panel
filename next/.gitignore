@@ -14,3 +14,4 @@ apps/desktop/ui/fleet.real.json
 # A saved `fleet view` for the AI fleet harness (dev_fleet.html?real=now). Real terminal text.
 apps/desktop/ui/fleet.now.real.json
 apps/desktop/ui/fleet.design.real.json
+apps/desktop/ui/fleet.trust.real.json
