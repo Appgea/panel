@@ -2704,51 +2704,10 @@ function platformPills(members: ProjectState[], labels: string[]): HTMLElement {
   return pills;
 }
 
-/** The marks around the name: the corner badge, the git chip, the activity bars, the quick button. */
-function decorateRow(
-  row: HTMLElement,
-  here: ProjectState,
-  members: ProjectState[],
-  attention: "needs" | "done" | null,
-): void {
+function decorateRow(row: HTMLElement, here: ProjectState, members: ProjectState[], attention: "needs" | "done" | null): void {
   if (here.project.role !== "leaf") return;
-  const lead = leadMember(members);
-  const id = lead.project.id;
-  const meta = row.querySelector<HTMLElement>(".project-meta")!;
   const touched = Math.max(...members.map(touchedAt));
   row.classList.toggle("is-stale", touched > 0 && Date.now() - touched > STALE_AFTER && !attention);
-
-  // One corner badge, the loudest signal wins. The title lists them all.
-  const reviews = members.reduce((sum, member) => sum + (reviewCounts.get(member.project.id) ?? 0), 0);
-  const verdict = members.map((member) => pulse.verdict(member.project.id)).find((v) => v?.risk) ?? null;
-  const signals: string[] = [];
-  if (!here.project.exists) signals.push("Folder missing");
-  if (verdict) signals.push(`Analytics: ${verdict.label || verdict.call}`);
-  if (reviews) signals.push(`${reviews} waiting for review`);
-  if (signals.length) {
-    const badge = document.createElement("i");
-    badge.className = `project-badge ${!here.project.exists || verdict ? "t-risk" : "t-review"}`;
-    badge.textContent = !here.project.exists ? "!" : verdict ? "↓" : String(Math.min(reviews, 9));
-    badge.title = signals.join(" · ");
-    row.querySelector(".project-icon")!.append(badge);
-  }
-
-  if (attention) {
-    const quick = document.createElement("button");
-    quick.type = "button";
-    quick.className = `project-quick t-${attention === "needs" ? "warn" : "ok"}`;
-    quick.textContent = attention === "needs" ? "Answer" : "Diff";
-    quick.title =
-      attention === "needs"
-        ? "See what the agent is asking, and answer it here"
-        : "Open the files this turn changed";
-    quick.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (attention === "needs") railCard.pin(row, () => cardModel(lead));
-      else void select(id, "files");
-    });
-    meta.append(quick);
-  }
 }
 
 /** The first row a filter found answers Enter, with the action word if one was typed. */
@@ -3132,7 +3091,7 @@ function paintProjects(): void {
       row.classList.toggle("is-asking", attention === "needs");
       row.classList.toggle("is-done", attention === "done");
       row.classList.toggle("is-running", running);
-      row.innerHTML = `<span class="project-icon"><span class="project-glyph"></span><i class="dot"></i></span><span class="project-label"><b></b></span><small></small><span class="project-meta"></span><span class="project-tools"><button class="project-pin" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z"/><path d="M12 14v7"/></svg></button><button class="project-more" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></span>`;
+      row.innerHTML = `<span class="project-icon"><span class="project-glyph"></span><i class="dot"></i></span><span class="project-label"><b></b></span><span class="project-meta"></span><span class="project-tools"><button class="project-pin" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z"/><path d="M12 14v7"/></svg></button><button class="project-more" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></span>`;
       row.querySelector(".project-glyph")!.textContent = here.project.name.trim().charAt(0).toUpperCase();
       const icon = document.createElement("img");
       icon.src = projectIconUrl(here.project.id);
@@ -3150,17 +3109,11 @@ function paintProjects(): void {
               tone: "",
             }
           : rowLine(lineInput(leadMember(members)));
-      const small = row.querySelector("small")!;
       const speaks = line.tone !== "" && line.tone !== "mute";
-      row.classList.toggle("has-line", speaks);
-      if (speaks) {
-        small.textContent = line.text;
-        small.classList.add(`t-${line.tone}`);
-      }
       const mark = line.text;
       decorateRow(row, here, members, attention);
       // The name survives collapse: the compact rail shows icons only, so it rides on hover.
-      row.title = attention ? `${here.project.name} — ${mark}` : here.project.name;
+      row.title = speaks ? `${here.project.name} — ${mark}` : here.project.name;
       const pin = row.querySelector<HTMLButtonElement>(".project-pin")!;
       pin.setAttribute("aria-label", pinned.has(here.project.id) ? "Unpin project" : "Pin project to top");
       pin.title = pinned.has(here.project.id) ? "Unpin" : "Pin to top";
