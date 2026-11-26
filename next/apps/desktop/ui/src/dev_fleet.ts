@@ -8,6 +8,7 @@
 import "./style.css";
 import type { OverviewData } from "./features/board_types";
 import { mountFleet, type FleetView } from "./features/fleet";
+import type { DesignData } from "./features/fleet_design";
 
 const params = new URLSearchParams(location.search);
 const clock = (m: number): string =>
@@ -80,8 +81,32 @@ const DAY: OverviewData = {
   ],
 };
 
+let designData: DesignData | null = null;
+const design = {
+  load: async (): Promise<DesignData> => (designData ??= (await (await fetch("/fleet.design.real.json")).json()) as DesignData),
+  send: async (route: string, body: unknown): Promise<DesignData> => {
+    const d = designData ?? {};
+    const req = body as { type: string; id: string; meta: [string, string][]; body: string; new?: boolean };
+    const lists = [d.bots, d.lenses, d.routines, d.abilities, d.kinds];
+    if (route === "undo") return { refused: "The harness keeps no history." };
+    for (const l of lists) {
+      const at = l?.findIndex((x) => x.type === req.type && x.id === req.id) ?? -1;
+      if (at < 0 || !l) continue;
+      if (route === "delete") l.splice(at, 1);
+      else l[at] = { ...l[at], meta: req.meta, body: req.body };
+      return { ...d };
+    }
+    if (route === "save" && req.new) {
+      const list = { bot: d.bots, lens: d.lenses, routine: d.routines, ability: d.abilities, kind: d.kinds }[req.type];
+      list?.push({ type: req.type as "bot", id: req.id, title: "", meta: req.meta, body: req.body, path: "(harness)", sig: "", family: req.meta.find(([k]) => k === "family")?.[1] });
+    }
+    return { ...d };
+  },
+};
+
 let reads = 0;
 const handle = mountFleet(document.getElementById("fleetScreen")!, {
+  design,
   openIssue: (n) => console.log("open issue", n),
   day: async () => (params.has("empty") ? { cards: [] } : params.get("real") === "now" ? null : DAY),
   view: async () => {
@@ -90,4 +115,11 @@ const handle = mountFleet(document.getElementById("fleetScreen")!, {
     return view();
   },
 });
+if (params.has("design")) localStorage.setItem("panel.fleet.mode", "design");
 handle.open();
+const steps = (params.get("steps") ?? "").split("|").filter(Boolean);
+const clickText = (text: string): void => {
+  const hit = [...document.querySelectorAll<HTMLElement>("button")].find((b) => b.querySelector("b")?.textContent === text || b.textContent === text);
+  hit?.click();
+};
+steps.forEach((s, i) => window.setTimeout(() => clickText(s), 900 + i * 300));

@@ -22,6 +22,7 @@ import type { OverviewData } from "./board_types";
 import { CLASS, className, duration, marks, mission, runLine, said, tidy, tokens } from "./fleet_words";
 import { art, crest, FLAME, insignia, STAR, tier } from "./game_art";
 import { hoursBack, newGame, rank, STREAK, update, XP, type Tally } from "./live_game";
+import type { DesignEvents, DesignHandle } from "./fleet_design";
 import "./fleet.css";
 
 export type FleetUnit = {
@@ -62,6 +63,7 @@ export type FleetEvents = {
   /** The board's closes and finds since a number of hours back, for the score. Without it the fleet's own closes score. */
   day?(hours: number): Promise<OverviewData | null>;
   openIssue?(number: number): void;
+  design?: DesignEvents;
 };
 export type FleetHandle = { open(): void; clear(): void; dispose(): void };
 
@@ -133,6 +135,22 @@ export function mountFleet(screen: HTMLElement, events: FleetEvents): FleetHandl
   const heading = h("div", "fl-heading");
   heading.append(h("h1", "", "AI fleet"), state, slots);
   const header = h("header", "fl-header");
+  let mode: "live" | "design" = "live";
+  let design: DesignHandle | null = null;
+  const designRoot = h("div");
+  designRoot.hidden = true;
+  const modes = h("div", "fl-modes");
+  modes.setAttribute("role", "tablist");
+  const modeButtons = (["live", "design"] as const).map((m) => {
+    const b = h("button", "fl-mode", m === "live" ? "Live" : "Fleet Design");
+    b.type = "button";
+    b.setAttribute("role", "tab");
+    b.addEventListener("click", () => setMode(m));
+    return [m, b] as const;
+  });
+  modes.append(...modeButtons.map(([, b]) => b));
+  modes.hidden = !events.design;
+  heading.append(modes);
   header.append(heading, stamp);
   const error = h("p", "fl-error");
   error.hidden = true;
@@ -199,7 +217,48 @@ export function mountFleet(screen: HTMLElement, events: FleetEvents): FleetHandl
 
   const body = h("div", "fl-body");
   body.append(hero, squad, unitsHead, units, empty, todayHead, today, moreRuns);
-  screen.replaceChildren(header, error, body);
+  screen.replaceChildren(header, error, body, designRoot);
+
+  function paintMode(): void {
+    for (const [m, b] of modeButtons) {
+      b.classList.toggle("is-on", m === mode);
+      b.setAttribute("aria-selected", String(m === mode));
+    }
+    body.hidden = mode !== "live";
+    designRoot.hidden = mode !== "design";
+    stamp.hidden = mode !== "live";
+    state.hidden = slots.hidden = mode !== "live";
+    if (mode === "live" && last) paint(last);
+  }
+
+  function setMode(m: "live" | "design"): void {
+    if (m === mode && (m === "live" || design)) return;
+    mode = m;
+    try {
+      localStorage.setItem("panel.fleet.mode", m);
+    } catch {
+      void 0;
+    }
+    paintMode();
+    window.clearInterval(timer);
+    if (!visible) return;
+    if (m === "live") {
+      void read();
+      timer = window.setInterval(() => void read(), EVERY);
+      return;
+    }
+    if (design) return design.open();
+    designRoot.textContent = "Opening Fleet Design…";
+    void import("./fleet_design")
+      .then(({ mountDesign }) => {
+        if (!events.design) return;
+        design = mountDesign(designRoot, events.design);
+        if (mode === "design" && visible) design.open();
+      })
+      .catch((reason: unknown) => {
+        designRoot.textContent = `Fleet Design could not open: ${errorText(reason, "it did not load")}`;
+      });
+  }
 
   const issueLink = (n: number, cls = "fl-issue"): HTMLElement => {
     if (!events.openIssue) return h("span", cls, `#${n}`);
@@ -548,6 +607,15 @@ export function mountFleet(screen: HTMLElement, events: FleetEvents): FleetHandl
     open() {
       visible = true;
       screen.hidden = false;
+      let saved = "live";
+      try {
+        saved = localStorage.getItem("panel.fleet.mode") ?? "live";
+      } catch {
+        void 0;
+      }
+      mode = "live";
+      if (saved === "design" && events.design) return setMode("design");
+      paintMode();
       void read();
       window.clearInterval(timer);
       timer = window.setInterval(() => void read(), EVERY);
@@ -559,6 +627,7 @@ export function mountFleet(screen: HTMLElement, events: FleetEvents): FleetHandl
     },
     dispose() {
       window.clearInterval(timer);
+      design?.dispose();
       cards.clear();
       screen.replaceChildren();
     },

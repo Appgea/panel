@@ -54,7 +54,8 @@ import { mountForYou, type ForYouHandle } from "./features/foryou";
 import type { BoardFeed } from "./features/live_cards";
 import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import type { InboxPost } from "./features/inbox_feed";
-import { moduleGet } from "./features/modules";
+import { moduleGet, modulePost } from "./features/modules";
+import type { DesignData } from "./features/fleet_design";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
 import {
@@ -1419,6 +1420,10 @@ function showFleet(): void {
       // The board's day scores the rank the way Live does. Without the scout module the fleet's own closes score.
       day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
       openIssue: (n) => void invoke("open_link", { url: `https://github.com/Appgea/ops/issues/${n}` }).catch((error: unknown) => console.warn("[panel] fleet", error)),
+      design: {
+        load: () => moduleGet<DesignData>("/m/fleet/design"),
+        send: (route, body) => modulePost<DesignData>(`/m/fleet/design/${route}`, body),
+      },
     });
     return fleet;
   });

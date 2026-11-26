@@ -61,6 +61,22 @@
 .fl-state.is-hold { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, transparent); }
 .fl-slots { min-width: 0; overflow: hidden; color: var(--ink-faint); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
 .fl-stamp { flex: none; color: var(--ink-faint); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+.fl-modes { display: flex; flex: none; order: -1; padding: 3px; border-radius: 999px; background: var(--bg-raised); }
+.fl-heading h1 { order: -2; }
+.fl-mode {
+  padding: 5px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.fl-mode:hover { color: var(--ink); }
+.fl-mode.is-on { background: var(--ink); color: var(--bg); }
 .fl-error { flex: none; margin: 0; padding: 10px 24px; color: var(--risk); background: color-mix(in srgb, var(--risk) 8%, transparent); border-bottom: 1px solid var(--line-soft); }
 
 .fl-body { flex: 1; min-height: 0; padding: 20px 24px 32px; overflow-y: auto; }

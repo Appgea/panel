@@ -39,6 +39,9 @@ def main():
     method, path = sys.argv[1], sys.argv[2].split("?")[0]
     if method == "GET" and path == "/view":
         return respond(*view())
+    if path.startswith("/design"):
+        import design
+        return respond(*design.handle(method, path, sys.stdin.read() if method == "POST" else ""))
     respond(404, {"error": f"no route {method} {path}"})
 
 
