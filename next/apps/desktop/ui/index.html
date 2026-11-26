@@ -297,7 +297,6 @@
              where you are, or Home is, or a project is. The rows are shortcuts to a tab inside it,
              never separate places. The strip within is ⌘1…⌘9; ⌘⇧W is the door. -->
         <nav id="workspaceNav" class="side-nav" aria-label="Workspace">
-          <span class="side-label side-nav-label"><span>Workspace</span></span>
           <button id="runButton" class="nav-row" type="button" title="Runs">
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg></span> Runs
           </button>
@@ -311,7 +310,6 @@
              live manager terminal. Esc gives the previous screen straight back. It sits under the
              Workspace: the work area is what you reach for first. -->
         <nav id="chatNav" class="side-nav chat-nav" aria-label="Inbox">
-          <span class="side-label side-nav-label"><span>Now</span></span>
           <!-- Everything that waits for you, on one screen: board calls, agents that wait, reports,
                files to look at, support mail, finished sessions. Reports, Manager, Support, History
                and Review had a row each until 2026-11-05. Owner: "One screen." See foryou.ts. -->
@@ -328,7 +326,6 @@
 
         <!-- Project memory and private notes. -->
         <nav id="planNav" class="side-nav plan-nav" aria-label="Desk">
-          <span class="side-label side-nav-label"><span>Desk</span></span>
           <!-- The fleet's units, what each is typing, and what closed today. Shown only with the
                fleet extension installed. -->
           <button id="fleetButton" class="nav-row" type="button" title="AI fleet: the units that run now and what they closed today" hidden>
@@ -363,7 +360,6 @@
                     title="Show only projects with a live agent"><i></i><b>0</b></button>
             <button id="projectSort" class="sort-chip" type="button"
                     title="Order: manual — drag rows to arrange">Manual</button>
-            <span id="projectCount">0</span>
           </div>
           <div id="projectList" class="project-list"></div>
           <!-- The rail shows the five you last worked in; everything else lives behind this one
@@ -390,7 +386,6 @@
             </button>
             <button id="themeToggle" class="ghost theme-toggle" type="button"
                     aria-label="Toggle light / dark theme" title="Toggle light / dark theme">◐</button>
-            <span class="health" title="Panel is running locally"><span class="health-dot"></span> Local</span>
           </span>
         </footer>
       </aside>

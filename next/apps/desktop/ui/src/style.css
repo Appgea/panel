@@ -333,7 +333,7 @@ button.ghost.sidebar-toggle[aria-pressed="true"] { border-color: var(--line); co
 .home-nav { margin-bottom: -6px; }
 
 /* The group's own name, on the strip's baseline. Reuses .side-label's typography. */
-.side-nav-label { padding: 0 8px 4px; }
+.side-nav + .side-nav { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
 .nav-row {
   position: relative;
   display: grid;
@@ -413,7 +413,6 @@ html.sidebar-compact .nav-badge {
   text-align: right;
 }
 /* The group label is the whole label: its one span is the name, not a count. */
-.side-nav-label span:last-child { text-align: left; font-weight: 600; }
 /* The projects scroll with the rest of the sidebar now, not inside a box of their own. The
    filter, the label, the rows, the door and the "+" stay one list. Overflow-x is hidden only to
    swallow the list's 2px bleed. */
@@ -805,6 +804,8 @@ html.sidebar-compact .project-group::before {
   overflow: hidden;
 }
 .project-label b { flex: 0 1 auto; min-width: 0; }
+.project-row:not(.has-line) { min-height: 38px; }
+.project-row:not(.has-line) small { display: none; }
 .project-row small {
   min-width: 0;
   overflow: hidden;
@@ -852,13 +853,7 @@ html.sidebar-compact .project-group::before {
   min-width: 0;
 }
 .project-meta:empty { display: none; }
-.project-chip {
-  color: var(--ink-faint);
-  font: var(--text-xs) ui-monospace, Menlo, monospace;
-  white-space: nowrap;
-}
-.project-chip.is-warn { color: var(--warn); }
-.project-spark { width: 28px; height: 10px; fill: color-mix(in oklab, var(--accent) 70%, var(--ink-faint)); }
+.project-spark { fill: color-mix(in oklab, var(--accent) 70%, var(--ink-faint)); }
 .project-spark rect.is-zero { fill: var(--line); }
 .project-row.is-active .project-spark { fill: var(--accent); }
 .project-quick {
@@ -1054,18 +1049,8 @@ html.sidebar-compact .lane-head.is-toggle { padding: 8px 0 4px; }
 .theme-toggle { padding: 5px; font-size: var(--text-sm); line-height: 1; color: var(--ink-faint); border-color: transparent; }
 .theme-toggle .ui-icon { width: 14px; height: 14px; }
 .theme-toggle:hover { color: var(--ink); background: var(--hover); }
-.health {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-}
 /* Static. "Healthy" is the resting truth, and a truth that never changes does not need to
    throb to prove it. The pulse canvas is the ONE continuous motion in the shell. */
-.health-dot {
-  width: 5px; height: 5px; border-radius: 50%; background: var(--ok);
-  opacity: 0.75;
-}
 
 /* ------------------------------------------------- sidebar, compact rail */
 
@@ -1098,7 +1083,6 @@ html.sidebar-compact .nav-glyph svg { width: 16px; height: 16px; }
    thing left saying "you are in the workspace" once the labels are gone. */
 html.sidebar-compact .side-nav { gap: 2px; padding: 3px; border-color: transparent; background: transparent; }
 html.sidebar-compact .home-nav { margin-bottom: -6px; }
-html.sidebar-compact .side-nav-label { margin: 3px 8px; }
 
 /* The PROJECTS label becomes a hairline — a divider still earns its keep at this width. */
 html.sidebar-compact .project-filter { display: none; }
@@ -1211,7 +1195,6 @@ html.sidebar-compact .add-project svg { width: 18px; height: 18px; }
 /* The footer stacks; "local" hides but its dot keeps testifying. */
 html.sidebar-compact .side-foot { justify-content: center; padding-top: 10px; }
 html.sidebar-compact .side-foot-right { flex-direction: column; gap: 8px; }
-html.sidebar-compact .health { width: 28px; height: 28px; justify-content: center; padding: 0; font-size: 0; gap: 0; }
 
 /* ------------------------------------------------------------------- main */
 

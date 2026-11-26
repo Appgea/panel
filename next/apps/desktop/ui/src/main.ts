@@ -307,7 +307,6 @@ const groupName = (id: string): string =>
 
 const projectList = el("projectList");
 const projectFilter = el<HTMLInputElement>("projectFilter");
-const projectCount = el("projectCount");
 const projectLive = el<HTMLButtonElement>("projectLive");
 const projectSort = el<HTMLButtonElement>("projectSort");
 const projectsLabel = el("projectsLabel");
@@ -2657,9 +2656,8 @@ function laneHead(section: string, count: number): HTMLElement {
     head.className = "project-group lane-head";
     head.dataset.lane = section;
     head.title = lane?.hint ?? "Your pins, in your order";
-    head.innerHTML = `<span></span><i></i>`;
+    head.innerHTML = `<span></span>`;
     head.querySelector("span")!.textContent = label;
-    head.querySelector("i")!.textContent = String(count);
     return head;
   }
   const head = document.createElement("button");
@@ -2750,18 +2748,7 @@ function decorateRow(
       else void select(id, "files");
     });
     meta.append(quick);
-  } else {
-    const chip = gitChip(pulse.peekGit(id));
-    if (chip) {
-      const node = document.createElement("span");
-      node.className = `project-chip${chip.warn ? " is-warn" : ""}`;
-      node.textContent = chip.text;
-      node.title = chip.title;
-      meta.append(node);
-    }
   }
-  const spark = sparkSvg(pulse.peekActivity(id));
-  if (spark) meta.insertAdjacentHTML("beforeend", spark);
 }
 
 /** The first row a filter found answers Enter, with the action word if one was typed. */
@@ -3046,9 +3033,6 @@ function paintProjects(): void {
   const leaves = (list: typeof allProjects): number =>
     list.filter((here) => here.project.role === "leaf").length;
   const projectTotal = leaves(allProjects);
-  projectCount.textContent = narrowed
-    ? `${leaves(visibleProjects)}/${projectTotal}`
-    : String(projectTotal);
   projectLive.hidden = liveCount === 0;
   projectLive.setAttribute("aria-pressed", String(liveOnly));
   projectLive.querySelector("b")!.textContent = String(liveCount);
@@ -3167,8 +3151,12 @@ function paintProjects(): void {
             }
           : rowLine(lineInput(leadMember(members)));
       const small = row.querySelector("small")!;
-      small.textContent = line.text;
-      if (line.tone) small.classList.add(`t-${line.tone}`);
+      const speaks = line.tone !== "" && line.tone !== "mute";
+      row.classList.toggle("has-line", speaks);
+      if (speaks) {
+        small.textContent = line.text;
+        small.classList.add(`t-${line.tone}`);
+      }
       const mark = line.text;
       decorateRow(row, here, members, attention);
       // The name survives collapse: the compact rail shows icons only, so it rides on hover.
