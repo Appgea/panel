@@ -87,6 +87,8 @@ def main():
     method, path = sys.argv[1], sys.argv[2].split("?")[0]
     if method == "GET" and path == "/view":
         return respond(*fleet("view"))
+    if method == "GET" and path == "/changes":
+        return respond(*fleet("changes"))
     if method == "GET" and path == "/design":
         return respond(*fleet("map"))
     if method == "GET" and path == "/design/trust":

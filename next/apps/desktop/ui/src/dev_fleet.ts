@@ -7,8 +7,10 @@
  */
 import "./style.css";
 import type { OverviewData } from "./features/board_types";
-import { mountFleet, type FleetView } from "./features/fleet";
+import { mountFleet, type FleetCalls, type FleetView } from "./features/fleet";
 import type { DesignData, TrustData } from "./features/fleet_design";
+import type { BoardIssue } from "./features/live_cards";
+import type { LiveAgent } from "./features/live_types";
 
 const params = new URLSearchParams(location.search);
 const clock = (m: number): string =>
@@ -93,6 +95,21 @@ let reads = 0;
 const handle = mountFleet(document.getElementById("fleetScreen")!, {
   design,
   openIssue: (n) => console.log("open issue", n),
+  openTerminal: (p) => (console.log("open terminal", p), true),
+  newCommander: async () => true,
+  commander: async () => (params.has("empty") ? null : ({ id: "cmd", name: "Commander", model: "Opus 5.5", harness: "claude", state: "turn", commander: true, panel: "s1" }) as unknown as LiveAgent),
+  calls: async (): Promise<FleetCalls> => (params.has("empty") ? { you: [], names: {} } : {
+    names: { tavla: "Tavla", pisti: "Pişti", memor: "Memor" },
+    you: [
+      { number: 2110, title: "Memor: raise the yearly price to $29.99?", url: "", apps: ["memor"], priority: 1 },
+      { number: 2111, title: "Tavla: ship the new splash to all players", url: "", apps: ["tavla"], priority: 2 },
+    ] as unknown as BoardIssue[],
+  }),
+  changes: async () => (params.has("empty") ? [] : [
+    { at: 0, time: clock(15), tag: "ability", text: "Flash scouts can now file a finding with a screenshot.", commit: "a1" },
+    { at: 0, time: clock(70), tag: "lens", text: "The ui-guidelines lens checks text overflow on small phones.", commit: "a2" },
+    { at: 0, time: clock(130), tag: "rule", text: "A unit over budget stops at its next turn.", commit: "a3" },
+  ]),
   day: async () => (params.has("empty") ? { cards: [] } : params.get("real") === "now" ? null : DAY),
   view: async () => {
     reads += 1;

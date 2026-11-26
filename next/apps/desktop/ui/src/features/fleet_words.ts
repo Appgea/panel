@@ -6,8 +6,6 @@
  */
 import { appName, cap, lensName } from "./live_text";
 
-export { millions } from "./live_text";
-
 /** The class a unit kind wears, and the CLI that runs it. Live uses the same names and hues. */
 export const CLASS: Record<string, { name: string; engine: string }> = {
   terra: { name: "Terra", engine: "Codex" },
@@ -103,22 +101,6 @@ export function tidy(screen: string): string {
     .replace(/^\s*\n/, "");
 }
 
-export type RunLine = { kind: "closed" | "scout" | "none"; text: string; numbers: number[]; lens?: string; app?: string };
-
-/** What an ended run did, as a person says it. The ledger writes "build 2011,2013, said bye". */
-export function runLine(run: { closed: number[]; result: string }): RunLine {
-  if (run.closed.length) return { kind: "closed", text: "Closed", numbers: run.closed };
-  const scout = /^scout\s+([^,\s]+)/.exec(run.result);
-  if (scout) {
-    const [lens, app] = scout[1].split("@");
-    return { kind: "scout", text: `Scouted ${lensName(lens)}${app ? ` in ${appName(app)}` : ""}`, numbers: [], lens: lensName(lens), app: app ? appName(app) : "" };
-  }
-  const build = /^build\s+([\d,]+)/.exec(run.result);
-  const numbers = build ? build[1].split(",").filter(Boolean).map(Number) : [];
-  const rest = run.result.replace(/^build\s+[\d,]+,?\s*/, "").replace(/,?\s*said bye$/, "").trim();
-  return { kind: "none", text: rest ? `Nothing closed: ${rest}` : numbers.length ? "Nothing closed on" : "Nothing closed", numbers };
-}
-
 export type Marked = { mark: "" | "b" | "i" | "code"; text: string };
 
 /**
@@ -137,11 +119,6 @@ export function marks(text: string): Marked[] {
   return out;
 }
 
-/** Millions as a person reads them: 0.8M, 48M, 1.2B. */
-export function tokens(m: number): string {
-  if (m >= 1000) return `${(m / 1000).toFixed(1)}B`;
-  return m >= 10 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
-}
 
 /** Minutes as a person reads them: 45 min, 3 h 20 min. */
 export function duration(min: number): string {

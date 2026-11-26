@@ -18,11 +18,6 @@ const TIERS: Tier[] = [
   { name: "legend", from: "#f4dcff", to: "#7b3cf0", ink: "#1b0533" },
 ];
 
-/** Recruit to Corporal are bronze, the sergeants silver, lieutenant and captain gold, the field officers platinum, a General legend. */
-export function tier(level: number): string {
-  return tierOf(level).name;
-}
-
 function tierOf(level: number): Tier {
   return TIERS[level <= 3 ? 0 : level <= 5 ? 1 : level <= 7 ? 2 : level <= 10 ? 3 : 4];
 }
@@ -96,22 +91,11 @@ const CREST: Record<string, string> = {
   fable: "M3.5 5h6.5a2.5 2.5 0 0 1 2 1v14a2.6 2.6 0 0 0-2-1H3.5ZM20.5 5H14a2.5 2.5 0 0 0-2 1v14a2.6 2.6 0 0 1 2-1h6.5Z",
 };
 
-/** A class kind from the name a feed line leads with: "Terra 8d17f4" is terra. Empty for anyone else. */
-export function crestKind(who: string): string {
-  const k = who.split(" ")[0].toLowerCase();
-  return k in CREST ? k : "";
-}
-
 export function crest(kind: string): string {
   const d = CREST[kind] ?? "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z";
   return `<svg class="crest" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}" fill="currentColor"/></svg>`;
 }
 
-export const FLAME = `<svg class="flame" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.5 2c.8 4.2 5.5 6.3 5.5 11.5a6 6 0 0 1-12 0c0-2.6 1.2-4.4 2.6-5.6-.2 2.2.8 3.6 2.1 3.9-.6-3.6.2-7 1.8-9.8Z" fill="currentColor"/></svg>`;
-
-export const STAR = `<svg class="star" viewBox="0 0 24 24" aria-hidden="true">${star(12, 12.6, 10.5, "currentColor")}</svg>`;
-
-/** Wraps an SVG string in a span. Every string here is built from numbers and constants only. */
 export function art(cls: string, svg: string): HTMLElement {
   const el = document.createElement("span");
   el.className = cls;

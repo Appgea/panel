@@ -43,7 +43,7 @@ import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
 import type { OpsMapHandle } from "./features/ops_map";
 import type { OverviewData, Scout } from "./features/board_types";
-import type { FleetHandle, FleetView } from "./features/fleet";
+import type { FleetChange, FleetHandle, FleetView } from "./features/fleet";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -1419,6 +1419,24 @@ function showFleet(): void {
       view: () => moduleGet<FleetView>("/m/fleet/view"),
       // The board's day scores the rank the way Live does. Without the scout module the fleet's own closes score.
       day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
+      commander: async () => {
+        const agents = (await invoke<LiveWorld>("live_world")).agents;
+        return agents.find((a) => commanderSession && a.panel === commanderSession) ?? agents.find((a) => a.commander) ?? null;
+      },
+      calls: async () => {
+        if (!moduleInstalled("scout")) return null;
+        const feed = await moduleGet<BoardFeed>("/m/scout/board").catch(() => null);
+        if (!feed || "error" in feed) return null;
+        return { you: feed.you ?? [], names: Object.fromEntries(Object.entries(feed.apps ?? {}).map(([k, v]) => [k.toLowerCase(), v.name])) };
+      },
+      changes: () => moduleGet<FleetChange[]>("/m/fleet/changes").then((c) => (Array.isArray(c) ? c : null)),
+      openTerminal: (panel) => {
+        const session = sessionById(panel);
+        if (!session) return false;
+        jumpToSession(session.project, session.id);
+        return true;
+      },
+      newCommander,
       openIssue: (n) => void invoke("open_link", { url: `https://github.com/Appgea/ops/issues/${n}` }).catch((error: unknown) => console.warn("[panel] fleet", error)),
       design: {
         load: () => moduleGet<DesignData>("/m/fleet/design"),
@@ -1462,6 +1480,17 @@ async function tellCommander(words: string, from = "Overview"): Promise<boolean>
     `You are the fleet commander. Read ~/.appgeapanel/skills/fleet/SKILL.md, section "When he steers", and act on it. ${order}`,
     async () => undefined);
   return commanderSession !== null;
+}
+
+async function newCommander(): Promise<boolean> {
+  const session = await launchScout({ id: "commander", agent: "claude" } as Scout,
+    "You are the fleet commander. Read ~/.appgeapanel/skills/fleet/SKILL.md. Run `fleet status`, tell the owner in two lines how the fleet stands, then wait for his words.",
+    async () => undefined);
+  if (!session) return false;
+  commanderSession = session;
+  const opened = sessionById(session);
+  if (opened) jumpToSession(opened.project, opened.id);
+  return true;
 }
 
 /**
