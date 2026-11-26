@@ -6,7 +6,7 @@
  * stopped fleet, ?error=1 a failed read over the last good one.
  */
 import "./style.css";
-import type { OverviewData } from "./features/board";
+import type { OverviewData } from "./features/board_types";
 import { mountFleet, type FleetView } from "./features/fleet";
 
 const params = new URLSearchParams(location.search);

@@ -75,6 +75,8 @@ export function placeLabel(place: Place): { kind: string; name: string } {
  *   appgeapanel://project/<id>/review[/<path>]    its work waiting in Review
  *   appgeapanel://project/<id>/work/<path>[:line] the file in Work
  *   appgeapanel://review | appgeapanel://manager
+
+ *   appgeapanel://support                         the Support screen
  *   appgeapanel://fleet                           the AI fleet screen: `fleet start` opens it
  *   appgeapanel://open/<full path>[:line]        any file or folder: Panel finds its project
  *
@@ -86,6 +88,7 @@ export type AppLink =
   | { to: "review" }
   | { to: "live" }
   | { to: "fleet" }
+  | { to: "support" }
   | { to: "manager" }
   | { to: "history"; query?: string; session?: string }
   | { to: "project"; project: string; place?: Place }
@@ -112,6 +115,7 @@ export function parseAppLink(url: string): AppLink | null {
     case "review":
     case "live":
     case "fleet":
+    case "support":
     case "manager":
       return id ? null : { to: verb };
     case "history": {

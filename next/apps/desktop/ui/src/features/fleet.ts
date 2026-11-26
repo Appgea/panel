@@ -18,7 +18,7 @@
  * only shows: starting and stopping the fleet stays a thing he asks for.
  */
 import { errorText } from "../errors";
-import type { OverviewData } from "./board";
+import type { OverviewData } from "./board_types";
 import { CLASS, className, duration, marks, mission, runLine, said, tidy, tokens } from "./fleet_words";
 import { art, crest, FLAME, insignia, STAR, tier } from "./game_art";
 import { hoursBack, newGame, rank, STREAK, update, XP, type Tally } from "./live_game";

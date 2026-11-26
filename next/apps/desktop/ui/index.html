@@ -329,18 +329,10 @@
         <!-- Project memory and private notes. -->
         <nav id="planNav" class="side-nav plan-nav" aria-label="Desk">
           <span class="side-label side-nav-label"><span>Desk</span></span>
-          <!-- Who holds what, what waits on you, and the scouts that find the work. Shown only with
-               the scout extension installed, like Support. -->
-          <button id="boardButton" class="nav-row" type="button" title="Board: who holds what, what needs you, the scouts" hidden>
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h4v14H4zM10 5h4v9h-4zM16 5h4v6h-4z"/></svg></span> Board
-          </button>
           <!-- The fleet's units, what each is typing, and what closed today. Shown only with the
-               fleet extension installed, like Board. -->
+               fleet extension installed. -->
           <button id="fleetButton" class="nav-row" type="button" title="AI fleet: the units that run now and what they closed today" hidden>
             <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1"/><rect x="13" y="4" width="8" height="6" rx="1"/><rect x="3" y="14" width="8" height="6" rx="1"/><path d="M14 15h6"/><path d="M14 19h4"/></svg></span> AI fleet
-          </button>
-          <button id="sprintButton" class="nav-row" type="button" title="Project desk">
-            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16"/><path d="M4 12h9"/><path d="M4 18h6"/><path d="m14 16 2.5 2.5L21 14"/></svg></span> Project desk
           </button>
           <!-- The ops tree as a network: who holds what, what finished, what is stuck. -->
           <button id="opsMapButton" class="nav-row" type="button" title="Ops map: what is done and what is stuck">
@@ -420,11 +412,8 @@
       <!-- HOME: the portfolio's cards, and a screen of its own. It swaps with the workspace or
            the project chrome the same way Settings does — it is not a tab of anything. -->
       <section id="homeScreen" class="home" hidden></section>
-      <section id="sprintScreen" class="sprint" hidden></section>
       <!-- OPS MAP: the company brain as a network. Portfolio-wide, like Home. -->
       <section id="opsMapScreen" class="ops-map" hidden tabindex="-1"></section>
-      <!-- BOARD: the issue board and the scouts. Portfolio-wide, like Home. -->
-      <section id="boardScreen" class="board" hidden tabindex="-1"></section>
       <!-- AI FLEET: the fleet's running units and what they closed today. Read-only: the units
            run in tmux outside Panel, so this screen holds no terminal. -->
       <section id="fleetScreen" class="fleet" hidden tabindex="-1"></section>
@@ -507,11 +496,6 @@
                 <i class="mtab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M9 5.5h6M9 18.5h6M8 8 5 5M16 8l3-3M7 12H3M17 12h4M8 16l-3 3M16 16l3 3"/><rect x="8" y="7" width="8" height="10" rx="4"/></svg></i>
                 <span class="mtab-name">Debug</span>
               </button>
-              <button id="tabProductSpine" class="mtab m-spine" role="tab" type="button"
-                      aria-selected="false" title="What the product does, where it can fail, and what changed">
-                <i class="mtab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3v18M8.5 5.2 12 7l3.5-1.8M8.5 9.2 12 11l3.5-1.8M8.5 13.2 12 15l3.5-1.8M8.5 17.2 12 19l3.5-1.8"/></svg></i>
-                <span class="mtab-name">Product Spine</span>
-              </button>
               <button id="tabRelease" class="mtab m-rel" role="tab" type="button"
                       aria-selected="false" title="What is live, and what is waiting to ship">
                 <i class="mtab-ico" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M14 4c3.7.5 5.5 2.3 6 6l-6.5 6.5-6-6Z"/><path d="m9.5 12.5-3.3.7L3 16.4l4.6.5M11.5 14.5l-.7 3.3L7.6 21l-.5-4.6"/><circle cx="15.5" cy="8.5" r="1.5"/></svg></i>
@@ -554,7 +538,6 @@
           <section id="filesPane" class="pane files-pane" aria-label="Working set" hidden></section>
           <section id="debugPane" class="pane debug-pane" aria-label="Debugger" hidden></section>
           <section id="gitPane" class="pane git-pane" aria-label="Git" hidden></section>
-          <section id="productSpinePane" class="pane product-spine-pane" aria-label="Product Spine" hidden></section>
           <section id="releasePane" class="pane release-pane" aria-label="Release" hidden></section>
           <section id="revenueCatPane" class="pane revenuecat-pane" aria-label="RevenueCat" hidden></section>
           <section id="analyticsPane" class="pane analytics-pane" aria-label="Analytics" hidden></section>

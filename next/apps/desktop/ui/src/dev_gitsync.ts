@@ -106,7 +106,7 @@ const dash = mountDashboard(stage, () => {}, {
   openFolder: () => {},
   installed: (module) => module === "git-manager",
 });
-dash.setModules(new Set(["git", "product-spine", "release"]));
+dash.setModules(new Set(["git", "release"]));
 dash.setProject(
   {
     id: "wolf",

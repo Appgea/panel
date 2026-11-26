@@ -267,16 +267,6 @@ if (params.has("foryou")) {
     }),
   ];
   const fy = mountForYou(document.getElementById("forYouScreen")!, {
-    world: readWorld,
-    board: readBoard,
-    answer: async (body) => {
-      console.log("[live harness] answer", body);
-      fixtureBoard.you = (fixtureBoard.you ?? []).filter((i) => i.number !== body.number);
-      return { ok: true, said: `#${body.number}: recorded` };
-    },
-    picture: async () => "",
-    openUrl,
-    openTerminal,
     sendToAgent,
     posts: () => posts,
     render: (p, openRef) => renderView(p.view ?? "message", p.payload, { openRef, openDocument: async () => {}, finishDocument: async () => "", openPlace: () => {} }),
@@ -286,20 +276,6 @@ if (params.has("foryou")) {
     openRef: (project, ref) => console.log("[live harness] ref", project, ref),
     openSession: (project, session) => console.log("[live harness] session", project, session),
     isLiveSession: (session) => session !== "s-Zenne",
-    review: () => [{ project: "pillow", items: [{ path: "/tmp/pillow/room_night.png", kind: "image", at: ago(15) }, { path: "/tmp/pillow/rain_loop.m4a", kind: "audio", at: ago(14) }] }],
-    support: async () => ({
-      problem: "",
-      items: [
-        { id: "s1", app: "tavla", subject: "The game freezes after I roll doubles twice in a row", email: "player@example.com", form: "Tavla support", fields: [{ q: "What happened?", a: "The game freezes after I roll doubles twice in a row" }, { q: "Device", a: "iPad Air" }], at: ago(90) },
-      ],
-    }),
-    ended: async () => ({ floor: ago(24 * 60), items: [{ id: "h1", project: "panel", agent: "Claude", title: "Panel Live shows only activity", at: ago(50), resumable: true }, { id: "h2", project: "panel", agent: "Codex", title: "Review the live map labels", at: ago(35), resumable: false }] }),
-    projectName: (id) => ({ tavla: "Tavla", pillow: "Pillow", panel: "Panel" })[id] ?? null,
-    pictureSrc: () => "",
-    openReview: async (project, paths) => (console.log("[live harness] review", project, paths), true),
-    resume: async (session) => console.log("[live harness] resume", session),
-    openSupport: () => console.log("[live harness] support"),
-    seen: (card) => console.log("[live harness] seen", card.id),
     count: (n) => console.log("[live harness] count", n),
   });
   document.getElementById("forYouScreen")!.hidden = false;

@@ -41,7 +41,7 @@ const esc = (value: unknown): string =>
   );
 
 /** Where a door leads. Mirrors the spine's `Tab` — the rail and the doors share one vocabulary. */
-export type Door = "files" | "git" | "product-spine" | "release" | "revenuecat" | "analytics";
+export type Door = "files" | "git" | "release" | "revenuecat" | "analytics";
 
 export type DashboardEvents = {
   /** Open this project's agent and hand it a task as its first prompt. */
@@ -401,14 +401,6 @@ export function mountDashboard(
     }
   }
 
-  const productSpine = makeCard(
-    grid,
-    "spine",
-    "spine",
-    "Product Spine",
-    "Open Product Spine",
-    () => open("product-spine"),
-  );
   const release = makeCard(grid, "rel", "release", "Release", "Open release", () => open("release"));
   const revenuecat = makeCard(
     grid,
@@ -439,9 +431,6 @@ export function mountDashboard(
     );
   });
 
-  productSpine.body.innerHTML = `
-    <p class="dash-lede">Every part of the product, how wide and deep it is, and where it
-    should grow.</p>`;
 
   /* -------------------------------------------------------------- workshop */
 
@@ -470,7 +459,7 @@ export function mountDashboard(
 
   /** Last project drawn. The entrance re-arms on a change of THIS, and on nothing else. */
   let shown: string | null = null;
-  let enabledModules = new Set(["git", "product-spine", "release"]);
+  let enabledModules = new Set(["git", "release"]);
   let currentProject: Project | null = null;
   let currentGit: GitState | null = null;
   let currentRunning = false;
@@ -540,7 +529,6 @@ export function mountDashboard(
     },
     setModules(enabled) {
       enabledModules = new Set(enabled);
-      productSpine.root.hidden = !enabledModules.has("product-spine");
       release.root.hidden = !enabledModules.has("release");
       revenuecat.root.hidden = !enabledModules.has("revenuecat");
       analytics.root.hidden = !events.installed("analytics");

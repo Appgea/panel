@@ -14,7 +14,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { icon } from "./icons";
-import { projectAssetUrl, projectIconUrl, schemeOrigin } from "./project-assets";
+import { projectIconUrl, schemeOrigin } from "./project-assets";
 import { withViewTransition } from "./motion";
 import { renderView } from "./registry";
 import { str } from "./views/dom";
@@ -41,11 +41,9 @@ import { mountSessionStrip, type SessionStripHandle } from "./features/sessions"
 import { openSkills } from "./features/skills";
 import { isAgentKind, type SessionKind } from "./features/agent-kinds";
 import { mountHome, type HomeHandle, type HomeProject } from "./features/home";
-import type { ProjectDeskHandle } from "./features/project_desk";
 import type { OpsMapHandle } from "./features/ops_map";
-import type { BoardData, BoardHandle, OverviewData, RoutinesData, Scout } from "./features/board";
+import type { OverviewData, Scout } from "./features/board_types";
 import type { FleetHandle, FleetView } from "./features/fleet";
-import type { ReviewDeck, ReviewHistory, SendResult } from "./features/swipe";
 import { mountChat, type ChatHandle } from "./features/chat";
 import { mountAskTray, type AskTrayHandle } from "./features/ask_tray";
 import type { NotebookHandle } from "./features/notebook";
@@ -54,10 +52,9 @@ import { mountReview } from "./features/review";
 import { mountLive, type LiveHandle, type LiveWorld } from "./features/live";
 import { mountForYou, type ForYouHandle } from "./features/foryou";
 import type { BoardFeed } from "./features/live_cards";
-import { agentName, fetchHistory, mountHistory, seenAt, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
-import type { SupportItem } from "./features/inbox_cards";
+import { fetchHistory, mountHistory, sinceSeen, type HistoryHandle, type HistorySession } from "./features/history";
 import type { InboxPost } from "./features/inbox_feed";
-import { moduleGet, modulePost } from "./features/modules";
+import { moduleGet } from "./features/modules";
 import { mountQuickOpen } from "./features/editor";
 import { mountTerminals, type TerminalsHandle } from "./features/terminals";
 import {
@@ -106,7 +103,7 @@ import {
 } from "./features/project_terminals";
 import { createWorkshop, type WorkshopHandle, type WorkshopPhase } from "./features/workshop";
 import { createProjectTools } from "./features/project_tools";
-import { errorNote, errorText } from "./errors";
+import { errorNote } from "./errors";
 import "./views";
 import "./motion.css";
 import "./style.css";
@@ -133,7 +130,7 @@ const el = <T extends HTMLElement>(id: string): T => {
  * have a tab, which meant the same event stream was readable in two fidelities at once
  * (cards / PTY) and the screen read as noise.
  */
-type CoreTab = "terminals" | "dash" | "files" | "debug" | "git" | "product-spine" | "release" | "revenuecat" | "analytics";
+type CoreTab = "terminals" | "dash" | "files" | "debug" | "git" | "release" | "revenuecat" | "analytics";
 type Tab = CoreTab | `extension:${string}:${string}`;
 
 type TurnWork = {
@@ -320,7 +317,6 @@ const debugPane = el("debugPane");
 const dashPane = el("dashPane");
 const terminalsTabPane = el("terminalsTabPane");
 const gitPane = el("gitPane");
-const productSpinePane = el("productSpinePane");
 const releasePane = el("releasePane");
 const revenueCatPane = el("revenueCatPane");
 const analyticsPane = el("analyticsPane");
@@ -334,19 +330,10 @@ let chat: ChatHandle;
 let askTray: AskTrayHandle;
 let notebook: NotebookHandle | null = null;
 let notebookLoading: Promise<NotebookHandle> | null = null;
-/** The plan screen. Lazy like the notebook: most sessions never open it. */
-let sprint: ProjectDeskHandle | null = null;
-let sprintLoading: Promise<ProjectDeskHandle> | null = null;
-let sprintActive = false;
-let settingsFromSprint = false;
-let chatFromSprint = false;
 /** The ops network. Lazy: a screen you go to. */
 let opsMap: OpsMapHandle | null = null;
 let opsMapLoading: Promise<OpsMapHandle> | null = null;
 let opsMapActive = false;
-let board: BoardHandle | null = null;
-let boardLoading: Promise<BoardHandle> | null = null;
-let boardActive = false;
 let fleet: FleetHandle | null = null;
 let fleetLoading: Promise<FleetHandle> | null = null;
 let fleetActive = false;
@@ -395,8 +382,6 @@ let chatFromForYou = false;
  *  month (inbox.rs), so they are still here after a restart. */
 let inboxPosts: InboxPost[] = [];
 const POSTS_MAX = 500;
-/** Sessions History last read, so an Inbox card can resume one by id. */
-let endedSessions = new Map<string, HistorySession>();
 /** Which pinned tab of the workspace is up. Mirrors of terminals.pinnedAt(), kept here because
  *  the hotkey guards below read them on every keystroke and they change only on a tab switch. */
 let runnerActive = false;
@@ -483,7 +468,6 @@ const projectTools = createProjectTools(
     files: filesPane,
     debugger: debugPane,
     git: gitPane,
-    productSpine: productSpinePane,
     release: releasePane,
     revenuecat: revenueCatPane,
     analytics: analyticsPane,
@@ -728,7 +712,6 @@ function mountModuleRailControls(): void {
 
 function syncModuleAvailability(here: ProjectState): void {
   el("tabGit").hidden = !tabEnabled(here, "git");
-  el("tabProductSpine").hidden = !tabEnabled(here, "product-spine");
   el("tabRelease").hidden = !tabEnabled(here, "release");
   el("tabRevenueCat").hidden = !tabEnabled(here, "revenuecat");
   el("tabAnalytics").hidden = !tabEnabled(here, "analytics");
@@ -745,9 +728,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropHome();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -789,7 +770,7 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   const moduleConfig = await invoke<ProjectModules>("project_modules", { project: id }).catch(() => {
     // Detection failed, so we know nothing about this project. Offer only the surfaces that are
     // about the repo itself — anything store- or SDK-shaped would be a guess.
-    return { configured: false, enabled: ["git", "product-spine"], work_exclude: [] };
+    return { configured: false, enabled: ["git"], work_exclude: [] };
   });
   if (active !== id) return;
   next.modules = new Set(moduleConfig.enabled);
@@ -1206,16 +1187,13 @@ function showSettings(): void {
   settingsFromWorkspace = terminalsActive;
   settingsFromHome = homeActive;
   settingsFromNotebook = notebookActive;
-  settingsFromSprint = sprintActive;
   settingsFromOpsMap = opsMapActive;
   // The workspace comes down properly — its pinned tabs go home and the deck takes its panes
   // back. Reopening rebuilds it on the same tabs; nothing about the PTYs is disturbed.
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -1248,8 +1226,6 @@ function exitSettings(): void {
     showHome();
   } else if (settingsFromNotebook) {
     showNotebook();
-  } else if (settingsFromSprint) {
-    showSprint();
   } else if (settingsFromOpsMap) {
     showOpsMap();
   } else {
@@ -1264,9 +1240,7 @@ function showTerminals(at?: number): void {
   dropHome();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -1294,9 +1268,7 @@ function showHome(): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -1332,9 +1304,7 @@ function showNotebook(): void {
   dropChat();
   if (terminalsActive) exitTerminals();
   dropHome();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -1373,62 +1343,13 @@ function dropNotebook(): void {
   el("notebookScreen").hidden = true;
 }
 
-/** Project desk reads release evidence and project memory directly. */
-function showSprint(): void {
-  dropSupport();
-  dropReview();
-  dropLive();
-  dropForYou();
-  dropHistory();
-  dropSettings();
-  dropChat();
-  dropNotebook();
-  if (terminalsActive) exitTerminals();
-  dropHome();
-  dropOpsMap();
-  dropBoard();
-  dropFleet();
-  if (sprintActive) return;
-  sprintActive = true;
-  mainZone().hidden = true;
-  const screen = el("sprintScreen");
-  screen.hidden = false;
-  if (!sprint) screen.textContent = "Reading projects…";
-  const loading = sprintLoading ?? import("./features/project_desk").then(({ mountProjectDesk }) => {
-    sprint = mountProjectDesk(screen, (project) => void select(project));
-    return sprint;
-  });
-  sprintLoading = loading;
-  void loading
-    .then((handle) => {
-      if (sprintActive) return handle.open();
-    })
-    .catch((error: unknown) => {
-      sprintLoading = null;
-      if (sprintActive) {
-        screen.replaceChildren(errorNote("Project desk could not open.", error, () => { dropSprint(); showSprint(); }));
-      }
-    });
-  paintNav();
-  paintProjects();
-}
-
-function dropSprint(): void {
-  if (!sprintActive) return;
-  sprint?.clear();
-  sprintActive = false;
-  el("sprintScreen").hidden = true;
-}
-
 /** The ops tree as a network: what finished lately, what is stuck. See features/ops_map.ts. */
 function showOpsMap(): void {
-  dropBoard();
   dropFleet();
   dropHistory();
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropSupport();
   dropReview();
   dropLive();
@@ -1472,46 +1393,14 @@ function dropOpsMap(): void {
   el("opsMapScreen").hidden = true;
 }
 
-/** Who holds what, what waits on you, and the scouts. Portfolio-wide. See features/board.ts. */
-function showBoard(): void {
-  if (!board) return;
-  dropFleet();
-  dropHistory();
-  dropSettings();
-  dropChat();
-  dropNotebook();
-  dropSprint();
-  dropSupport();
-  dropReview();
-  dropLive();
-  dropForYou();
-  dropOpsMap();
-  if (terminalsActive) exitTerminals();
-  dropHome();
-  if (boardActive) return;
-  boardActive = true;
-  mainZone().hidden = true;
-  board.open();
-  paintNav();
-  paintProjects();
-}
-
-function dropBoard(): void {
-  if (!boardActive) return;
-  board?.clear();
-  boardActive = false;
-}
-
 /** The fleet's running units and what they closed today. Portfolio-wide. See features/fleet.ts.
  *  It loads on the first open, so an `appgeapanel://fleet` link that launched Panel lands here
  *  before the module list has answered. */
 function showFleet(): void {
-  dropBoard();
   dropHistory();
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropSupport();
   dropReview();
   dropLive();
@@ -1556,48 +1445,6 @@ function dropFleet(): void {
   el("fleetScreen").hidden = true;
 }
 
-/** The Board and its strip come with the scout extension and leave with it. */
-function setupBoard(on: boolean): void {
-  el("boardButton").hidden = !on;
-  if (!on) {
-    dropBoard();
-    board?.dispose();
-    board = null;
-    boardLoading = null;
-    return;
-  }
-  if (board || boardLoading) return;
-  const loading = import("./features/board").then(({ mountBoard }) => {
-    board = mountBoard(el("boardScreen"), {
-      api: {
-        board: (fresh) => moduleGet<BoardData>(`/m/scout/board${fresh ? "?fresh=1" : ""}`),
-        picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
-        routines: () => moduleGet<RoutinesData>("/m/scout/routines"),
-        overview: (hours) => moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`),
-        fleet: () => moduleGet<FleetView>("/m/fleet/view"),
-      },
-      appIcon: (dir) => {
-        const project = [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`));
-        return project ? projectIconUrl(project.project.id) : null;
-      },
-      openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] board", error)),
-      openSwipe: () => void openSwipeReview(),
-      // `routine ID` records the run under the session's own name and prints the lens brief, so the
-      // terminal needs only this one line. It ends with `routine done`, which posts the report.
-      startRoutine: async (id) =>
-        Boolean(await launchScout({ id, agent: "claude" } as Scout,
-          `Run \`routine ${id}\` in the shell and do what it prints, to the end.`, async () => undefined)),
-      tellCommander: (words) => tellCommander(words),
-    });
-    return board;
-  });
-  boardLoading = loading;
-  loading.catch((error: unknown) => {
-    boardLoading = null;
-    console.warn("[panel] board", error);
-  });
-}
-
 /** The fleet's commander: one Claude terminal on the main folder that takes his words from the Board's Overview.
  *  Reused while it lives, so a second direction lands where the first one's context is. The fleet skill's
  *  "When he steers" says what it does with them. */
@@ -1610,53 +1457,6 @@ async function tellCommander(words: string, from = "Overview"): Promise<boolean>
     `You are the fleet commander. Read ~/.appgeapanel/skills/fleet/SKILL.md, section "When he steers", and act on it. ${order}`,
     async () => undefined);
   return commanderSession !== null;
-}
-
-/** The swipe review (swipe.ts) over the whole window. Its verdicts go to GitHub through the scout
- *  module, and his words to one Claude terminal on the main folder, typed like a scout's prompt. */
-let swipeOpen = false;
-async function openSwipeReview(): Promise<void> {
-  if (swipeOpen) return;
-  swipeOpen = true;
-  try {
-    const { openSwipe } = await import("./features/swipe");
-    const projectFor = (dir: string) =>
-      [...states.values()].find((s) => s.project.path.toLowerCase().endsWith(`/${dir.toLowerCase()}`))?.project;
-    openSwipe({
-      api: {
-        deck: (hours) => moduleGet<ReviewDeck>(`/m/scout/review/deck${hours ? `?hours=${hours}` : ""}`),
-        voice: (audio, mime) => modulePost<{ text: string; path: string }>("/m/scout/review/voice", { audio, mime }),
-        send: (body) => modulePost<SendResult>("/m/scout/review/send", body),
-        history: () => moduleGet<ReviewHistory>("/m/scout/review/history"),
-        agent: (id, session) => modulePost("/m/scout/review/agent", { id, session }),
-        picture: (path) =>
-          moduleGet<{ src: string }>(`/m/scout/review/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
-      },
-      appIcon: (dir) => {
-        const project = projectFor(dir);
-        return project ? projectIconUrl(project.id) : null;
-      },
-      appName: (dir) => projectFor(dir)?.name ?? dir.replace(/_/g, " "),
-      openUrl: (url) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] swipe", error)),
-      launchAgent: (prompt) => launchScout({ id: "swipe-review", agent: "claude" } as Scout, prompt, async () => undefined),
-      showSession: (id) => {
-        showTerminals();
-        return terminals.reveal(id);
-      },
-      fullscreen: async (on) => {
-        const panel = getCurrentWindow();
-        await panel.setFullscreen(on);
-        return panel.isFullscreen();
-      },
-      onClose: () => {
-        swipeOpen = false;
-        board?.refresh(true);
-      },
-    });
-  } catch (error) {
-    swipeOpen = false;
-    console.warn("[panel] swipe", error);
-  }
 }
 
 /**
@@ -1693,9 +1493,7 @@ function showSupport(): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1743,9 +1541,7 @@ function showReview(projectId?: string): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1773,9 +1569,7 @@ function showLive(): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropForYou();
   if (terminalsActive) exitTerminals();
@@ -1804,9 +1598,7 @@ function showForYou(): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropLive();
   if (terminalsActive) exitTerminals();
@@ -1837,9 +1629,7 @@ function showHistory(focus?: { query?: string; session?: string }): void {
   dropSettings();
   dropChat();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   if (terminalsActive) exitTerminals();
   dropHome();
@@ -1937,6 +1727,9 @@ function followAppLink(url: string): void {
     case "fleet":
       showFleet();
       return;
+    case "support":
+      showSupport();
+      return;
     case "manager":
       chat.show();
       return;
@@ -1956,36 +1749,6 @@ function followAppLink(url: string): void {
 
 function takeAppLinks(): void {
   void invoke<string[]>("take_links").then((urls) => urls.forEach(followAppLink)).catch(() => undefined);
-}
-
-const SUPPORT_PULL_MS = 30 * 60_000;
-let supportPulledAt = 0;
-/** Why the last pull fell short, shown on the Inbox with a door to Support's setup. */
-let supportProblem = "";
-
-/** A support message as the support module's log stores it. */
-type SupportMessage = {
-  id: string;
-  apps: string[];
-  form_title: string;
-  submitted_at: string;
-  email: string;
-  fields: { question: string; answer: string }[];
-  lead: string;
-};
-
-/** Its subject is the longest answer: the form's own title says which app, not what happened. */
-function supportItem(m: SupportMessage): SupportItem {
-  const longest = m.fields.reduce((best, f) => (f.answer.length > best.length ? f.answer : best), "");
-  return {
-    id: m.id,
-    app: m.apps[0] ?? "",
-    subject: (longest || m.lead || "(empty response)").replace(/\s+/g, " ").trim(),
-    email: m.email,
-    form: m.form_title,
-    fields: m.fields.map((f) => ({ q: f.question, a: f.answer })),
-    at: Date.parse(m.submitted_at) || Date.now(),
-  };
 }
 
 /** A message from an agent: show it in the Inbox and keep it past a restart. */
@@ -2076,7 +1839,6 @@ function showChat(): void {
   chatFromWorkspace = terminalsActive;
   chatFromHome = homeActive;
   chatFromNotebook = notebookActive;
-  chatFromSprint = sprintActive;
   chatFromOpsMap = opsMapActive;
   chatFromForYou = forYouActive;
   dropSettings();
@@ -2084,9 +1846,7 @@ function showChat(): void {
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
-  dropSprint();
   dropOpsMap();
-  dropBoard();
   dropFleet();
   dropSupport();
   dropHistory();
@@ -2117,8 +1877,6 @@ function exitChat(): void {
     showHome();
   } else if (chatFromNotebook) {
     showNotebook();
-  } else if (chatFromSprint) {
-    showSprint();
   } else if (chatFromOpsMap) {
     showOpsMap();
   } else if (chatFromForYou) {
@@ -2159,9 +1917,7 @@ const offProject = (): boolean =>
   settingsActive ||
   chatActive ||
   notebookActive ||
-  sprintActive ||
   opsMapActive ||
-  boardActive ||
   fleetActive ||
   supportActive ||
   reviewActive ||
@@ -2456,11 +2212,9 @@ function paintNav(): void {
   el("chatNav").classList.toggle("is-active", readingFromInbox || liveActive || forYouActive);
   el("forYouButton").classList.toggle("is-on", forYouActive || readingFromInbox);
   el("liveButton").classList.toggle("is-on", liveActive);
-  el("planNav").classList.toggle("is-active", notebookActive || sprintActive || opsMapActive || boardActive || fleetActive);
+  el("planNav").classList.toggle("is-active", notebookActive || opsMapActive || fleetActive);
   el("fleetButton").classList.toggle("is-on", fleetActive);
-  el("sprintButton").classList.toggle("is-on", sprintActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
-  el("boardButton").classList.toggle("is-on", boardActive);
   el("notebookButton").classList.toggle("is-on", notebookActive);
   // The gear is a door like any other row: lit while its screen is the one on the glass.
   el("settingsButton").classList.toggle("is-active", settingsActive);
@@ -3636,7 +3390,6 @@ const TABS: TabEntry[] = [
   { tab: "dash", pane: dashPane, button: "tabDash" },
   { tab: "files", pane: filesPane, button: "tabFiles" },
   { tab: "debug", pane: debugPane, button: "tabDebug" },
-  { tab: "product-spine", pane: productSpinePane, button: "tabProductSpine" },
   { tab: "release", pane: releasePane, button: "tabRelease" },
   { tab: "revenuecat", pane: revenueCatPane, button: "tabRevenueCat" },
   { tab: "analytics", pane: analyticsPane, button: "tabAnalytics" },
@@ -3708,7 +3461,6 @@ function registerProjectSurfaces(modules: PanelModule[]): void {
 async function refreshProjectSurfaces(): Promise<void> {
   const modules = await invoke<PanelModule[]>("list_modules").catch(() => []);
   registerProjectSurfaces(modules);
-  setupBoard(modules.some((module) => module.name === "scout"));
   // The AI fleet row comes with the fleet extension. Its screen loads on the first open.
   el("fleetButton").hidden = !modules.some((module) => module.name === "fleet");
   // Support's messages reach you as Inbox cards. Without the module there is nothing to open.
@@ -3779,10 +3531,6 @@ async function loadTab(tab: Tab): Promise<void> {
   }
   if (tab === "git") {
     const tool = await projectTools.ensureGit();
-    if (active === projectId) tool.setProject(projectId, projectPath);
-  }
-  if (tab === "product-spine") {
-    const tool = await projectTools.ensureProductSpine();
     if (active === projectId) tool.setProject(projectId, projectPath);
   }
   if (tab === "release") {
@@ -4191,7 +3939,6 @@ function onEvent(event: ProjectEvent): void {
       endPermissionWait(id, event.session_id);
       if (event.view === "message") {
         // A report often means an issue moved or a scout finished.
-        board?.refresh(true);
         const here = state(id);
         const source = here?.sessions.find((session) => session.id === event.session_id);
         const flowFiles =
@@ -4421,7 +4168,6 @@ async function boot(): Promise<void> {
   window.addEventListener("focus", () => {
     if (active && !offProject()) markSeen(active);
     // Coming back is also when the board and due scouts are read. Nothing polls.
-    board?.refresh();
   });
 
   deck = new TerminalDeck(el("terminalHost"), {
@@ -4443,12 +4189,10 @@ async function boot(): Promise<void> {
     runCommand: runInShell,
     onExit(sessionId) {
       exited.add(sessionId);
-      board?.refresh();
       askTray.closeSession(sessionId);
       // The manager's terminal shares the exit path with every other session, so the rail hears
       // about its own death here rather than through a second channel.
       chat.noteExit(sessionId);
-      sprint?.sync();
       working.delete(sessionId);
       setPhase(sessionId, null);
       const owner = [...states.values()].find((here) =>
@@ -4500,17 +4244,8 @@ async function boot(): Promise<void> {
     tellCommander: (words) => tellCommander(words, "Live"),
   });
   forYou = mountForYou(el("forYouScreen"), {
-    world: liveWorld,
-    board: liveBoard,
-    answer: (body) => modulePost<{ ok: boolean; said?: string }>("/m/scout/live/answer", body),
-    picture: (path) => moduleGet<{ src: string }>(`/m/scout/picture?path=${encodeURIComponent(path)}`).then((answer) => answer.src),
-    openUrl: openLink,
-    openTerminal,
     sendToAgent: (panel, text) => deck.sendPrompt(panel, text),
-    // The Inbox mounts before Review, and reads it only once the agents answer.
-    review: () => review?.fresh() ?? [],
     posts: () => inboxPosts,
-    // The same message view as on the Stage, but its refs open in the post's own evidence box.
     render: (post, openRef) =>
       renderView(post.view ?? "message", post.payload, { ...projectCtx(post.project), openRef }),
     renderFlow: (post, openRef) =>
@@ -4526,65 +4261,7 @@ async function boot(): Promise<void> {
     openRef: (project, ref) => projectCtx(project).openRef(ref),
     openSession: (project, session) => jumpToSession(project, session),
     isLiveSession: (session) => !exited.has(session) && sessionById(session) !== null,
-    support(fresh) {
-      if (!moduleInstalled("support")) return Promise.resolve(null);
-      // Pulling walks every app's Google Form, so it runs on Refresh or every half hour, not
-      // every minute. It used to wait for a Fetch press on the Support screen. It is not awaited:
-      // the board's cards must not wait on Google. What it pulls, or why it failed, shows on the
-      // next read.
-      if (fresh || Date.now() - supportPulledAt > SUPPORT_PULL_MS) {
-        supportPulledAt = Date.now();
-        void modulePost<{ errors: unknown[]; forms_unreachable: string[] }>("/m/support/fetch", {})
-          .then((pulled) => {
-            const bad = pulled.errors.length + pulled.forms_unreachable.length;
-            supportProblem = bad ? `${bad} support ${bad === 1 ? "form" : "forms"} could not be read.` : "";
-          })
-          .catch((error: unknown) => {
-            console.warn("[panel] support pull", error);
-            supportProblem = `Support forms could not be pulled: ${errorText(error, "unknown error")}.`;
-          });
-      }
-      return moduleGet<{ messages: SupportMessage[] }>("/m/support/inbox?unread=1&limit=50").then((inbox) => ({
-        items: inbox.messages.map(supportItem),
-        problem: supportProblem,
-      }));
-    },
-    openSupport: () => showSupport(),
-    ended: () =>
-      fetchHistory().then((data) => {
-        const ended = sinceSeen(data, 0);
-        endedSessions = new Map(ended.map((session) => [session.id, session]));
-        return {
-          floor: seenAt(),
-          items: ended.map((session) => ({
-            id: session.id,
-            project: session.project,
-            agent: agentName(session.agent),
-            title: session.title,
-            at: Date.parse(session.endedAt),
-            resumable: session.resume === "exact",
-          })),
-        };
-      }),
-    projectName: (id) => state(id)?.project.name ?? null,
-    pictureSrc: (project, path) => projectAssetUrl(project, path),
-    openReview: (project, paths) => review.openFiles(project, paths),
-    async resume(id) {
-      const session = endedSessions.get(id);
-      if (!session) throw new Error("History no longer lists that session");
-      await resumeConversation(session);
-    },
-    seen(card) {
-      if (card.kind === "review" && card.refs) review.see(card.refs);
-      if (card.kind === "support" && card.refs) {
-        void modulePost("/m/support/read", { ids: card.refs }).catch((error: unknown) => console.warn("[panel] support read", error));
-      }
-    },
-    // One number in one place: the Inbox row. Home totals the same counts per project.
-    count: (total, byProject) => {
-      paintInboxBadge(total);
-      home?.unread(byProject);
-    },
+    count: paintInboxBadge,
   });
   review = mountReview(el("reviewScreen"), {
     projectName: (id) => state(id)?.project.name ?? id,
@@ -4773,16 +4450,13 @@ async function boot(): Promise<void> {
   // a screen beside the workspace, not a tab of it, so it answers to ⌘⇧C instead.
   paintChatNav();
   el("notebookButton").addEventListener("click", () => showNotebook());
-  el("sprintButton").addEventListener("click", () => showSprint());
   el("opsMapButton").addEventListener("click", () => showOpsMap());
   el("skillsButton").addEventListener("click", () => showSkills());
-  el("boardButton").addEventListener("click", () => showBoard());
   el("fleetButton").addEventListener("click", () => showFleet());
   el("liveButton").addEventListener("click", () => showLive());
   el("forYouButton").addEventListener("click", () => showForYou());
   // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
   // module is installed. Until then it is not a place you can be.
-  el("boardButton").hidden = true;
   const paintNotebookHint = (): void => {
     el("notebookButton").title = `Notebook (${chordLabel("app.notebook")})`;
   };
@@ -5143,7 +4817,6 @@ async function boot(): Promise<void> {
   await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
-  board?.refresh();
   paintProjects();
   // The portfolio lands on Home. Only a Panel scoped to ONE project skips it — there is no
   // portfolio to look across, so it goes straight in, exactly as before.
@@ -5169,7 +4842,6 @@ async function boot(): Promise<void> {
   await listen("panel-portfolio-changed", () => void refreshPortfolio());
   // The plan is written by agents in their own terminals. The screen follows the file rather
   // than waiting to be told, so an agent's plan lands without anyone pressing refresh.
-  await listen("panel-sprints-changed", () => sprint?.sync());
   // now.md, the log and the rollouts are written by agents too. The map follows the files.
   await listen("panel-ops-changed", () => opsMap?.sync());
   // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.

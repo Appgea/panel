@@ -1,5 +1,5 @@
 
-import type { OverviewCard, OverviewData } from "./board";
+import type { OverviewCard, OverviewData } from "./board_types";
 import type { FleetView } from "./fleet";
 import { appName, cap, lensName, millions, unitName } from "./live_text";
 

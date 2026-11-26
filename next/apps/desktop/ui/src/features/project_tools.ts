@@ -8,7 +8,6 @@
 
 import type { FilesHandle } from "./files";
 import type { GitHandle, GitTurn, GitProject } from "./git";
-import type { ProductSpineHandle } from "./product_spine";
 import type { ReleaseHandle } from "./release";
 import type { RevenueCatHandle } from "./revenuecat";
 import type { AnalyticsHandle } from "./analytics";
@@ -23,7 +22,6 @@ type ToolHosts = {
   files: HTMLElement;
   debugger: HTMLElement;
   git: HTMLElement;
-  productSpine: HTMLElement;
   release: HTMLElement;
   revenuecat: HTMLElement;
   analytics: HTMLElement;
@@ -47,7 +45,6 @@ export type ProjectTools = {
   ensureFiles(): Promise<FilesHandle>;
   ensureDebugger(): Promise<DebuggerHandle>;
   ensureGit(): Promise<GitHandle>;
-  ensureProductSpine(): Promise<ProductSpineHandle>;
   ensureRelease(): Promise<ReleaseHandle>;
   ensureRevenueCat(): Promise<RevenueCatHandle>;
   ensureAnalytics(): Promise<AnalyticsHandle>;
@@ -57,7 +54,6 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
   let files: FilesHandle | undefined;
   let git: GitHandle | undefined;
   let debuggerTool: DebuggerHandle | undefined;
-  let productSpine: ProductSpineHandle | undefined;
   let release: ReleaseHandle | undefined;
   let revenuecat: RevenueCatHandle | undefined;
   let analytics: AnalyticsHandle | undefined;
@@ -65,7 +61,6 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
   let filesPromise: Promise<FilesHandle> | undefined;
   let gitPromise: Promise<GitHandle> | undefined;
   let debuggerPromise: Promise<DebuggerHandle> | undefined;
-  let productSpinePromise: Promise<ProductSpineHandle> | undefined;
   let releasePromise: Promise<ReleaseHandle> | undefined;
   let revenuecatPromise: Promise<RevenueCatHandle> | undefined;
   let analyticsPromise: Promise<AnalyticsHandle> | undefined;
@@ -127,13 +122,6 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
         return git;
       });
       return git ?? gitPromise;
-    },
-    async ensureProductSpine() {
-      productSpinePromise ??= import("./product_spine").then(({ mountProductSpine }) => {
-        productSpine = mountProductSpine(hosts.productSpine);
-        return productSpine;
-      });
-      return productSpine ?? productSpinePromise;
     },
     async ensureRelease() {
       releasePromise ??= import("./release").then(({ mountRelease }) => {
