@@ -4448,7 +4448,7 @@ fn selftest() -> i32 {
     let shell_case: (&str, &[&str]) = if cfg!(windows) {
         ("powershell.exe", &["-NoProfile", "-Command", "echo PANEL_SHELL_OK"])
     } else {
-        (&shell, &["-lc", "echo PANEL_SHELL_OK"])
+        (&shell, &["-lc", "echo PANEL_SHELL_OK child_session=${CLAUDE_CODE_CHILD_SESSION:-none}"])
     };
 
     // (label, program, args). Empty program = baseline shell running a marker echo.
@@ -4523,8 +4523,23 @@ fn selftest() -> i32 {
     }
 }
 
+// KEEP: an agent that restarts Panel hands it CLAUDE_CODE_CHILD_SESSION, and every Claude in its terminals stops saving transcripts.
+fn drop_parent_claude_session() {
+    let marks: Vec<_> = std::env::vars_os()
+        .filter_map(|(key, _)| {
+            let name = key.to_str()?;
+            let mark = matches!(name, "CLAUDECODE" | "CLAUDE_PID" | "CLAUDE_PROJECT_DIR" | "CLAUDE_EFFORT" | "CLAUDE_ENV_FILE")
+                || (name.starts_with("CLAUDE_CODE_") && name != "CLAUDE_CODE_FORCE_SESSION_PERSISTENCE");
+            mark.then_some(key)
+        })
+        .collect();
+    for key in marks {
+        std::env::remove_var(key);
+    }
+}
+
 fn main() {
-    // Runs before the Tauri event loop, so every PTY/subprocess spawned later inherits the fix.
+    drop_parent_claude_session();
     // PANEL_NO_PATHFIX skips it — used only by the self-test to show the before/after.
     #[cfg(not(windows))]
     if std::env::var_os("PANEL_NO_PATHFIX").is_none() {
