@@ -1,13 +1,7 @@
-/**
- * First-use lifecycle for project tools.
- *
- * These screens are shared across projects and comparatively expensive. Keeping their imports
- * here makes the application spine depend on a small lifecycle API instead of every tool module,
- * and ensures concurrent requests still mount only one instance.
- */
 
 import type { FilesHandle } from "./files";
 import type { GitHandle, GitTurn, GitProject } from "./git";
+import type { ProductSpineHandle } from "./product_spine";
 import type { ReleaseHandle } from "./release";
 import type { RevenueCatHandle } from "./revenuecat";
 import type { AnalyticsHandle } from "./analytics";
@@ -22,6 +16,7 @@ type ToolHosts = {
   files: HTMLElement;
   debugger: HTMLElement;
   git: HTMLElement;
+  productSpine: HTMLElement;
   release: HTMLElement;
   revenuecat: HTMLElement;
   analytics: HTMLElement;
@@ -29,7 +24,6 @@ type ToolHosts = {
 
 type ToolEvents = {
   current(): CurrentProject | null;
-  /** The selected project's agent turns, most recent first — the Git tab's unit of work. */
   turns(projectId?: string): GitTurn[];
   runWithAgent(prompt: string): Promise<void>;
   gitProjects(): GitProject[];
@@ -45,6 +39,7 @@ export type ProjectTools = {
   ensureFiles(): Promise<FilesHandle>;
   ensureDebugger(): Promise<DebuggerHandle>;
   ensureGit(): Promise<GitHandle>;
+  ensureProductSpine(): Promise<ProductSpineHandle>;
   ensureRelease(): Promise<ReleaseHandle>;
   ensureRevenueCat(): Promise<RevenueCatHandle>;
   ensureAnalytics(): Promise<AnalyticsHandle>;
@@ -54,6 +49,7 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
   let files: FilesHandle | undefined;
   let git: GitHandle | undefined;
   let debuggerTool: DebuggerHandle | undefined;
+  let productSpine: ProductSpineHandle | undefined;
   let release: ReleaseHandle | undefined;
   let revenuecat: RevenueCatHandle | undefined;
   let analytics: AnalyticsHandle | undefined;
@@ -61,12 +57,11 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
   let filesPromise: Promise<FilesHandle> | undefined;
   let gitPromise: Promise<GitHandle> | undefined;
   let debuggerPromise: Promise<DebuggerHandle> | undefined;
+  let productSpinePromise: Promise<ProductSpineHandle> | undefined;
   let releasePromise: Promise<ReleaseHandle> | undefined;
   let revenuecatPromise: Promise<RevenueCatHandle> | undefined;
   let analyticsPromise: Promise<AnalyticsHandle> | undefined;
 
-  /* Work's debug bar drives the same debugger the Debug tab does, and it may press Start before
-     that tab has ever been opened — so this is the loader both entry points share. */
   const loadDebugger = async (): Promise<DebuggerHandle> => {
     debuggerPromise ??= import("./debugger").then(({ mountDebugger }) => {
       debuggerTool = mountDebugger(hosts.debugger, { open: events.openRef });
@@ -122,6 +117,13 @@ export function createProjectTools(hosts: ToolHosts, events: ToolEvents): Projec
         return git;
       });
       return git ?? gitPromise;
+    },
+    async ensureProductSpine() {
+      productSpinePromise ??= import("./product_spine").then(({ mountProductSpine }) => {
+        productSpine = mountProductSpine(hosts.productSpine);
+        return productSpine;
+      });
+      return productSpine ?? productSpinePromise;
     },
     async ensureRelease() {
       releasePromise ??= import("./release").then(({ mountRelease }) => {

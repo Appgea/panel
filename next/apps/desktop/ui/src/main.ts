@@ -1,13 +1,3 @@
-/**
- * The spine.
- *
- * Panel is an admin panel across a portfolio, not an IDE inside one repo. The PROJECT is
- * the unit: each one owns an agent, a working set and a stage, and several
- * run at once. Selecting a project swaps what you SEE; it never tears down what is RUNNING.
- *
- * Every event arrives from Rust already tagged with its project, so this file routes rather
- * than guesses. Nothing here knows how a view, a question, or a file is drawn.
- */
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -115,44 +105,19 @@ const el = <T extends HTMLElement>(id: string): T => {
   return node as T;
 };
 
-/**
- * The module rail. Every place you can be on a project screen is one of these, and they all sit
- * TOGETHER at the top — Terminals, Dashboard, then one segment per Panel module.
- *
- * Projects open on Terminals. Git follows immediately for reviewing the agent's changes.
- * Dashboard and Work remain available without interrupting the terminal-first workflow.
- *
- * They used to be scattered: Git was a tab, Product Spine was a ghost button off in the actions, and
- * Release — a whole module, the one that answers "what is actually shipped?" — was not on the
- * screen at all. Three modules, three different shapes, so nothing read as "these are the doors
- * into this project". Same rail, same shape, one hue each.
- *
- * The agent's rendered output is NOT a place of its own: it lands on the Dashboard. It used to
- * have a tab, which meant the same event stream was readable in two fidelities at once
- * (cards / PTY) and the screen read as noise.
- */
-type CoreTab = "terminals" | "dash" | "files" | "debug" | "git" | "release" | "revenuecat" | "analytics";
+type CoreTab = "terminals" | "dash" | "files" | "debug" | "git" | "product-spine" | "release" | "revenuecat" | "analytics";
 type Tab = CoreTab | `extension:${string}:${string}`;
 
 type TurnWork = {
-  /** First line of the latest user prompt for this terminal session. */
   prompt: string | null;
-  /** Files connected to that prompt, never the repository's accumulated Git dirt. */
   files: WorkFile[];
-  /** A deliberate agent handoff is authoritative over automatically observed edits. */
   declared: boolean;
 };
 
-/**
- * Everything Panel knows about one project. The DOM lives here rather than being re-rendered
- * on switch — a project you come back to should look exactly as you left it, scroll included.
- */
 type ProjectState = {
   project: Project;
   stage: HTMLElement;
-  /** Automatic, event-derived scene for this project's current work. */
   workshop: WorkshopHandle;
-  /** Latest-prompt working set per terminal. Multiple agents in one project never mix lists. */
   workBySession: Map<string, TurnWork>;
   status: string;
   detail: string;
@@ -161,68 +126,31 @@ type ProjectState = {
   tab: Tab;
   unseenStage: number;
   unseenFiles: number;
-  /** Every terminal open on this project — agents and shells alike, in the order opened. */
   sessions: Session[];
-  /** Which one's screen is showing. The others keep running regardless. */
   activeSession: string | null;
-  /** `Date.now()` of the last time this project was selected. 0 = never — sinks to config order. */
   lastActive: number;
 };
 
 const states = new Map<string, ProjectState>();
 let active: string | null = null;
-/** The sidebar's slow facts (git, commits, portfolio status, analytics) and its hover card. Up
- *  here so every function below can read them from the first paint. */
 const pulse = mountPulse({
   changed: () => paintProjectsSoon(),
   analyticsInstalled: () => moduleInstalled("analytics"),
 });
 const railCard = mountRailCard();
 
-/** Sessions whose process has exited. They keep their transcript; they stop claiming to run. */
 const exited = new Set<string>();
-/**
- * Distinct files an agent has written since the human last looked at this project's Work tab.
- * This is a COUNT for the rail badge and nothing else — there is no banner, no theater and no
- * pending queue any more. What an agent actually did is reported in the chat rail.
- */
 const unseenEdits = new Map<string, Set<string>>();
-/** Prevent a repeated shortcut or double-click from trying to close the same PTY twice. */
 const closing = new Set<string>();
-/**
- * Agent sessions that are mid-turn. The OS cannot see this: an agent waiting on the model has
- * forked nothing, so it looks exactly like an idle prompt — and closing it would throw away a
- * turn in flight. Filled from the agent's own status events, emptied when the turn finishes.
- */
 const working = new Set<string>();
-/**
- * The same knowledge, one step finer, for the one surface that shows sessions side by side.
- *
- * `working` answers "may I close this"; a wall of nine identical black panes needs the other
- * question — WHICH of these is running and which one is parked on you. "ask" is a turn that has
- * stopped and wants an answer; "work" is a turn still moving. A session absent from this map is
- * quiet, and a shell is always absent: it never speaks a status in its life.
- */
 const sessionPhase = new Map<string, "work" | "ask">();
-/** When each session began waiting on you. ⌘⇧A visits the longest wait first. */
 const askSince = new Map<string, number>();
-/**
- * Agents put to sleep, and what each gave back (null when there was no reading). Asleep is a
- * kind of exited: no process, the scrollback kept. The difference is that Wake resumes the same
- * conversation in the same pane, where Restart starts a new one.
- */
 const asleep = new Map<string, number | null>();
-/** The latest reading per live session, from session_memory. */
 let memory = new Map<string, { bytes: number | null; canSleep: boolean }>();
-/** When a person or the agent last did anything in each session. A session never touched
- *  counts from launch, so a restored wall is not put to sleep on its first tick. */
 const touched = new Map<string, number>();
 const launchedAt = Date.now();
-/** When a sleep was last refused, per session. Most refusals are an agent with no conversation
- *  yet, so auto-sleep waits a while before it asks that one again. */
 const refused = new Map<string, number>();
 const RETRY_REFUSED = 15 * 60_000;
-/** The only writer of sessionPhase, so a wait's start time can never outlive the wait. */
 function setPhase(sessionId: string, phase: "work" | "ask" | null): void {
   if (phase !== "ask") askSince.delete(sessionId);
   else if (sessionPhase.get(sessionId) !== "ask") askSince.set(sessionId, Date.now());
@@ -230,16 +158,7 @@ function setPhase(sessionId: string, phase: "work" | "ask" | null): void {
   else sessionPhase.delete(sessionId);
 }
 
-/* ------------------------------------------------------------------ attention
- * "Which agent needs me" is the question Panel exists to answer. Two states answer it, and the
- * rail row, Home's card and the dock badge all read them from here:
- *
- *   - needs  — a session is parked on you: a permission prompt in its terminal, or an open ask.
- *   - done   — a turn finished while you were not looking. It is your move, and an idle dot
- *              would say the same thing as a project nobody touched all week.
- */
 type Attention = "needs" | "done" | null;
-/** Projects whose last turn finished out of sight. Cleared by looking at the project. */
 const doneUnseen = new Set<string>();
 const attentionOf = (here: ProjectState): Attention =>
   here.sessions.some((session) => sessionPhase.get(session.id) === "ask")
@@ -247,7 +166,6 @@ const attentionOf = (here: ProjectState): Attention =>
     : doneUnseen.has(here.project.id)
       ? "done"
       : null;
-/** The human can see this project right now. */
 const lookingAt = (id: string): boolean =>
   document.hasFocus() &&
   (id === CPO_ID
@@ -256,7 +174,6 @@ const lookingAt = (id: string): boolean =>
 
 type Alert = { title: string; body: string; urgent: boolean };
 let badgeShown = -1;
-/** Keep the dock badge on the count. An alert is sent with it; Rust drops it if Panel has focus. */
 function signalAttention(alert: Alert | null = null): void {
   const count = [...states.values()].filter((here) => attentionOf(here)).length;
   if (!alert && count === badgeShown) return;
@@ -270,19 +187,14 @@ function markSeen(id: string): void {
   if (doneUnseen.delete(id)) paintProjectsSoon();
 }
 
-/** A permission wait ends when the agent moves again or you answer it in the terminal. An open
- *  ask does not: only its own answer or timeout ends it. */
 function endPermissionWait(id: string, sessionId: string): void {
   if (sessionPhase.get(sessionId) !== "ask" || askTray.sessionAsking(sessionId)) return;
   setPhase(sessionId, "work");
   setStatus(id, "working");
 }
-/** True while ANY project has a live (non-exited) session. */
 const hasLiveSessions = (): boolean =>
   [...states.values()].some((here) => here.sessions.some((session) => !exited.has(session.id)));
 
-// Dev-only: tell vite.config.ts's plugin when a session is live so it defers the full-page
-// reload that would otherwise forget the deck's adopted panes mid-session.
 if (import.meta.hot) {
   let lastReported: boolean | null = null;
   window.setInterval(() => {
@@ -295,13 +207,6 @@ if (import.meta.hot) {
   }, 1500);
 }
 
-/**
- * The portfolio's groups, in config order. Read once at boot — a company is not something that
- * changes while you work, and re-reading it on every repaint would be a disk read per frame.
- *
- * Empty is the normal case for a single-company portfolio, and everything downstream treats it
- * that way: no sidebar sections, no per-group tabs, nothing to notice.
- */
 let groups: Group[] = [];
 const groupName = (id: string): string =>
   groups.find((group) => group.id === id)?.name ?? (id || "");
@@ -317,6 +222,7 @@ const debugPane = el("debugPane");
 const dashPane = el("dashPane");
 const terminalsTabPane = el("terminalsTabPane");
 const gitPane = el("gitPane");
+const productSpinePane = el("productSpinePane");
 const releasePane = el("releasePane");
 const revenueCatPane = el("revenueCatPane");
 const analyticsPane = el("analyticsPane");
@@ -330,7 +236,6 @@ let chat: ChatHandle;
 let askTray: AskTrayHandle;
 let notebook: NotebookHandle | null = null;
 let notebookLoading: Promise<NotebookHandle> | null = null;
-/** The ops network. Lazy: a screen you go to. */
 let opsMap: OpsMapHandle | null = null;
 let opsMapLoading: Promise<OpsMapHandle> | null = null;
 let opsMapActive = false;
@@ -339,55 +244,37 @@ let fleetLoading: Promise<FleetHandle> | null = null;
 let fleetActive = false;
 let settingsFromOpsMap = false;
 let chatFromOpsMap = false;
-/** The support queue. Lazy for the same reason as the plan: it is a screen you go to, not one
- *  you land on, and mounting it costs a read of the module's stored log. */
 let support: SupportHandle | null = null;
 let supportLoading: Promise<SupportHandle> | null = null;
 let supportActive = false;
 let reviewActive = false;
 let review: ReturnType<typeof mountReview>;
-/** Every agent on this Mac, drawn by Bevy. Mounted at boot, polled only while open. */
 let live: LiveHandle;
 let liveActive = false;
-/** The calls that wait for the owner. Mounted at boot, polled only while open. */
 let forYou: ForYouHandle;
 let forYouActive = false;
-/** Every agent session, reported or not, read from each agent's own store. */
 let history: HistoryHandle;
 let historyActive = false;
 let terminals: TerminalsHandle;
-/** The workspace screen is up — Runs, or one of the terminal tabs. Every portfolio-level WORK
- *  surface is a tab of this one screen; Home, Settings and a project each replace it. */
 let terminalsActive = false;
 let settings: SettingsHandle;
-/** Settings is a screen, so something has to remember what it took the glass from. */
 let settingsActive = false;
 let settingsFromWorkspace = false;
 let settingsFromHome = false;
 let settingsFromNotebook = false;
 let runner: RunnerHandle;
-/** Home is a screen of its own — the portfolio's landing, not a tab of the work area. */
 let homeActive = false;
-/** Local Markdown notes. This screen has no project or agent connection. */
 let notebookActive = false;
-/** Chat is a screen too now, so it needs the same bookkeeping Settings has: it took the glass
- *  from something, and it owes that something back on the way out. */
 let chatActive = false;
 let chatFromWorkspace = false;
 let chatFromHome = false;
 let chatFromNotebook = false;
-/** The Manager opened over the Inbox hands the glass back to the Inbox. */
 let chatFromForYou = false;
-/** Every message agents sent, oldest first. The Inbox shows them. The backend keeps them for a
- *  month (inbox.rs), so they are still here after a restart. */
 let inboxPosts: InboxPost[] = [];
 const POSTS_MAX = 500;
-/** Which pinned tab of the workspace is up. Mirrors of terminals.pinnedAt(), kept here because
- *  the hotkey guards below read them on every keystroke and they change only on a tab switch. */
 let runnerActive = false;
 let chatSequence = 0;
 
-/** Open (or reuse) this project's Claude session and submit a task as its first prompt. */
 async function runWithAgent(prompt: string): Promise<void> {
   if (!active) return;
   const session = await openSessionFor(active, "claude");
@@ -396,11 +283,6 @@ async function runWithAgent(prompt: string): Promise<void> {
   jumpToSession(session.project, session.id);
 }
 
-/**
- * A command an agent printed, run in a shell of that agent's project. An idle shell already open
- * there takes it, so a row of Run clicks does not leave a row of terminals; otherwise a new one
- * opens at the project root. Panel goes to that shell either way: what ran is never hidden.
- */
 async function runInShell(sessionId: string, command: string): Promise<boolean> {
   const project = sessionById(sessionId)?.project;
   const here = project ? state(project) : undefined;
@@ -415,11 +297,8 @@ async function runInShell(sessionId: string, command: string): Promise<boolean> 
   }
   shell ??= await openSessionFor(project, "shell");
   if (!shell) return false;
-  // One line runs. Several are pasted and wait for Enter: a TUI wraps a long command with a
-  // real newline, and running each half on its own could do damage.
   const data = command.includes("\n") ? `\x1b[200~${command}\x1b[201~` : `${command}\r`;
   try {
-    // A shell still starting reads it once it is up.
     await invoke("write_terminal", { terminalId: shell.terminal_id, data });
   } catch {
     return false;
@@ -430,20 +309,14 @@ async function runInShell(sessionId: string, command: string): Promise<boolean> 
 
 let shutdownPromptOpen = false;
 
-/** The manager's project id. It has a project state like every worker, so its terminal is tracked
- *  the same way, but it is not in the portfolio: no sidebar row, no Home card, no git surface. The
- *  host resolves it against the ops tree. Mirrors CPO_ID in main.rs. */
 const CPO_ID = "appgea";
 
-/** Project states that are not in the portfolio. */
 const offPortfolio = (id: string): boolean => id === CPO_ID || id === MAIN_ID;
 
-/** Every project state except the manager's and the main folder's — what the portfolio surfaces iterate. */
 function portfolioStates(): ProjectState[] {
   return [...states.values()].filter((here) => !offPortfolio(here.project.id));
 }
 
-/** The main folder can move when the portfolio does: with no `mainFolder` set it is derived. */
 async function refreshMainFolder(): Promise<void> {
   const main = await invoke<Project>("main_folder_project").catch(() => null);
   if (!main) return;
@@ -456,7 +329,6 @@ async function refreshMainFolder(): Promise<void> {
   known.project.exists = main.exists;
 }
 
-/** The manager's live session, newest first. Null when it is not running. */
 function managerSession(): Session | null {
   const here = states.get(CPO_ID);
   const live = here?.sessions.filter((session) => isAgentKind(session.kind) && !exited.has(session.id)) ?? [];
@@ -468,6 +340,7 @@ const projectTools = createProjectTools(
     files: filesPane,
     debugger: debugPane,
     git: gitPane,
+    productSpine: productSpinePane,
     release: releasePane,
     revenuecat: revenueCatPane,
     analytics: analyticsPane,
@@ -481,8 +354,6 @@ const projectTools = createProjectTools(
         path: here.project.path,
       };
     },
-    // One entry per terminal that has a turn on record, newest terminal first. `live` is the
-    // same mid-turn test the status dot uses, so Git never offers to commit a half-written turn.
     turns(projectId = active ?? undefined) {
       const here = projectId ? state(projectId) : undefined;
       if (!here) return [];
@@ -544,17 +415,11 @@ const ctx: RenderCtx = {
   },
 };
 
-/**
- * Where a Panel link goes (deeplink.ts). Review opens the deck on the files the report named —
- * falling back to the project's queue when none of them is on disk — and never leaves the screen
- * you were on. Work and Git are the project's own tabs; the Manager is its pane in Chat.
- */
 function openPlace(project: string | null, place: Place, alongside: string[] = []): void {
   if (place.to === "manager") {
     chat.show();
     return;
   }
-  // The Manager and the main folder are not projects: no Review queue, Work tab or Git to open.
   if (!project || offPortfolio(project)) return;
   if (place.to === "work") {
     projectCtx(project).openRef(place.line ? `${place.path}:${place.line}` : place.path);
@@ -567,8 +432,6 @@ function openPlace(project: string | null, place: Place, alongside: string[] = [
   }
 }
 
-/** Chat posts can open a file from ANY project, not whichever project happened to be selected
- * before the Workspace came up. Each post carries its routing context with it. */
 function projectCtx(project: string): RenderCtx {
   return {
     openRef(ref) {
@@ -597,17 +460,13 @@ function projectCtx(project: string): RenderCtx {
   };
 }
 
-/* --------------------------------------------------------------- projects */
 
 function state(id: string): ProjectState | undefined {
   return states.get(id);
 }
 
-/** When each project was last worked in, kept across launches (see `lastActive`). */
 const recentStamps = readStored<Record<string, number>>("panel-project-recent", {});
 
-/** Record that real work happened in a project. This is the only thing that feeds the rail's
- *  short list, so it is deliberately narrow: opening a session or an agent turn, never a click. */
 function touchProject(id: string): void {
   const here = state(id);
   if (!here) return;
@@ -616,7 +475,6 @@ function touchProject(id: string): void {
   try {
     localStorage.setItem("panel-project-recent", JSON.stringify(recentStamps));
   } catch {
-    /* a full or blocked store costs us ordering, nothing more */
   }
 }
 
@@ -641,25 +499,16 @@ function makeState(project: Project): ProjectState {
     status: "idle",
     detail: "no agent running",
     running: false,
-    // Empty until `project_modules` answers. Tabs then FADE IN rather than out: guessing a broad
-    // set here meant every project flashed Release and RevenueCat for a frame before losing them.
     modules: new Set<string>(),
     tab: defaultTab(project),
     unseenStage: 0,
     unseenFiles: 0,
     sessions: [],
     activeSession: null,
-    // Recency outlives the launch. The rail's short list IS the recent list, so a stamp that
-    // reset every morning would hand you five arbitrary rows on the first run of the day.
     lastActive: recentStamps[project.id] ?? 0,
   };
 }
 
-/** Terminals, Dashboard, Work and Debug are core surfaces. Every project has them, so they are not
- *  modules and cannot be switched off. Everything else stands only where the project has a use for it:
- *  Analytics without a Firebase config, or RevenueCat without the SDK, is a tab that can only ever
- *  show you an error. Panel detects the set (see `detect_modules` in projects.rs) and
- *  `.panel/modules.json` overrides it. */
 function tabEnabled(here: ProjectState, tab: Tab): boolean {
   const extension = extensionTabs.get(tab);
   if (extension) {
@@ -712,6 +561,7 @@ function mountModuleRailControls(): void {
 
 function syncModuleAvailability(here: ProjectState): void {
   el("tabGit").hidden = !tabEnabled(here, "git");
+  el("tabProductSpine").hidden = !tabEnabled(here, "product-spine");
   el("tabRelease").hidden = !tabEnabled(here, "release");
   el("tabRevenueCat").hidden = !tabEnabled(here, "revenuecat");
   el("tabAnalytics").hidden = !tabEnabled(here, "analytics");
@@ -722,8 +572,6 @@ function syncModuleAvailability(here: ProjectState): void {
 }
 
 async function select(id: string, requestedTab?: Tab): Promise<void> {
-  // Choosing any project always leaves the workspace cleanly; no-ops when it is down. Same
-  // for Home and Settings — picking a project is as much a way out of them as Done is.
   dropSettings();
   dropHome();
   dropChat();
@@ -736,19 +584,13 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   dropLive();
   dropForYou();
   exitTerminals();
-  // Whatever took the glass has handed it back — the project chrome is the screen again. Said
-  // here once rather than in each drop*(), which do not know what replaces them.
   mainZone().hidden = false;
   const next = state(id);
   if (!next) return;
   active = id;
   markSeen(id);
   el("startAgentError").hidden = true;
-  // Selecting a project does NOT reorder the rail. A tap only moves the highlight — the row
-  // floats up later, animated, when there's a real reason: an action or a live terminal
-  // (see bumpProject). Reordering on every tap made the sidebar jump under the finger.
 
-  // Swap the per-project DOM in wholesale. Cheap, and it preserves scroll.
   dashboard.stageHost.replaceChildren(next.stage);
   dashboard.workshopHost.replaceChildren(next.workshop.root);
   dashboard.syncStage();
@@ -768,20 +610,13 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   }
   projectTerminals.setProject(id);
   const moduleConfig = await invoke<ProjectModules>("project_modules", { project: id }).catch(() => {
-    // Detection failed, so we know nothing about this project. Offer only the surfaces that are
-    // about the repo itself — anything store- or SDK-shaped would be a guess.
-    return { configured: false, enabled: ["git"], work_exclude: [] };
+    return { configured: false, enabled: ["git", "product-spine"], work_exclude: [] };
   });
   if (active !== id) return;
   next.modules = new Set(moduleConfig.enabled);
   syncModuleAvailability(next);
   if (requestedTab) next.tab = requestedTab;
   if (!tabEnabled(next, next.tab)) next.tab = defaultTab(next.project);
-  // Git and Product Spine are NOT loaded here — see loadTab(). Eagerly opening them cost a module
-  // round-trip each (repo detect + status + a 150-commit graph, and an iframe) on every click in
-  // the sidebar, for two screens you were usually not even looking at.
-  //
-  // The sessions of every OTHER project keep running; we only stop showing them.
   showSessions();
   paintProjects();
   paintNav();
@@ -790,20 +625,11 @@ async function select(id: string, requestedTab?: Tab): Promise<void> {
   void refreshProject(id);
 }
 
-/* ---------------------------------------------------------------- sessions */
 
-/**
- * Draw the strip and show the active session's screen, for whatever project is selected.
- *
- * This is the ONLY place that decides what the terminal zone looks like. Everything that changes
- * a session — opening, closing, exiting, switching project — funnels through here rather than
- * poking the zone itself, keeping the strip and the visible session in sync.
- */
 function showSessions(): void {
   const here = active ? state(active) : undefined;
   if (!here) return;
 
-  // A session you closed or that died is not somewhere you can be sent.
   if (here.activeSession && !here.sessions.some((s) => s.id === here.activeSession)) {
     here.activeSession = null;
   }
@@ -812,13 +638,11 @@ function showSessions(): void {
   }
 
   strip.paint(here.sessions, here.activeSession, exited, asleep);
-  // Empty, the strip would be a bar holding only Skills; the empty state below speaks instead.
   el("terminalEmpty").hidden = here.sessions.length > 0;
   el("sessionStrip").hidden = here.sessions.length === 0;
   deck.show(projectTerminalVisible() ? here.activeSession : null);
   syncActiveWork(here);
 
-  // An agent is "running" for the dashboard's purposes when a live claude is open on it.
   here.running = here.sessions.some((s) => isAgentKind(s.kind) && !exited.has(s.id));
   here.workshop.setAgents(
     here.sessions
@@ -832,22 +656,12 @@ function showSessions(): void {
   if (terminalsActive) terminals.sync(wallProjects());
 }
 
-/**
- * Open a session on ANY project — the Terminals screen launches across the whole portfolio,
- * so this cannot assume the target is the one being looked at. It ADDS — it never replaces
- * what is running. Simulator runs are NOT sessions: they belong to the Run screen and never
- * join the deck.
- */
-/** Why the last start_session call failed — the Terminals wall reads this to explain a failed
- *  launch instead of silently snapping the ＋ pane back to idle. */
 let lastStartError = "";
 
 async function openSessionFor(
   projectId: string,
   kind: SessionKind,
-  /** Fork here instead of the project root — ⌘T on the wall passes the focused shell's own cwd. */
   cwd?: string,
-  /** Pick a past session of this kind back up (History) instead of starting fresh. */
   resume?: string,
 ): Promise<Session | null> {
   const here = state(projectId);
@@ -879,8 +693,6 @@ async function openSessionFor(
         rows: size.rows,
         cwd: cwd ?? null,
       });
-    // The PTY now exists on the Rust side. From here on, a throw must reap it — otherwise a
-    // failure building the xterm pane leaves a live, invisible process behind.
     started = session;
     here.sessions.push(session);
     here.activeSession = session.id;
@@ -890,15 +702,12 @@ async function openSessionFor(
     if (isAgentKind(kind)) setStatus(projectId, "ready", here.project.name);
     if (active === projectId) showSessions();
     paintProjects();
-    // The project's RUNNING verdict just changed, and the dashboard draws from that. Without
-    // this it goes on saying "at rest" at a live agent.
     void refreshProject(projectId);
     return session;
   } catch (error) {
     lastStartError = String(error);
     console.error("[panel] start_session failed", { projectId, kind, error });
     if (started) {
-      // Roll back a half-open session: drop it from the model and kill its orphaned PTY.
       here.sessions = here.sessions.filter((s) => s.id !== started!.id);
       deck.remove(started.id);
       void invoke("stop_session", { session: started.id }).catch(() => undefined);
@@ -907,14 +716,11 @@ async function openSessionFor(
   }
 }
 
-/** An ended session, started again: same project, same kind. The ended one goes first, so the
- *  new terminal takes its seat rather than queuing behind a corpse. */
 async function restartSession(sessionId: string): Promise<void> {
   if (asleep.has(sessionId)) return wakeSession(sessionId);
   const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
   const session = owner?.sessions.find((s) => s.id === sessionId);
   if (!owner || !session || !exited.has(sessionId)) return;
-  // Runs and tasks restart from their own screens, which know their target and command.
   if (session.kind === "sim" || session.kind === "task") return;
   await closeSession(sessionId);
   const kind: SessionKind = session.kind;
@@ -923,24 +729,16 @@ async function restartSession(sessionId: string): Promise<void> {
     await alertDialog(`${session.title} did not start again.\n\n${lastStartError || "Check that its CLI is installed."}`);
     return;
   }
-  // On the wall the new tile appears in place; anywhere else, show it.
   if (!terminalsActive) jumpToSession(next.project, next.id);
 }
 
-/* ------------------------------------------------------------------ sleep
- * Nothing is torn down to look elsewhere, so by evening the wall is a pile of agents that all
- * still run, each half a gigabyte or more with its MCP servers. Sleep ends an agent's process
- * and keeps its pane. Wake resumes the same conversation there. main.rs has the long version. */
 
-/** The terminal the keyboard is in, if the window has it. Never put to sleep under your hands. */
 function typingIn(): string | null {
   if (!document.hasFocus()) return null;
   if (terminalsActive) return terminals?.focusedSession() ?? null;
   return active && !offProject() ? (state(active)?.activeSession ?? null) : null;
 }
 
-/** Agents that could sleep now and have been left alone for at least `quietFor` ms. Working,
- *  waiting on you, or under the caret: never. */
 function quietAgents(quietFor: number): string[] {
   const now = Date.now();
   const here = typingIn();
@@ -957,7 +755,6 @@ function quietAgents(quietFor: number): string[] {
   return out;
 }
 
-/** Read what every live session holds. One `ps` on the Rust side, so cheap enough to poll. */
 async function refreshMemory(): Promise<void> {
   const read = await invoke<Record<string, { bytes: number | null; canSleep: boolean }>>("session_memory")
     .catch(() => null);
@@ -966,13 +763,10 @@ async function refreshMemory(): Promise<void> {
   terminals?.paintMemory();
 }
 
-/** `asked`: you pressed it, so a refusal is said out loud. Auto-sleep only notes it. */
 async function sleepSessions(ids: string[], asked: boolean): Promise<void> {
   const awake: string[] = [];
   await Promise.all(ids.map(async (id) => {
     if (asleep.has(id) || exited.has(id) || closing.has(id)) return;
-    // Filed before the call: the PTY's closing chunk can beat the reply, and the pane must
-    // already know to say "asleep" rather than "ended".
     asleep.set(id, memory.get(id)?.bytes ?? null);
     try {
       await invoke("sleep_session", { session: id });
@@ -990,7 +784,6 @@ async function sleepSessions(ids: string[], asked: boolean): Promise<void> {
   else console.warn("[panel] left awake", awake);
 }
 
-/** The setting's answer to "how long is too long". Checked once a minute. */
 function sleepUnused(): void {
   const minutes = PREF.sleepAfterMinutes();
   if (!minutes) return;
@@ -998,7 +791,6 @@ function sleepUnused(): void {
   if (due.length) void sleepSessions(due, false);
 }
 
-/** Fork a sleeping agent again, on its own conversation, in its own pane. */
 async function wakeSession(sessionId: string): Promise<void> {
   const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
   const session = owner?.sessions.find((s) => s.id === sessionId);
@@ -1014,7 +806,6 @@ async function wakeSession(sessionId: string): Promise<void> {
   asleep.delete(sessionId);
   exited.delete(sessionId);
   touched.set(sessionId, Date.now());
-  // Same id, new PTY. Everything keyed by the id (its tab, its name, its seat) stays put.
   owner.sessions = owner.sessions.map((s) => (s.id === sessionId ? woke : s));
   deck.wake(sessionId, woke.terminal_id);
   owner.running = true;
@@ -1025,8 +816,6 @@ async function wakeSession(sessionId: string): Promise<void> {
   void refreshMemory();
 }
 
-/** Who a review's feedback goes to: the agent you were last in on that project, else its newest
- *  live agent. Shells and ended sessions cannot take a message. */
 function reviewAgent(projectId: string): Session | null {
   const here = state(projectId);
   if (!here) return null;
@@ -1034,7 +823,6 @@ function reviewAgent(projectId: string): Session | null {
   return live.find((s) => s.id === here.activeSession) ?? live[live.length - 1] ?? null;
 }
 
-/** The active-project shorthand every in-project control uses. */
 async function openSession(kind: SessionKind): Promise<boolean> {
   if (!active) return false;
   const session = await openSessionFor(active, kind);
@@ -1042,16 +830,11 @@ async function openSession(kind: SessionKind): Promise<boolean> {
   return Boolean(session);
 }
 
-/** Is this session doing anything? An agent mid-turn counts even though it has forked nothing;
- *  otherwise it is the OS's answer (the PTY's foreground process is no longer the shell/agent
- *  itself). Unknown counts as busy — a failed probe must cost a click, never an unasked kill. */
 async function sessionBusy(sessionId: string): Promise<boolean> {
   if (working.has(sessionId)) return true;
   return invoke<boolean>("session_busy", { session: sessionId }).catch(() => true);
 }
 
-/** Close one session for good: confirm a live process, kill the PTY, drop the screen, forget it.
- *  Owner is found by lookup — the Terminals wall closes sessions of projects you are not in. */
 async function closeSession(sessionId: string): Promise<void> {
   const here = [...states.values()].find((candidate) =>
     candidate.sessions.some((s) => s.id === sessionId),
@@ -1060,25 +843,11 @@ async function closeSession(sessionId: string): Promise<void> {
   const session = here.sessions.find((candidate) => candidate.id === sessionId);
   if (!session || closing.has(sessionId)) return;
 
-  // An ended session is only retained scrollback and can disappear immediately. A live one is
-  // asked about in two cases.
-  //
-  // One: something is visibly going on — a command running under the shell (the OS knows), or an
-  // agent mid-turn (only Panel knows, since a thinking agent has forked nothing).
-  //
-  // Two: it is an AGENT AT ALL, busy or not. A shell at a prompt holds nothing and closing it
-  // costs a keystroke to get back. An agent at a prompt is holding a whole conversation — the
-  // context, the plan, everything it has read — and closing it throws that away with no undo and
-  // no trace. "It happens to be idle this second" was never a reason to skip the question. So a
-  // live agent is always worth one click; a live shell only when it is doing something.
   const liveAgent = !exited.has(sessionId) && isAgentKind(session.kind);
   if (!exited.has(sessionId) && (liveAgent || (await sessionBusy(sessionId)))) {
     const note = liveAgent
       ? "Its conversation and context are lost. This cannot be undone."
       : "Its running process will be stopped.";
-    // Asked ON the terminal it is about — the prompt lives in that pane, so nothing else in the
-    // app is blocked and there is no doubt which screen is being closed. Only when the pane is
-    // off-screen (nothing to ask over) does this fall back to the app-modal confirm.
     const inPlace = deck.confirmClose(sessionId, {
       title: session.title,
       projectId: here.project.id,
@@ -1091,7 +860,6 @@ async function closeSession(sessionId: string): Promise<void> {
         danger: true,
       }));
     if (!confirmed) return;
-    // The session could have exited or been closed elsewhere while the question was up.
     if (closing.has(sessionId) || !here.sessions.some((candidate) => candidate.id === sessionId)) return;
   }
 
@@ -1108,7 +876,6 @@ async function closeSession(sessionId: string): Promise<void> {
     setPhase(sessionId, null);
     here.workBySession.delete(sessionId);
     deck.remove(sessionId);
-    // Closed from the wall or its project page, the manager's pane must stop showing it too.
     chat.noteExit(sessionId);
     here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
     if (active === here.project.id) showSessions();
@@ -1120,28 +887,7 @@ async function closeSession(sessionId: string): Promise<void> {
   }
 }
 
-/* -------------------------------------------------------------- workspace */
 
-/**
- * ONE portfolio work screen replaces the per-project chrome while it is up: the Workspace.
- * Runs, and the terminal wall are tabs of it, not screens — see features/terminals.ts. The
- * sidebar has a single door into it for the same reason: the whole area is focused or it
- * isn't, and there is nothing separate left to focus.
- *
- * Home is NOT one of them. It is the portfolio's landing — where you look at the estate rather
- * than work in it — so it is a screen of its own, a standalone row above the group, and it
- * claims no digit chord.
- *
- * It borrows the deck's panes — it LENDS each mount div, the PTYs never notice, and takes
- * them all back on exit. While it is up the deck's single-screen logic stands down
- * (beginOverview) so nothing fights over mounts.
- *
- * ⌘1…⌘9 index the strip one for one while the wall is up: ⌘1 Runs, ⌘2 the first terminal tab.
- * On a project the same digits are Work's file slots. ⌘J is the door between the two, and ⌘K
- * lands straight on Runs.
- */
-/** The wall's projects: the portfolio plus the manager, so its terminal sits on the wall like any
- *  worker's. Home and every other portfolio surface use homeProjects() and leave it out. */
 function wallProjects(): HomeProject[] {
   return homeProjects(true);
 }
@@ -1165,22 +911,9 @@ function homeProjects(withManager = false): HomeProject[] {
 
 const mainZone = (): HTMLElement => document.querySelector<HTMLElement>(".main")!;
 
-/** Strip indexes, in the order set by the `pinned` array handed to mountTerminals below:
- *  Runs, then the terminal tabs. Also the ⌘ ladder, off by one. Inbox used to hold index 0; it
- *  is not a tab any more, so the ladder lost a rung rather than keeping a dead one. */
 const TAB_RUNS = 0;
-/** The first terminal tab. Everything past it is another one. */
 const TAB_WALL = 1;
 
-/**
- * Bring the workspace up, optionally on a given strip index. Already up, it is only a tab
- * switch — nothing is torn down to change tabs. Without an index it lands wherever you left it.
- */
-/**
- * Settings takes the glass from whatever was up and gives it back on the way out. It is a
- * screen because it earns one: a full grid of chords and switches is not a dialog, and a sheet
- * over a live wall leaves half the app visible and none of it clickable.
- */
 function showSettings(): void {
   if (settingsActive) return;
   dropChat();
@@ -1188,8 +921,6 @@ function showSettings(): void {
   settingsFromHome = homeActive;
   settingsFromNotebook = notebookActive;
   settingsFromOpsMap = opsMapActive;
-  // The workspace comes down properly — its pinned tabs go home and the deck takes its panes
-  // back. Reopening rebuilds it on the same tabs; nothing about the PTYs is disturbed.
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
@@ -1207,8 +938,6 @@ function showSettings(): void {
   paintNav();
 }
 
-/** Take Settings down without deciding what replaces it — for the paths that are on their way
- *  somewhere specific already (a project, Home, a workspace tab). */
 function dropSettings(): void {
   if (!settingsActive) return;
   settings.clear();
@@ -1216,7 +945,6 @@ function dropSettings(): void {
   el("settingsScreen").hidden = true;
 }
 
-/** Leave Settings for the screen it interrupted. */
 function exitSettings(): void {
   if (!settingsActive) return;
   dropSettings();
@@ -1235,7 +963,6 @@ function exitSettings(): void {
 }
 
 function showTerminals(at?: number): void {
-  // Any other door out of Settings, Home or Chat is still a door out of them.
   dropSettings();
   dropHome();
   dropChat();
@@ -1262,8 +989,6 @@ function showTerminals(at?: number): void {
   paintProjects(); // no project row may stay lit while the workspace is the screen
 }
 
-/** Home is its own screen: the app's landing, and what every "back to the portfolio" path means.
- *  It takes the glass from the workspace or a project the same way Settings does. */
 function showHome(): void {
   dropSettings();
   dropChat();
@@ -1275,22 +1000,17 @@ function showHome(): void {
   dropReview();
   dropLive();
   dropForYou();
-  // The workspace comes down properly — the deck takes its panes back before Home takes the glass.
   if (terminalsActive) exitTerminals();
   if (homeActive) return;
   homeActive = true;
   mainZone().hidden = true;
   el("homeScreen").hidden = false;
-  // Home's finder is the one project search while Home is up, so the rail's filter steps aside
-  // and must not leave the rail narrowed behind it.
   if (projectFilter.value) projectFilter.value = "";
   home.open(homeProjects());
   paintNav();
   paintProjects(); // no project row may stay lit while Home is the screen
 }
 
-/** Take Home down without deciding what replaces it — the caller is already on its way
- *  somewhere (a project, a workspace tab, Settings). */
 function dropHome(): void {
   if (!homeActive) return;
   home.clear();
@@ -1298,7 +1018,6 @@ function dropHome(): void {
   el("homeScreen").hidden = true;
 }
 
-/** Open the private Markdown notebook outside every project surface. */
 function showNotebook(): void {
   dropSettings();
   dropChat();
@@ -1343,7 +1062,6 @@ function dropNotebook(): void {
   el("notebookScreen").hidden = true;
 }
 
-/** The ops tree as a network: what finished lately, what is stuck. See features/ops_map.ts. */
 function showOpsMap(): void {
   dropFleet();
   dropHistory();
@@ -1393,9 +1111,6 @@ function dropOpsMap(): void {
   el("opsMapScreen").hidden = true;
 }
 
-/** The fleet's running units and what they closed today. Portfolio-wide. See features/fleet.ts.
- *  It loads on the first open, so an `appgeapanel://fleet` link that launched Panel lands here
- *  before the module list has answered. */
 function showFleet(): void {
   dropHistory();
   dropSettings();
@@ -1417,7 +1132,6 @@ function showFleet(): void {
   const loading = fleetLoading ?? import("./features/fleet").then(({ mountFleet }) => {
     fleet = mountFleet(screen, {
       view: () => moduleGet<FleetView>("/m/fleet/view"),
-      // The board's day scores the rank the way Live does. Without the scout module the fleet's own closes score.
       day: (hours) => (moduleInstalled("scout") ? moduleGet<OverviewData>(`/m/scout/review/overview?hours=${hours}`).catch(() => null) : Promise.resolve(null)),
       commander: async () => {
         const agents = (await invoke<LiveWorld>("live_world")).agents;
@@ -1468,9 +1182,6 @@ function dropFleet(): void {
   el("fleetScreen").hidden = true;
 }
 
-/** The fleet's commander: one Claude terminal on the main folder that takes his words from the Board's Overview.
- *  Reused while it lives, so a second direction lands where the first one's context is. The fleet skill's
- *  "When he steers" says what it does with them. */
 let commanderSession: string | null = null;
 async function tellCommander(words: string, from = "Overview"): Promise<boolean> {
   const said = words.replace(/\s+/g, " ").trim();
@@ -1493,10 +1204,6 @@ async function newCommander(): Promise<boolean> {
   return true;
 }
 
-/**
- * A scout runs where you can see it: a terminal on the main folder, its prompt typed once the
- * agent is up. It never takes the screen you are on; the strip says it is running.
- */
 async function launchScout(
   scout: Scout,
   prompt: string,
@@ -1504,9 +1211,7 @@ async function launchScout(
 ): Promise<string | null> {
   const session = await openSessionFor(MAIN_ID, (scout.agent ?? "claude") as SessionKind);
   if (!session) return null;
-  // Recorded before the prompt, so a quick agent's own "done" can never be overwritten by it.
   await started(session.id);
-  // Typed before the agent switches on bracketed paste, a prompt arrives as raw keys.
   const until = Date.now() + 20_000;
   while (!deck.pasteReady(session.id) && Date.now() < until) await new Promise((resolve) => setTimeout(resolve, 250));
   if (scout.model && scout.agent === "claude") {
@@ -1516,9 +1221,6 @@ async function launchScout(
   return (await deck.sendPrompt(session.id, prompt)) ? session.id : null;
 }
 
-/** Support is a screen like Home: one queue for the whole portfolio. Every app publishes its own
- *  support form, but the person reading them is one person, so this is one list and not a tab
- *  that appears eleven times. */
 function showSupport(): void {
   dropHistory();
   dropReview();
@@ -1538,7 +1240,6 @@ function showSupport(): void {
   screen.hidden = false;
   if (!support) screen.textContent = "Opening support…";
   const loading = supportLoading ?? import("./features/support").then(({ mountSupport }) => {
-    // Opening Support reads everything in it. The Inbox's next read drops those cards.
     support = mountSupport(screen, { onUnread: () => undefined });
     return support;
   });
@@ -1564,8 +1265,6 @@ function dropSupport(): void {
   el("supportScreen").hidden = true;
 }
 
-/** Review: what the agents made, across every project. Mounted at boot so the badge counts files
- *  that land while you are elsewhere. From a project, it goes straight into that project's work. */
 function showReview(projectId?: string): void {
   if (projectId && review.openProject(projectId)) return;
   dropLive();
@@ -1595,7 +1294,6 @@ function dropReview(): void {
   el("reviewScreen").hidden = true;
 }
 
-/** Live: every agent on this Mac in its project's room, and who started whom. */
 function showLive(): void {
   dropSupport();
   dropReview();
@@ -1624,7 +1322,6 @@ function dropLive(): void {
   el("liveScreen").hidden = true;
 }
 
-/** Inbox: what agents sent and what waits for the owner, as one feed. Live shows what runs. */
 function showForYou(): void {
   dropSupport();
   dropReview();
@@ -1653,8 +1350,6 @@ function dropForYou(): void {
   el("forYouScreen").hidden = true;
 }
 
-/** History: every agent session across the portfolio, reported or not. A screen like Support —
- *  one list for one person — opened from its row, from Home, or from an appgeapanel:// link. */
 function showHistory(focus?: { query?: string; session?: string }): void {
   dropSupport();
   dropReview();
@@ -1684,8 +1379,6 @@ function historyProjectName(id: string): string {
   return state(id)?.project.name ?? id;
 }
 
-/** Home's strip: sessions that ended since you last opened History. One read of the
- *  transcripts, which after the first is only the bytes added since. */
 function refreshHistorySignals(): void {
   void fetchHistory().then((data) => {
     const fresh = sinceSeen(data);
@@ -1699,18 +1392,13 @@ function refreshHistorySignals(): void {
   }).catch((error: unknown) => console.warn("[panel] history unavailable", error));
 }
 
-/** Resume from History. Same seat bookkeeping as any new terminal; Rust refuses a conversation a
- *  live terminal already holds. */
 async function resumeConversation(session: HistorySession): Promise<string> {
-  // History only offers Resume for agents Panel can run, so the agent is an engine kind.
   const started = await openSessionFor(session.project, session.agent as SessionKind, session.cwd, session.id);
   if (!started) throw new Error(lastStartError || "The conversation could not resume.");
   jumpToSession(started.project, started.id);
   return started.id;
 }
 
-/** A file History lists is relative to the folder the session ran in, which may sit below the
- *  project root. Work wants it relative to the root. */
 function openHistoryFile(projectId: string, cwd: string, path: string): void {
   const root = state(projectId)?.project.path;
   const absolute = path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) ? path : `${cwd}/${path}`;
@@ -1718,12 +1406,6 @@ function openHistoryFile(projectId: string, cwd: string, path: string): void {
   openPlace(projectId, { to: "work", path: relative });
 }
 
-/**
- * A full path a terminal printed or a link named. Inside a project it opens in Panel: what was
- * made in Review, any other file in Work. A folder, a path outside every project, or a reveal
- * goes to the Mac. `near` is the project the path was printed in, which wins a tie. A link from
- * outside Panel never opens a file in its app: any web page can hand the OS one. It only shows it.
- */
 async function openFullPath(target: FileTarget, reveal: boolean, near: string | null, outside = false): Promise<void> {
   const found = await invoke<{ path: string; folder: boolean }>("locate_path", { path: target.path });
   const owners = reveal || found.folder
@@ -1741,7 +1423,6 @@ async function openFullPath(target: FileTarget, reveal: boolean, near: string | 
   }
 }
 
-/** An appgeapanel:// link, from outside Panel. Unknown projects and malformed links do nothing. */
 function followAppLink(url: string): void {
   const link = parseAppLink(url);
   if (!link) {
@@ -1774,7 +1455,6 @@ function followAppLink(url: string): void {
       void openFullPath(link, false, null, true).catch((error: unknown) => console.warn("[panel] link", error));
       return;
     case "project":
-      // The Manager and the main folder have no project page for a link to open.
       if (!state(link.project) || offPortfolio(link.project)) return;
       if (link.place) openPlace(link.project, link.place);
       else void select(link.project);
@@ -1785,7 +1465,6 @@ function takeAppLinks(): void {
   void invoke<string[]>("take_links").then((urls) => urls.forEach(followAppLink)).catch(() => undefined);
 }
 
-/** A message from an agent: show it in the Inbox and keep it past a restart. */
 function addPost(post: InboxPost): void {
   inboxPosts.push(post);
   if (inboxPosts.length > POSTS_MAX) inboxPosts.shift();
@@ -1793,7 +1472,6 @@ function addPost(post: InboxPost): void {
   postsChanged();
 }
 
-/** The messages changed: the Inbox, Home's activity list and the project rows all read them. */
 function postsChanged(): void {
   const title = (post: InboxPost) => str(post.payload.title, str(post.payload.outcome, "Report"));
   for (const post of inboxPosts) {
@@ -1815,7 +1493,6 @@ function postsChanged(): void {
   );
 }
 
-/** What the backend kept from earlier runs. It is JSON from disk, so each row is checked. */
 async function loadKeptPosts(): Promise<void> {
   const kept = await invoke<Partial<InboxPost>[]>("inbox_messages");
   const good = kept.flatMap((row): InboxPost[] =>
@@ -1837,37 +1514,22 @@ async function loadKeptPosts(): Promise<void> {
         ]
       : [],
   );
-  // A message that arrived while this read ran is already in the list, and newer.
   const have = new Set(inboxPosts.map((post) => post.id));
   inboxPosts = [...good.filter((post) => !have.has(post.id)), ...inboxPosts].sort((a, b) => a.at - b.at).slice(-POSTS_MAX);
   postsChanged();
 }
 
-/** From Home or a project row: open the Inbox on one message. */
 function revealPost(postId: string): void {
   showForYou();
   forYou.reveal(postId);
 }
 
-/** One count for everything unread or waiting in the Inbox. It replaced five badges. */
 function paintInboxBadge(count: number): void {
   const badge = el("forYouBadge");
   badge.textContent = count > 99 ? "99+" : String(count);
   badge.hidden = count === 0;
 }
 
-/**
- * Chat takes the glass the way Settings does, and hands it back on the way out.
- *
- * It was a column beside the work, on the reasoning that the conversation is the accessory. The
- * shape was the problem: what arrives here is screenshots, replays and a live agent terminal, and
- * 360px turned all three into a preview of themselves. Esc, ⌘W and the row itself all give the
- * previous screen back, so it still costs one key to leave.
- *
- * Nothing here calls chat.show() — it is the other way round. Chat owns its own visibility and
- * tells the shell through the `visibility` callback, so the class, the badge and the screen can
- * never disagree about whether it is up.
- */
 function showChat(): void {
   if (chatActive) return;
   chatFromWorkspace = terminalsActive;
@@ -1876,7 +1538,6 @@ function showChat(): void {
   chatFromOpsMap = opsMapActive;
   chatFromForYou = forYouActive;
   dropSettings();
-  // The workspace comes down properly — the deck takes its panes back before Chat takes the glass.
   if (terminalsActive) exitTerminals();
   dropHome();
   dropNotebook();
@@ -1892,16 +1553,12 @@ function showChat(): void {
   paintNav();
 }
 
-/** Take Chat down without deciding what replaces it — for callers already on their way somewhere.
- *  Clearing the flag first is what stops chat.hide() from restoring a screen the caller is about
- *  to replace anyway. */
 function dropChat(): void {
   if (!chatActive) return;
   chatActive = false;
   chat.hide();
 }
 
-/** Leave Chat for the screen it interrupted. */
 function exitChat(): void {
   if (!chatActive) return;
   chatActive = false;
@@ -1921,8 +1578,6 @@ function exitChat(): void {
   paintNav();
 }
 
-/** Leaving takes the whole workspace down — including the pinned tabs, whose elements
- *  terminals.clear() hands back to #runScreen on the way out. */
 function exitTerminals(): void {
   if (!terminalsActive) return;
   terminals.clear();
@@ -1944,7 +1599,6 @@ function runnerProjects(): RunnerProject[] {
   }));
 }
 
-/** True while some screen other than a project has the glass. */
 const offProject = (): boolean =>
   terminalsActive ||
   homeActive ||
@@ -1959,15 +1613,12 @@ const offProject = (): boolean =>
   forYouActive ||
   historyActive;
 
-/** Navigation and run actions share the project selected on the visible surface. */
 function focusedProjectId(): string | null {
   return (runnerActive ? runner.focusedProject() : null)
     ?? (terminalsActive ? terminals.focusedProject() : null)
     ?? active;
 }
 
-/** ⌘J — the door between the wall and a project, both ways. Leaving the wall lands on the
- *  focused terminal's project: on the wall that is the only honest "the project I am on". */
 function toggleWall(): void {
   if (!terminalsActive) {
     showTerminals(TAB_WALL);
@@ -1976,7 +1627,6 @@ function toggleWall(): void {
   leaveWorkspace();
 }
 
-/** ⌘K — Runs from anywhere. Already on Runs, it is the way back, the same as ⌘J. */
 function toggleRuns(): void {
   if (!terminalsActive || terminals.pinnedAt() !== TAB_RUNS) {
     showTerminals(TAB_RUNS);
@@ -1985,15 +1635,12 @@ function toggleRuns(): void {
   leaveWorkspace();
 }
 
-/** Back to a project: the focused terminal's, else the one you were on, else out. */
 function leaveWorkspace(): void {
   const id = focusedProjectId();
   if (id) void select(id);
   else exitTerminals();
 }
 
-/** ⌘⇧E / ⌘⇧G / ⌘⇧D — one module of the project you are looking at, from anywhere. From the
- *  wall "looking at" is the focused terminal's project, the same answer ⌘R gives. */
 async function goSection(tab: Tab): Promise<void> {
   const id = focusedProjectId();
   if (!id) return;
@@ -2004,8 +1651,6 @@ async function goSection(tab: Tab): Promise<void> {
   }
 }
 
-/** ⌘⇧[ / ⌘⇧] on a project — walk the module rail, wrapping, the way the same chords walk the
- *  strip on the wall. Hidden modules are not rungs. */
 function stepRail(delta: number): void {
   const here = active ? state(active) : undefined;
   if (!here) return;
@@ -2015,8 +1660,6 @@ function stepRail(delta: number): void {
   void setTab(rungs[(((at + delta) % rungs.length) + rungs.length) % rungs.length].tab);
 }
 
-/** ⌘1…⌘9 on a project — Work's file slots. Work is brought up only when the slot has a file.
- *  False leaves the chord free for its app-level fallback. */
 async function jumpToSlot(slot: number): Promise<boolean> {
   const id = active;
   if (!id) return false;
@@ -2029,8 +1672,6 @@ async function jumpToSlot(slot: number): Promise<boolean> {
   return true;
 }
 
-/** The workspace's build bar reads run state from the runner and names from the sidebar — the
- *  runner only knows the projects it was last handed, and it is not always open. */
 function pushRunBar(): void {
   if (!terminalsActive) return;
   terminals.setRuns(
@@ -2041,22 +1682,6 @@ function pushRunBar(): void {
   );
 }
 
-/**
- * ⌘R — run the app you are looking at, and if it is already up, RE-RUN it.
- * ⌘⇧R — a fresh run of that app, always: new build, app deleted off a simulator first.
- *
- * "Looking at" is the focused terminal's project while the workspace is up, because on the wall
- * that is the only honest answer: the tabs hold terminals from every project at once. Inside a
- * project it is that project.
- *
- * A re-run is a hot restart when the run has one — seconds, same process, same device. Where
- * none is on offer the runner falls through to a new build that keeps the app's data, so ⌘R
- * never does nothing. Either build replaces the run in place: same target, same device, new build. Rust reaps the old
- * PTY and hands its lease back before re-taking the same address, so nothing moves.
- *
- * ⌘. is still the only way to stop without starting, and ⌘⌥R is still the only way to get a
- * second copy. Neither is reachable by pressing these twice.
- */
 function runFocusedApp(fresh: boolean): void {
   const projectId = focusedProjectId();
   if (!projectId) return;
@@ -2071,12 +1696,6 @@ function runFocusedApp(fresh: boolean): void {
   });
 }
 
-/**
- * ⌘⌥R — choose where a SECOND copy should run.
- *
- * Deliberately its own chord and not a variant of ⌘R: it costs a device, a build and a gigabyte,
- * so nobody should reach it by mistake. Runs opens with the app highlighted.
- */
 function runExtraInstance(): void {
   const projectId = focusedProjectId();
   if (!projectId || !state(projectId)) return;
@@ -2086,19 +1705,7 @@ function runExtraInstance(): void {
   });
 }
 
-/**
- * ⌘. — stop the run you are looking at, and give its simulator back.
- *
- * The other half of ⌘R, and the reason a device is ever released: stopping the PTY ends
- * `flutter run`, and Rust shuts the simulator down once nothing else is using it. Deliberately a
- * different key from ⌘R — starting and stopping a build are two decisions, not a toggle.
- *
- * Where "you are looking at" runs out, one live run is not ambiguous: if exactly one app is
- * running anywhere, ⌘. means that one. Several, and it declines rather than guessing which
- * afternoon to end.
- */
 function stopFocusedApp(): void {
-  // On the Runs tab the screen has an answer of its own — the card last touched.
   if (runnerActive && runner.closeActive()) return;
   const projectId = focusedProjectId();
   if (projectId && runner.projectRun(projectId)?.live) {
@@ -2109,8 +1716,6 @@ function stopFocusedApp(): void {
   if (live.length === 1) void runner.stopProject(live[0].project);
 }
 
-/** Every agent waiting on you, longest first: open questions and permission prompts, then
- *  turns that finished out of sight. Same two states as the rail's attention, one per session. */
 function waitingSessions(): Session[] {
   const asking = [...askSince.entries()]
     .filter(([id]) => sessionPhase.get(id) === "ask")
@@ -2123,8 +1728,6 @@ function waitingSessions(): Session[] {
   return [...asking, ...finished];
 }
 
-/** ⌘⇧A: the next agent waiting on you. Pressed on one that waits, it moves past it, so repeated
- *  presses walk the whole queue. The wall keeps you on the wall; anywhere else opens the project. */
 function goWaiting(): void {
   const queue = waitingSessions();
   if (!queue.length) return;
@@ -2190,7 +1793,6 @@ function showSkills(sessionId: string | null = null): void {
       if (working.has(session.id) || await invoke<boolean>("session_busy", { session: session.id })) {
         throw new Error("Wait for the agent to finish before staging a skill request.");
       }
-      // One bracketed paste, never Enter or terminal control sequences from a skill file.
       const data = text.replace(/[\u0000-\u001f\u007f-\u009f]/g, " ");
       await invoke("write_terminal", {
         terminalId: live.terminal_id,
@@ -2207,17 +1809,13 @@ function openProjectFromHome(projectId: string, start = false): void {
   });
 }
 
-/** Jump from a wall tile straight into that session, wherever it lives. */
 function jumpToSession(projectId: string, sessionId: string): void {
-  // Set the destination BEFORE selecting: select() -> showSessions() reads activeSession.
   const here = state(projectId);
   if (here) here.activeSession = sessionId;
-  // The manager's home is its pane in Chat, not a project page around the ops tree.
   if (projectId === CPO_ID) {
     chat.show();
     return;
   }
-  // The main folder has no project page: its terminals live on the wall.
   if (projectId === MAIN_ID) {
     showTerminals();
     terminals.reveal(sessionId);
@@ -2228,20 +1826,14 @@ function jumpToSession(projectId: string, sessionId: string): void {
   });
 }
 
-/** Marks the one sidebar row for the screen on the glass. */
 function paintNav(): void {
   el("homeNav").classList.toggle("is-active", homeActive);
   el("homeButton").classList.toggle("is-on", homeActive);
   el("projectsSection").classList.toggle("home-up", homeActive);
   el("workspaceNav").classList.toggle("is-active", terminalsActive);
-  // The sidebar marks one row, the way a Mac sidebar does. A group tab other than Runs is still
-  // the wall's area, so Terminals carries it.
   const runsUp = terminalsActive && runnerActive;
   el("runButton").classList.toggle("is-on", runsUp);
   el("terminalsButton").classList.toggle("is-on", terminalsActive && !runsUp);
-  // INBOX and DESK hold separate screens, not tabs of one: the box says which group you are in,
-  // and only the row you are actually on carries the accent. Manager, Support, History and
-  // Review have no rows: the Inbox opens them for one thing, and the Inbox row stays lit.
   const readingFromInbox = chatActive || supportActive || reviewActive || historyActive;
   el("chatNav").classList.toggle("is-active", readingFromInbox || liveActive || forYouActive);
   el("forYouButton").classList.toggle("is-on", forYouActive || readingFromInbox);
@@ -2250,26 +1842,17 @@ function paintNav(): void {
   el("fleetButton").classList.toggle("is-on", fleetActive);
   el("opsMapButton").classList.toggle("is-on", opsMapActive);
   el("notebookButton").classList.toggle("is-on", notebookActive);
-  // The gear is a door like any other row: lit while its screen is the one on the glass.
   el("settingsButton").classList.toggle("is-active", settingsActive);
 }
 
-/** Looking at the manager's pane is looking at the manager: its finished turn has been seen.
- *  The Manager lost its row on 2026-11-05 ("its no more needed"); ⌘⇧M still opens it. */
 function paintChatNav(): void {
   if (chat.isVisible()) markSeen(CPO_ID);
 }
 
-/** Terminal shortcuts only act on a visible project terminal. */
 function projectTerminalVisible(): boolean {
   return !offProject() && !!active && state(active)?.tab === "terminals";
 }
 
-/**
- * A working agent writes files in bursts, and each `file_changed` used to trigger a full git
- * refresh — a rewrite touching twenty files paid for twenty `git status` runs, all of them
- * describing a tree that was still being written. Coalesce: the last write in a burst wins.
- */
 const pending = new Map<string, number>();
 const refreshing = new Map<string, Promise<void>>();
 const refreshAgain = new Set<string>();
@@ -2285,13 +1868,6 @@ function refreshSoon(id: string): void {
   );
 }
 
-/**
- * Pull Git state for the Dashboard and Git module status.
- *
- * Agent edits can outpace Git on a large repo. Keep one status process active per project, then
- * run once more if changes arrived while it worked. Parallel copies only compete for the same
- * index and return stale snapshots in a different order.
- */
 function refreshProject(id: string): Promise<void> {
   const underway = refreshing.get(id);
   if (underway) {
@@ -2316,27 +1892,13 @@ async function loadProjectGit(id: string): Promise<void> {
     el("projectBranch").textContent = git.is_repo
       ? `${git.branch}${git.dirty ? ` · ${git.dirty} changed` : ""}`
       : here.project.path;
-    // The Git segment carries a dot when the repo is holding something — uncommitted work, or
-    // commits that never left the machine. It is the only status the rail shows without asking.
     el("gitDot").hidden = !git.is_repo || (git.dirty === 0 && git.ahead === 0);
-    // The Git tab shows the same dirt as the dashboard. Re-read it on the same coalesced beat.
     if (!offProject() && here.tab === "git") projectTools.git?.refresh();
   } catch (error) {
     console.error("[panel] project refresh failed", { project: id, error });
   }
 }
 
-/* ------------------------------------------------------------------ portfolio order
- * The rail is navigation, and navigation that rearranges itself is navigation you cannot learn.
- * Panel used to float running projects to the top and restamp a key on every agent turn, so the
- * row you were aiming at slid out from under the cursor. It doesn't any more:
- *
- *   - the order is the USER'S — manual by default, dragged into place, pinned at the top;
- *   - activity is shown IN PLACE (the dot) and summed by the ⏻ live chip, which filters on demand
- *     instead of reordering;
- *   - the other orders (recent / A–Z) exist, but only because you asked for them by name, and even
- *     then the list freezes while the pointer is inside it — nothing moves under your hand.
- */
 type SortMode = "lanes" | "manual" | "recent" | "name";
 const SORT_LABEL: Record<SortMode, string> = { lanes: "Lanes", manual: "Manual", recent: "Recent", name: "A–Z" };
 const SORT_HINT: Record<SortMode, string> = {
@@ -2359,31 +1921,17 @@ let sortMode: SortMode = ((): SortMode => {
   const saved = localStorage.getItem("panel-project-sort");
   return saved === "manual" || saved === "recent" || saved === "name" ? saved : "lanes";
 })();
-/* ------------------------------------------------------------------ the short rail
- * A portfolio of two dozen apps is a fact, not a menu. Painting all of it every second of the day
- * made the rail a wall you had to read, and the answer to "where was I" was buried in the middle
- * of it. So the rail shows the dozen you last WORKED in (sessions and agent turns — not clicks),
- * and the rest is one button away. Expanded, it is the old full list with its order, drag and pins
- * intact; a filter or the live chip opens it on its own, because a search that hides matches lies.
- */
 const RECENT_ROWS = 12;
 let showAllProjects = localStorage.getItem("panel-project-showall") === "1";
 
-/** The user's own order, by project id. Anything not in it yet lands at the end, in config order. */
 let manualOrder: string[] = readStored<string[]>("panel-project-order", []);
 const pinned = new Set<string>(readStored<string[]>("panel-project-pins", []));
-/** The live chip's state: show only projects with a running agent. Never sticky across sessions. */
 let liveOnly = false;
-/** Lanes fold the Quiet lane until you open it. The choice sticks. */
 let quietOpen = localStorage.getItem("panel-rail-quiet") === "1";
-/** Folded platform rows: guest id → host id, and host id → every member, host first. */
 const hostOf = new Map<string, string>();
 let membersOf = new Map<string, string[]>();
-/** Each project's newest agent message. */
 const lastReport = new Map<string, { id: string; title: string; at: number }>();
-/** Unseen review batches per project. */
 let reviewCounts = new Map<string, number>();
-/** The ids in the order last painted. Used to hold the list still while the pointer is inside. */
 let paintedOrder: string[] = [];
 let listHot = false;
 let dragging = false;
@@ -2396,8 +1944,6 @@ function saveOrder(): void {
   localStorage.setItem("panel-project-sort", sortMode);
 }
 
-/** True while the rail is showing the short list. A filter, the live chip, or a portfolio small
- *  enough to fit anyway all mean there is nothing to collapse. */
 function railCollapsed(): boolean {
   return (
     sortMode !== "lanes" &&
@@ -2408,14 +1954,10 @@ function railCollapsed(): boolean {
   );
 }
 
-/** The rule the list actually obeys right now. Collapsed, it is always recency — the short list
- *  IS "recent", and honouring A–Z there would give you five apps beginning with A. */
 function activeSort(): SortMode {
   return railCollapsed() ? "recent" : sortMode;
 }
 
-/** Pinned first, then whichever rule the user picked. Ties always fall back to the manual order,
- *  so even "recent" never shuffles two projects that were last touched at the same moment. */
 function orderProjects(): ProjectState[] {
   const mode = activeSort();
   const all = portfolioStates();
@@ -2435,8 +1977,6 @@ function orderProjects(): ProjectState[] {
   const isPinned = (here: ProjectState): boolean =>
     pinned.has(here.project.id) ||
     (here.project.role === "collection" && children(here.project.id).some((child) => pinned.has(child.project.id)));
-  // Frozen: the pointer is in the list (or a drag is live) and the rule is one that can move rows.
-  // Keep exactly what is on screen; the new order lands the moment the pointer leaves.
   if ((listHot || dragging) && (mode === "recent" || mode === "lanes") && paintedOrder.length) {
     const held = (here: ProjectState): number => {
       const at = paintedOrder.indexOf(here.project.id);
@@ -2471,15 +2011,6 @@ function orderProjects(): ProjectState[] {
   return nested;
 }
 
-/*
- * The project row's menu.
- *
- * Groups shipped as an edit to config.json and a relaunch, which is not a feature — it is a note
- * to whoever wrote it. This is the whole of their UI: pick a project's company, or make a company.
- * Everything downstream follows on the next read, so nothing here asks for a restart.
- *
- * Fixed-position and body-owned, because the rail scrolls and clips its own overflow.
- */
 const rowMenu = document.createElement("div");
 rowMenu.className = "row-menu";
 rowMenu.hidden = true;
@@ -2495,7 +2026,6 @@ function closeRowMenu(): void {
   rowMenuOwner = null;
 }
 
-// Capture, so a click meant to dismiss the menu never also lands on the row underneath it.
 addEventListener(
   "pointerdown",
   (event) => {
@@ -2509,12 +2039,6 @@ addEventListener("keydown", (event) => {
 addEventListener("blur", closeRowMenu);
 addEventListener("resize", closeRowMenu);
 
-/**
- * Write the new company and let the rail and the strip catch up.
- *
- * Optimistic: the row jumps to its new section on this frame and jumps back if the write fails.
- * A disk write is not something a human should watch a list wait for.
- */
 async function fileUnder(here: ProjectState, group: string): Promise<void> {
   closeRowMenu();
   const branch = here.project.parent_id ? state(here.project.parent_id) ?? here : here;
@@ -2558,8 +2082,6 @@ async function makeGroup(here: ProjectState): Promise<void> {
     await alertDialog(`That group could not be made.\n\n${String(error)}`);
     return;
   }
-  // The project that opened the menu goes straight in. Making a group and then having to file
-  // something into it is two steps for one intention.
   const made = groups[groups.length - 1];
   if (made) await fileUnder(here, made.id);
 }
@@ -2593,8 +2115,6 @@ function openRowMenu(here: ProjectState, at: { x: number; y: number }): void {
   nodes.push(fresh);
   rowMenu.replaceChildren(...nodes);
 
-  // Place it, then pull it back inside the window. Measuring needs it visible, so it is shown
-  // first at the raw point and corrected before the frame paints.
   rowMenu.hidden = false;
   rowMenu.style.left = "0px";
   rowMenu.style.top = "0px";
@@ -2606,13 +2126,7 @@ function openRowMenu(here: ProjectState, at: { x: number; y: number }): void {
   rowMenu.querySelector<HTMLButtonElement>(".row-menu-item")?.focus();
 }
 
-/* ------------------------------------------------------------------ the rail's facts
- * Everything a row says beyond its name comes from here: the pulse (git, commits, portfolio
- * status, analytics), the attention state, the review queue and the last report. The rules live
- * in features/rail.ts; these functions only gather the facts for them.
- */
 
-/** The rows a platform pair folds into one: the host first. A plain project is its own list. */
 function membersFor(here: ProjectState): ProjectState[] {
   const ids = membersOf.get(here.project.id) ?? [here.project.id];
   return ids.map((id) => state(id)).filter((member): member is ProjectState => Boolean(member));
@@ -2623,7 +2137,6 @@ function unitAttention(members: ProjectState[]): "needs" | "done" | null {
   return all.includes("needs") ? "needs" : all.includes("done") ? "done" : null;
 }
 
-/** Pinned, or a collection or a folded row with a pinned member. */
 function pinnedUnit(here: ProjectState): boolean {
   if (membersFor(here).some((member) => pinned.has(member.project.id))) return true;
   return (
@@ -2632,7 +2145,6 @@ function pinnedUnit(here: ProjectState): boolean {
   );
 }
 
-/** Newest sign of life: a visit, an agent turn, a commit, or a report. */
 function touchedAt(here: ProjectState): number {
   const commit = (pulse.peekActivity(here.project.id)?.last_commit ?? 0) * 1000;
   return Math.max(here.lastActive, commit, lastReport.get(here.project.id)?.at ?? 0);
@@ -2650,7 +2162,6 @@ function factsOf(here: ProjectState): RowFacts {
   };
 }
 
-/** A collection sits where its busiest child does, a folded row where its busiest member does. */
 function unitLane(here: ProjectState): Lane {
   const members =
     here.project.role === "collection"
@@ -2659,7 +2170,6 @@ function unitLane(here: ProjectState): Lane {
   return members.map((member) => laneOf(factsOf(member))).reduce(urgent, "quiet" as Lane);
 }
 
-/** The member whose state the row's line should speak for: parked, finished, working, else host. */
 function leadMember(members: ProjectState[]): ProjectState {
   return (
     members.find((member) => attentionOf(member) === "needs") ??
@@ -2682,7 +2192,6 @@ function lineInput(here: ProjectState): Parameters<typeof rowLine>[0] {
   };
 }
 
-/** A lane's header. Quiet's is a button: it folds the lane away and brings it back. */
 function laneHead(section: string, count: number): HTMLElement {
   const lane = LANES.find((entry) => entry.id === section);
   const label = section === "pinned" ? "Pinned" : lane?.label ?? section;
@@ -2713,7 +2222,6 @@ function laneHead(section: string, count: number): HTMLElement {
   return head;
 }
 
-/** One pill per platform, each with its own state dot. A click opens that member. */
 function platformPills(members: ProjectState[], labels: string[]): HTMLElement {
   const pills = document.createElement("span");
   pills.className = "project-pills";
@@ -2745,7 +2253,6 @@ function decorateRow(row: HTMLElement, here: ProjectState, members: ProjectState
   row.classList.toggle("is-stale", touched > 0 && Date.now() - touched > STALE_AFTER && !attention);
 }
 
-/** The first row a filter found answers Enter, with the action word if one was typed. */
 function markTarget(action: RowAction | null): void {
   const row = [...projectList.querySelectorAll<HTMLElement>(".project-row")].find(
     (candidate) => !candidate.classList.contains("is-collection"),
@@ -2758,7 +2265,6 @@ function markTarget(action: RowAction | null): void {
   row.querySelector(".project-meta")?.prepend(hint);
 }
 
-/** Open a project and do one thing there. The filter's action words and the card share this. */
 async function runRowAction(id: string, action: RowAction | null): Promise<void> {
   switch (action) {
     case "claude":
@@ -2790,7 +2296,6 @@ async function runRowAction(id: string, action: RowAction | null): Promise<void>
   }
 }
 
-/** The card for one project: everything the row has no room for, plus the doors. */
 function cardModel(here: ProjectState): CardModel {
   const id = here.project.id;
   const facts = factsOf(here);
@@ -2811,8 +2316,6 @@ function cardModel(here: ProjectState): CardModel {
     if (askTray.sessionAsking(parked.id)) {
       ask = { headline: askTray.headline(id) ?? "The agent asked a question", screen: [], actions: [{ ...open, label: "Answer", primary: true }] };
     } else {
-      // A terminal permission prompt. Enter takes the highlighted choice and Esc refuses, the
-      // same keys the terminal itself answers to. Only Claude's prompt is known to work that way.
       const answerable = parked.kind === "claude";
       const send = (data: string) => async () => {
         await invoke("write_terminal", { terminalId: parked.terminal_id, data });
@@ -2873,17 +2376,12 @@ function cardModel(here: ProjectState): CardModel {
   };
 }
 
-/** Pins first, in rail order, then every other row as painted. ⌃1…⌃9 walk this list. */
 function jumpTargets(): string[] {
   const rows = [...projectList.querySelectorAll<HTMLElement>(".project-row")];
   const ids = (list: HTMLElement[]) => list.map((row) => row.dataset.projectId!).filter(Boolean);
   return [...ids(rows.filter((row) => row.classList.contains("is-pinned"))), ...ids(rows.filter((row) => !row.classList.contains("is-pinned")))];
 }
 
-/**
- * Files dropped on a row go to that project's agent: pasted into its prompt, not submitted, so
- * you add the instruction. No agent running starts one first.
- */
 async function dropOnProject(id: string, paths: string[]): Promise<void> {
   const here = state(id);
   if (!here || here.project.role !== "leaf" || !paths.length) return;
@@ -2896,12 +2394,10 @@ async function dropOnProject(id: string, paths: string[]): Promise<void> {
   }
   await select(id);
   jumpToSession(id, session.id);
-  // A brand-new agent draws its prompt after a moment. Typing into it sooner is typing into nothing.
   if (fresh) await new Promise((resolve) => window.setTimeout(resolve, 1500));
   deck.pastePaths(session.id, paths);
 }
 
-/** Which project row a physical-pixel window point is over, for a Finder drop. */
 function rowAtPoint(x: number, y: number): HTMLElement | null {
   const ratio = window.devicePixelRatio || 1;
   const row = document.elementFromPoint(x / ratio, y / ratio)?.closest<HTMLElement>(".project-row");
@@ -2915,7 +2411,6 @@ function paintRowDrop(row: HTMLElement | null): void {
   row?.classList.add("is-drop");
 }
 
-/** Display name → project id, any case, for boards that name apps rather than folders. */
 function projectNames(): Map<string, string> {
   const names = new Map<string, string>();
   for (const here of portfolioStates()) {
@@ -2926,18 +2421,15 @@ function projectNames(): Map<string, string> {
 }
 
 function paintProjects(): void {
-  // A direct paint answers any batched one that is still waiting.
   if (paintSoonTimer) {
     window.clearTimeout(paintSoonTimer);
     paintSoonTimer = 0;
   }
-  // A repaint mid-drag would tear the row out of your hand. Hold it until the drop lands.
   if (dragging) {
     repaintQueued = true;
     return;
   }
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  // FLIP step 1 — remember where every row sits right now, keyed by project, before the swap.
   const before = new Map<string, number>();
   if (!reduce) {
     for (const child of projectList.children) {
@@ -2946,12 +2438,9 @@ function paintProjects(): void {
     }
   }
   const { query, action: queryAction } = parseQuery(projectFilter.value);
-  // Platform pairs fold into their host's row, so the row is listed when any member matches.
   membersOf = platformGroups(portfolioStates().map((here) => here.project));
   hostOf.clear();
   for (const [host, members] of membersOf) for (const id of members) if (id !== host) hostOf.set(id, host);
-  // The live chip drops itself when the work stops, and it decides whether the rail is collapsed —
-  // so it has to settle BEFORE the order is asked for, not after.
   const liveCount = portfolioStates().filter((here) => here.running).length;
   if (liveOnly && liveCount === 0) liveOnly = false;
   const collapsed = railCollapsed();
@@ -2971,8 +2460,6 @@ function paintProjects(): void {
   const matching = allProjects.filter(
     (here) => !hostOf.has(here.project.id) && membersFor(here).some(hits),
   );
-  // Collapsed, the rail keeps RECENT_ROWS rows — but never at the cost of hiding a pin (a deliberate
-  // or the project you are standing in (which may be one you have not worked in yet today).
   const shown = new Set<string>();
   if (collapsed) {
     for (const here of matching) if (pinned.has(here.project.id)) shown.add(here.project.id);
@@ -2990,11 +2477,6 @@ function paintProjects(): void {
   }
   const visibleProjects = collapsed ? matching.filter((here) => shown.has(here.project.id)) : matching;
   const narrowed = Boolean(query) || liveOnly;
-  /*
-   * Lanes. Every top-level row takes the lane of its busiest member, children ride with their
-   * parent, pins lead in a section of their own, and Quiet folds unless you opened it or a filter
-   * is doing the narrowing. A filter that hides matches would be lying.
-   */
   const laneMode = activeSort() === "lanes";
   const topOf = (here: ProjectState): ProjectState =>
     here.project.parent_id ? state(here.project.parent_id) ?? here : here;
@@ -3022,22 +2504,16 @@ function paintProjects(): void {
       visibleProjects.splice(0, visibleProjects.length, ...keep);
     }
   }
-  // Counts are projects, never rows: a collection is a folder in this list, not a project, and
-  // Home counts the same way. Two numbers for one portfolio read as a bug.
   const leaves = (list: typeof allProjects): number =>
     list.filter((here) => here.project.role === "leaf").length;
   const projectTotal = leaves(allProjects);
   projectLive.hidden = liveCount === 0;
   projectLive.setAttribute("aria-pressed", String(liveOnly));
   projectLive.querySelector("b")!.textContent = String(liveCount);
-  // Collapsed the label says what the rows ARE, and the order chip goes with it: there is no
-  // rule to choose while the list is "the ones you were just in".
   projectsLabel.textContent = collapsed ? "Recent" : "Projects";
   projectSort.hidden = collapsed;
   projectSort.textContent = SORT_LABEL[sortMode];
   projectSort.title = SORT_HINT[sortMode];
-  // The one door between the short rail and the whole portfolio. It only appears when there is
-  // something behind it, and it stays put while a filter is doing the narrowing.
   const hiddenCount = projectTotal - leaves(visibleProjects);
   projectShowAll.hidden = laneMode || narrowed || (!collapsed && states.size <= RECENT_ROWS);
   projectShowAll.classList.toggle("is-open", !collapsed);
@@ -3051,30 +2527,14 @@ function paintProjects(): void {
     ? `Show all ${projectTotal} projects`
     : `Show only the ${RECENT_ROWS} most recent`;
   projectShowAll.setAttribute("aria-expanded", String(!collapsed));
-  /*
-   * Sectioning by group.
-   *
-   * Only when there is more than one group ON SCREEN. A portfolio that is all one company gets a
-   * header saying "Appgea" above every row it owns, which is a label that never distinguishes
-   * anything — so it does not appear until the day it means something. Filters can also narrow
-   * the rail to one group, and then the header goes away again on its own.
-   *
-   * Order inside a group is untouched: pins, drags and sort modes all still decide it. The group
-   * only decides which block a row sits in.
-   */
   const groupOrder = new Map(groups.map((group, at) => [group.id, at]));
   const groupsOnScreen = new Set(visibleProjects.map((here) => here.project.group || ""));
   const sectioned = !laneMode && groupsOnScreen.size > 1;
   if (sectioned) {
     const rank = (id: string): number => groupOrder.get(id) ?? (id ? 500 : 999);
-    // A stable sort by group rank keeps every within-group order exactly as it was computed.
     visibleProjects.sort((a, b) => rank(a.project.group) - rank(b.project.group));
   }
-  // No group id can be this, so the first row always opens a section.
   let openSection = "\u0000";
-  // Drag is honest about when it can hold: only the manual order is yours to rearrange, only
-  // when the list on screen is the whole list, and never across sections — what decides which
-  // block a row sits in is its group, and a drag has no way to say that.
   const hierarchical = visibleProjects.some(
     (here) => here.project.role === "collection" || Boolean(here.project.parent_id),
   );
@@ -3093,7 +2553,6 @@ function paintProjects(): void {
         openSection = here.project.group;
         const head = document.createElement("div");
         head.className = "project-group";
-        // "Ungrouped" is a real answer, not a missing one: a project nobody has filed yet.
         head.textContent = groupName(openSection) || "Ungrouped";
         nodes.push(head);
       }
@@ -3105,14 +2564,10 @@ function paintProjects(): void {
       row.classList.toggle("is-child", Boolean(here.project.parent_id));
       row.classList.toggle("is-collection", here.project.role === "collection");
       row.classList.toggle("is-pinned", pinned.has(here.project.id));
-      // The seam under the last pin is the only thing that says "these two groups are different",
-      // and it is also the line a drag will not cross.
       const nextProject = visibleProjects[index + 1];
       if (pinned.has(here.project.id) && nextProject && !pinned.has(nextProject.project.id)) {
         row.classList.add("is-pin-last");
       }
-      // While a portfolio screen is up, no project is "where you are" — even though `active`
-      // still remembers the last one for a cheap return.
       const members = membersFor(here);
       row.classList.toggle(
         "is-active",
@@ -3147,7 +2602,6 @@ function paintProjects(): void {
       const speaks = line.tone !== "" && line.tone !== "mute";
       const mark = line.text;
       decorateRow(row, here, members, attention);
-      // The name survives collapse: the compact rail shows icons only, so it rides on hover.
       row.title = speaks ? `${here.project.name} — ${mark}` : here.project.name;
       const pin = row.querySelector<HTMLButtonElement>(".project-pin")!;
       pin.setAttribute("aria-label", pinned.has(here.project.id) ? "Unpin project" : "Pin project to top");
@@ -3169,8 +2623,6 @@ function paintProjects(): void {
         rowMenuOwner = more;
         more.classList.add("is-open");
       });
-      // Right-click gets the same menu. The browser fires this for the keyboard's menu key too,
-      // so this one listener is also how the menu is reachable without a mouse.
       row.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         const box = row.getBoundingClientRect();
@@ -3213,10 +2665,6 @@ function paintProjects(): void {
       : "No agent is running right now";
     projectList.append(empty);
   }
-  // FLIP step 2 — a row that moved is placed at its NEW slot, offset back to the old one with no
-  // transition, then released next frame so it glides. Order changes are rare and deliberate now
-  // (a drag, a pin, a sort switch), so this animates a move the user ASKED for. Nothing scrolls
-  // on its own any more: the rail follows your hand, never the other way round.
   if (!reduce && before.size) {
     let moved = false;
     for (const child of projectList.children) {
@@ -3247,8 +2695,6 @@ function paintProjects(): void {
       });
     }
   }
-  // Everything that changes a project repaints the sidebar, so this one hook is what keeps
-  // the portfolio screens live — summaries, card verdicts, wall tiles — while one is open.
   if (homeActive) home.sync(homeProjects());
   if (terminalsActive) terminals.sync(wallProjects());
   if (runnerActive) runner.sync(runnerProjects());
@@ -3256,12 +2702,8 @@ function paintProjects(): void {
   repaintQueued = false;
 }
 
-/** A drag that ended is not a click. Cleared on the next tick, after the click would have fired. */
 let suppressRowClick = false;
 
-/** Pointer-driven reorder. Not HTML5 drag-and-drop: that one hands the gesture to the OS, and in a
- *  Tauri webview the window's own drop handler eats it. A drag stays inside its group — pinned rows
- *  reorder among pins, the rest among themselves — so the seam is a wall you can feel. */
 function beginRowDrag(event: PointerEvent, row: HTMLElement, canDrag: boolean): void {
   if (!canDrag || event.button !== 0) return;
   if ((event.target as HTMLElement).closest(".project-tools, .project-meta, .project-pills")) return;
@@ -3301,8 +2743,6 @@ function beginRowDrag(event: PointerEvent, row: HTMLElement, canDrag: boolean): 
     }
     if (next === target) return;
     target = next;
-    // Everything the dragged row passes steps aside by exactly one slot — the gap that opens up
-    // IS the drop preview, so there is no separate insertion line to read.
     for (let i = first; i <= last; i += 1) {
       if (i === start) continue;
       const shift =
@@ -3334,8 +2774,6 @@ function beginRowDrag(event: PointerEvent, row: HTMLElement, canDrag: boolean): 
       manualOrder = [...ids, ...manualOrder.filter((id) => !ids.includes(id))];
       saveOrder();
     }
-    // Transforms are left ON PURPOSE: paintProjects measures where the rows LOOK before it swaps
-    // them, so the drop glides from under your finger instead of snapping back and re-flying.
     paintProjects();
   };
 
@@ -3344,7 +2782,6 @@ function beginRowDrag(event: PointerEvent, row: HTMLElement, canDrag: boolean): 
   window.addEventListener("pointercancel", end);
 }
 
-/* ------------------------------------------------------------------- tabs */
 
 type TabEntry = {
   tab: Tab;
@@ -3366,6 +2803,7 @@ const TABS: TabEntry[] = [
   { tab: "dash", pane: dashPane, button: "tabDash" },
   { tab: "files", pane: filesPane, button: "tabFiles" },
   { tab: "debug", pane: debugPane, button: "tabDebug" },
+  { tab: "product-spine", pane: productSpinePane, button: "tabProductSpine" },
   { tab: "release", pane: releasePane, button: "tabRelease" },
   { tab: "revenuecat", pane: revenueCatPane, button: "tabRevenueCat" },
   { tab: "analytics", pane: analyticsPane, button: "tabAnalytics" },
@@ -3373,7 +2811,6 @@ const TABS: TabEntry[] = [
 
 const extensionTabs = new Map<Tab, NonNullable<TabEntry["extension"]>>();
 const activeExtensionModules = new Set<string>();
-/** One answer for every screen that shows a module's card: is it installed right now. */
 const moduleInstalled = (name: string): boolean => activeExtensionModules.has(name);
 
 addEventListener("message", (event) => {
@@ -3437,9 +2874,7 @@ function registerProjectSurfaces(modules: PanelModule[]): void {
 async function refreshProjectSurfaces(): Promise<void> {
   const modules = await invoke<PanelModule[]>("list_modules").catch(() => []);
   registerProjectSurfaces(modules);
-  // The AI fleet row comes with the fleet extension. Its screen loads on the first open.
   el("fleetButton").hidden = !modules.some((module) => module.name === "fleet");
-  // Support's messages reach you as Inbox cards. Without the module there is nothing to open.
   if (!modules.some((module) => module.name === "support")) dropSupport();
   const here = active ? state(active) : undefined;
   if (!here) return;
@@ -3475,15 +2910,6 @@ function loadExtensionTab(entry: TabEntry, project: Project): void {
   extension.frame.setAttribute("src", target);
 }
 
-/**
- * Pay for a screen when you look at it, not when you select a project. Every handle ignores a
- * path it already holds, so this is safe to call on every tab press and every project switch —
- * it does real work only the first time you actually land on the screen for that project.
- *
- * This matters more than it looks: Git, Product Spine and Release each shell out to a Python
- * INTERPRETER. Loading all three on select would spawn three of them per click in the sidebar,
- * for two screens you were usually not even looking at.
- */
 async function loadTab(tab: Tab): Promise<void> {
   const here = active ? state(active) : undefined;
   if (!here || !active || !tabEnabled(here, tab)) return;
@@ -3494,9 +2920,6 @@ async function loadTab(tab: Tab): Promise<void> {
   if (tab === "files") {
     const tool = await projectTools.ensureFiles();
     if (active === projectId) tool.setProject(projectId, projectPath);
-    // Work wears the debug bar, and a bar cannot say "Start" before something has asked whether
-    // this project has a profile. The debugger is the one that knows, so it comes up with Work.
-    // It costs a 10kB chunk and four cheap file reads; it starts no adapter until you press it.
     void projectTools.ensureDebugger().then((debug) => {
       if (active === projectId) void debug.setProject(projectId, projectPath);
     });
@@ -3507,6 +2930,10 @@ async function loadTab(tab: Tab): Promise<void> {
   }
   if (tab === "git") {
     const tool = await projectTools.ensureGit();
+    if (active === projectId) tool.setProject(projectId, projectPath);
+  }
+  if (tab === "product-spine") {
+    const tool = await projectTools.ensureProductSpine();
     if (active === projectId) tool.setProject(projectId, projectPath);
   }
   if (tab === "release") {
@@ -3521,19 +2948,14 @@ async function loadTab(tab: Tab): Promise<void> {
     const tool = await projectTools.ensureAnalytics();
     if (active === projectId) tool.setProject(projectId, projectPath);
   }
-  // Whether this project can be RUN is a Rust filesystem sniff, so it is paid for on arrival at
-  // the tab that offers Run — not on every project switch.
   if (tab === "terminals") void runner.refreshTargets().then(syncProjectTerminals);
 }
 
-/** Repaint the Terminals tab from truth: this project's sessions, and the runner's own run
- *  state. Cheap and idempotent — called on session changes, run changes and tab entry. */
 function syncProjectTerminals(): void {
   const here = active ? state(active) : undefined;
   if (!here) return;
   const run = runner.projectRun(here.project.id);
   projectTerminals.sync(here.sessions, exited, run);
-  // The Dashboard's action bar reads the same truth, from the same call. Two surfaces, one sync.
   const alive = here.sessions.filter((session) => !exited.has(session.id));
   dashboard.setLive(
     run,
@@ -3542,13 +2964,6 @@ function syncProjectTerminals(): void {
   );
 }
 
-/*
- * There used to be an `offerPendingReplay` here, and after it a robot banner on the Work tab, and
- * a theater that performed every edit the agent had made. Both are gone. Work is a reading and
- * editing surface; it does not animate, and it does not carry a notification. The one place that
- * reports what an agent did is the chat rail — the rail is beside the work rather than on top of
- * it, and a second copy on a tab you are trying to work in is noise with a badge on it.
- */
 
 async function setTab(tab: Tab): Promise<void> {
   const here = active ? state(active) : undefined;
@@ -3575,7 +2990,6 @@ async function setTab(tab: Tab): Promise<void> {
     }
     mainZone().classList.toggle("is-term-tab", tab === "terminals");
     if (tab === "terminals") syncProjectTerminals();
-    // The deck stays inside this tab. Hide every project pane on other surfaces.
     deck.show(projectTerminalVisible() ? here?.activeSession ?? null : null);
     if (here && tab === "dash") here.unseenStage = 0;
     if (here && tab === "files") {
@@ -3600,8 +3014,6 @@ function paintBadges(): void {
   const here = active ? state(active) : undefined;
   badge("dashBadge", here?.unseenStage ?? 0);
   badge("filesBadge", here?.unseenFiles ?? 0);
-  // Terminals wears the count of LIVE sessions, so the rail answers "is anything running here?"
-  // without opening the tab.
   badge(
     "terminalsBadge",
     here ? here.sessions.filter((session) => !exited.has(session.id)).length : 0,
@@ -3614,12 +3026,7 @@ function badge(id: string, count: number): void {
   node.hidden = count === 0;
 }
 
-/* ------------------------------------------------------------- working set */
 
-/**
- * Paint the selected terminal's latest-prompt files. A deliberate agent handoff beats observed
- * edits because it knows which files still need the human and why.
- */
 function applyWorklist(id: string, sessionId: string, list: WorkFile[], declared: boolean): void {
   const here = state(id);
   if (!here) return;
@@ -3675,7 +3082,6 @@ function addTurnFile(id: string, sessionId: string, path: string): void {
   );
 }
 
-/* ---------------------------------------------------------------- surfaces */
 
 function placeOnStage(id: string, node: HTMLElement): void {
   const here = state(id);
@@ -3684,18 +3090,12 @@ function placeOnStage(id: string, node: HTMLElement): void {
   here.stage.prepend(node);
   while (here.stage.childElementCount > 30) here.stage.lastElementChild?.remove();
   if (active === id) dashboard.syncStage();
-  // The stage now lives ON the Dashboard, so only a project you are not looking at — or one you
-  // left on another tab — can accumulate output you have not seen.
   if (here.tab !== "dash" || active !== id) {
     here.unseenStage += 1;
     if (active === id) paintBadges();
   }
 }
 
-/**
- * One persistent sim status card per project on the Stage, updated in place. Status events replace
- * the card instead of stacking a new one each launch/reload — the card is a live readout, not a log.
- */
 function updateSimCard(id: string, payload: Payload): void {
   const here = state(id);
   if (!here) return;
@@ -3725,11 +3125,6 @@ function setStatus(id: string, status: string, detail?: string | null): void {
   paintProjectsSoon();
 }
 
-/**
- * Status events arrive in bursts: several per agent turn, from every agent at once. Each full
- * paint rebuilds every row, reads every row's position first, and re-syncs Home. One paint per
- * burst shows the same final state at a fraction of the cost.
- */
 let paintSoonTimer = 0;
 function paintProjectsSoon(): void {
   if (paintSoonTimer) return;
@@ -3739,15 +3134,7 @@ function paintProjectsSoon(): void {
   }, 80);
 }
 
-/* ----------------------------------------------------------------- events */
 
-/**
- * The manager's team tools (list_workers, read_worker, brief_worker in panel_mcp.py). They ride
- * the ask channel and are answered here because this window holds the truth: which terminal is
- * mid-turn, which is parked on you, and the rendered screen (the PTY tail is cursor moves, not
- * text). Only the manager's own sessions get an answer, and no brief is typed until you approve
- * the exact text in a dialog.
- */
 async function answerTeam(project: string, qid: string, spec: Payload): Promise<void> {
   const reply = (value: unknown): void => {
     void invoke("answer_ask", { qid, value }).catch(() => undefined);
@@ -3798,7 +3185,6 @@ async function answerTeam(project: string, qid: string, spec: Payload): Promise<
     reply({ error: `unknown team request: ${kind}` });
     return;
   }
-  // Bracketed paste carries the text; a control character could end the paste and type keys.
   const text = String(spec.text ?? "").replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, " ").trim();
   const busy = (): string | null =>
     !isAgentKind(session.kind)
@@ -3826,7 +3212,6 @@ async function answerTeam(project: string, qid: string, spec: Payload): Promise<
     reply({ sent: false, reason: "the human declined this brief" });
     return;
   }
-  // The worker may have started a turn while the dialog was up.
   const late = busy();
   if (late) {
     reply({ sent: false, reason: late });
@@ -3851,7 +3236,6 @@ function onEvent(event: ProjectEvent): void {
     case "agent_status":
       touched.set(event.session_id, Date.now());
       setStatus(id, event.status, event.detail);
-      // "waiting"/"asking" is still mid-turn — the agent has not handed control back yet.
       if (/^(idle|done|complete|error|failed)$/.test(event.status)) {
         working.delete(event.session_id);
         setPhase(event.session_id, null);
@@ -3864,7 +3248,6 @@ function onEvent(event: ProjectEvent): void {
       }
       if (event.status === "thinking") {
         beginTurn(id, event.session_id, event.detail);
-        // A new prompt is you answering. Whatever finished before has been seen.
         doneUnseen.delete(id);
       }
       if (/^(waiting|asking)$/.test(event.status)) {
@@ -3887,8 +3270,6 @@ function onEvent(event: ProjectEvent): void {
 
     case "file_changed": {
       endPermissionWait(id, event.session_id);
-      // The workshop owns edited files: one station/file evolves in place instead of a feed
-      // repeating every write.
       const owner = state(id);
       if (owner?.activeSession === event.session_id) owner.workshop.fileChanged(event.path);
       addTurnFile(id, event.session_id, event.path);
@@ -3905,8 +3286,6 @@ function onEvent(event: ProjectEvent): void {
         here.unseenFiles = Math.max(here.unseenFiles, pending);
         if (active === id) paintBadges();
       }
-      // Git still owns repository-wide dirt/ahead state; coalesce its refresh independently of
-      // the prompt-scoped Work list above.
       refreshSoon(id);
       break;
     }
@@ -3914,7 +3293,6 @@ function onEvent(event: ProjectEvent): void {
     case "visual_requested":
       endPermissionWait(id, event.session_id);
       if (event.view === "message") {
-        // A report often means an issue moved or a scout finished.
         const here = state(id);
         const source = here?.sessions.find((session) => session.id === event.session_id);
         const flowFiles =
@@ -3943,13 +3321,9 @@ function onEvent(event: ProjectEvent): void {
           at: Date.now(),
           payload: event.payload,
         });
-        // Keep the project-local echo as useful context; the Inbox is where you read and answer
-        // it, while Dashboard answers "what did this project's agent just send?"
         placeOnStage(id, renderView(event.view, event.payload, projectCtx(id)));
         break;
       }
-      // A showcase is a notification too. Keep the terminals completely unobstructed and put
-      // the real projector in the Inbox, where its previews remain available after arrival.
       if (event.view === "showcase") {
         const here = state(id);
         const source = here?.sessions.find((session) => session.id === event.session_id);
@@ -3982,8 +3356,6 @@ function onEvent(event: ProjectEvent): void {
         const kind = event.view.slice(4);
         const here = state(id);
         here?.workshop.checkpoint(kind, String(event.payload.command ?? ""), true);
-        // Live only when the moment's canvas is actually on screen (that project's Git tab);
-        // everywhere else there is nothing to play to.
         if (!offProject() && active === id && here?.tab === "git") {
           projectTools.git?.playMoment(kind, event.payload);
         }
@@ -3991,8 +3363,6 @@ function onEvent(event: ProjectEvent): void {
         break;
       }
       if (event.view === "sim") {
-        // Simulator lifecycle. The Run screen owns the state (screen up or not); the
-        // dashboard keeps its in-place card.
         runner.onSim(id, event.session_id, event.payload);
         updateSimCard(id, event.payload);
         break;
@@ -4001,12 +3371,10 @@ function onEvent(event: ProjectEvent): void {
       break;
 
     case "ask_requested": {
-      // A team request is not a question for you; it is answered, or confirmed, on its own.
       if (String(event.spec.kind ?? "").startsWith("team:")) {
         void answerTeam(id, event.qid, event.spec);
         break;
       }
-      // The agent's tool call is parked on a socket until this is answered or times out.
       const headline = String(event.spec.title ?? event.spec.prompt ?? event.spec.ask ?? "needs your answer");
       setPhase(event.session_id, "ask");
       askTray.open(id, event.session_id, event.qid, event.spec);
@@ -4050,26 +3418,12 @@ function onEvent(event: ProjectEvent): void {
   }
 }
 
-/* ------------------------------------------------------------------- boot */
 
 type Wall = {
   savedAt: number;
   sessions: Array<{ session: Session; screen: string; asleep: boolean }>;
 };
 
-/**
- * Put the terminals back. First what already runs: a page reloaded under a live Panel (its web
- * view died and came back) gets every live pane back as it is. Live goes first, so a pane that
- * restore_wall forks next is never adopted twice.
- *
- * Then last session's terminals. Rust forks each one again in the folder it had and hands back
- * the screen it was showing; here they rejoin their projects and get that screen painted into
- * them. Ids are preserved across the restart, which is what lets the wall put each terminal back
- * in its own tab and under the name you gave it — both of those are filed by session id.
- *
- * Those processes did not survive. Agents that can resume were launched resuming, so the
- * conversation is there; a build that was running is not. The banner in each pane says so.
- */
 async function restoreWall(): Promise<void> {
   const none: Wall = { savedAt: 0, sessions: [] };
   deck.dropPending();
@@ -4089,15 +3443,11 @@ function adoptWall(wall: Wall, forked: boolean): void {
   for (const { session, screen, asleep: slept } of wall.sessions) {
     const here = state(session.project);
     if (!here) {
-      // The project was removed from config while Panel was closed. Rust forked the terminal
-      // before it could know that, so close it rather than leaking a PTY with no owner. A live
-      // one is someone's running work: it stays, and the quit prompt still names it.
       if (forked) void invoke("stop_session", { session: session.id }).catch(() => undefined);
       continue;
     }
     here.sessions.push(session);
     here.activeSession ??= session.id;
-    // Asleep before the pane exists, so it opens on its Wake bar and never counts as running.
     if (slept) {
       asleep.set(session.id, null);
       exited.add(session.id);
@@ -4109,8 +3459,6 @@ function adoptWall(wall: Wall, forked: boolean): void {
 
 async function boot(): Promise<void> {
   mountModuleRailControls();
-  // The dashboard's module cards are doors, and a door has to lead somewhere. It does not know
-  // what a tab is — it hands back which module it was a door to, and the rail does the rest.
   dashboard = mountDashboard(dashPane, (door) => setTab(door), {
     runWithAgent,
     openSession: (kind) => void openSession(kind),
@@ -4130,8 +3478,6 @@ async function boot(): Promise<void> {
     installed: moduleInstalled,
   });
 
-  // A session's process can end without anyone clicking anything — `exit`, a crash, claude
-  // finishing. The strip has to say so, or it goes on showing a live dot for a dead PTY.
   askTray = mountAskTray({
     projectName: (id) => state(id)?.project.name ?? id,
     sessionName: (id) => sessionById(id)?.title ?? "agent",
@@ -4140,17 +3486,13 @@ async function boot(): Promise<void> {
     openSession: (project, session) => jumpToSession(project, session),
     changed: () => paintProjectsSoon(),
   });
-  // Coming back to the window is looking at whatever project is on screen.
   window.addEventListener("focus", () => {
     if (active && !offProject()) markSeen(active);
-    // Coming back is also when the board and due scouts are read. Nothing polls.
   });
 
   deck = new TerminalDeck(el("terminalHost"), {
     onInput(sessionId, data) {
       touched.set(sessionId, Date.now());
-      // A permission prompt is answered with Enter, Esc, or its number key. Arrows only move the
-      // highlight, and focus reports are the terminal talking, not you.
       if (!/^(\r|\x1b|[0-9])$/.test(data)) return;
       const owner = [...states.values()].find((here) => here.sessions.some((s) => s.id === sessionId));
       if (owner) endPermissionWait(owner.project.id, sessionId);
@@ -4166,8 +3508,6 @@ async function boot(): Promise<void> {
     onExit(sessionId) {
       exited.add(sessionId);
       askTray.closeSession(sessionId);
-      // The manager's terminal shares the exit path with every other session, so the rail hears
-      // about its own death here rather than through a second channel.
       chat.noteExit(sessionId);
       working.delete(sessionId);
       setPhase(sessionId, null);
@@ -4178,10 +3518,8 @@ async function boot(): Promise<void> {
       owner.running = owner.sessions.some((s) => isAgentKind(s.kind) && !exited.has(s.id));
       if (owner.project.id === active) {
         showSessions();
-        // The agent that just died was what made this project "live". Say so.
         void refreshProject(owner.project.id);
       }
-      // paintProjects() ends by syncing Home, which flips this session's tile to "ended".
       paintProjects();
     },
     onRestart(sessionId) {
@@ -4196,9 +3534,7 @@ async function boot(): Promise<void> {
     },
   });
 
-  // Live and For you read the same world and the same board, each only while it is open.
   const liveWorld = () => invoke<LiveWorld>("live_world");
-  // The board lives in the scout module. Without it Live still runs, and For you has session cards only.
   const liveBoard = (fresh: boolean) => moduleGet<BoardFeed>(`/m/scout/board${fresh ? "?fresh=1" : ""}`).catch(() => null);
   const openLink = (url: string) => void invoke("open_link", { url }).catch((error: unknown) => console.warn("[panel] live", error));
   const openTerminal = (panel: string) => {
@@ -4252,7 +3588,6 @@ async function boot(): Promise<void> {
       reviewCounts = counts;
       paintProjectsSoon();
     },
-    // New or seen files change the Inbox's Review cards.
     onCount: () => forYou.refresh(),
   });
 
@@ -4270,16 +3605,13 @@ async function boot(): Promise<void> {
       void closeSession(sessionId);
     },
   });
-  // The empty terminal area's one button is the head's Start agent, not a second implementation.
   el("terminalEmptyStart").addEventListener("click", () => el<HTMLButtonElement>("startAgent").click());
 
-  // Home no longer owns a screen — it is tab 1 of the workspace, opened by the strip.
   home = mountHome(el("homeScreen"), {
     openProject: (id, start) => openProjectFromHome(id, start),
     isExited: (sessionId) => exited.has(sessionId),
     projectGit: (id) =>
       pulse.git(id).then((git) => git ?? Promise.reject(new Error("no git snapshot"))),
-    // Home lists what was said; the Inbox is where it is read and answered.
     openPost: (postId) => revealPost(postId),
     openHistory: (sessionId) => showHistory(sessionId ? { session: sessionId } : undefined),
     installed: moduleInstalled,
@@ -4297,8 +3629,6 @@ async function boot(): Promise<void> {
   });
 
   chat = mountChat(el("chatRail"), {
-    // The Manager decides whether it is up; the shell decides what that costs. Every path lands
-    // here: ⌘⇧M, Esc, ⌘W and the Project desk handing it a question.
     visibility: (shown) => {
       if (shown) showChat();
       else exitChat();
@@ -4306,8 +3636,6 @@ async function boot(): Promise<void> {
     },
   },
   {
-    // The manager is a session like any other: it opens through the same path as a worker, so
-    // its status, attention, wall seat and restore come from the same bookkeeping.
     start: async (kind) => {
       const session = await openSessionFor(CPO_ID, kind);
       if (!session) throw new Error(lastStartError || "The manager could not start.");
@@ -4324,8 +3652,6 @@ async function boot(): Promise<void> {
     resetPreprompt: () => invoke<string>("reset_cpo_preprompt"),
   });
 
-  // Chat is the frontmost conversational surface. Close it before a terminal, tab, or native
-  // window can consume the same key. Modals and expanded previews remain above chat and keep Esc.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4345,8 +3671,6 @@ async function boot(): Promise<void> {
         !event.shiftKey;
       const closeChord = matchesShortcut(event, "Meta+KeyW");
       if (!escape && !closeChord) return;
-      // The manager is an agent in a terminal, and Esc is how you interrupt an agent. While its
-      // terminal has the caret, Esc goes to the agent. ⌘W, ⌘⇧M and × still close the screen.
       if (escape && (event.target as Element | null)?.closest?.(".cpo-term")) return;
       chat.hide();
       event.preventDefault();
@@ -4355,14 +3679,8 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // The workspace is presentation-only: the deck lends it every live pane and takes them back
-  // on exit. The launch pad starts sessions on ANY project through the same one door
-  // (openSessionFor) the in-project controls use. Runs is lent to it the same way — a whole
-  // element this time — and handed back on clear(). Home is not among them: it is a screen of
-  // its own. Neither is Chat, for the same reason — it never enters the strip.
   terminals = mountTerminals(el("terminalsScreen"), {
     skills: (sessionId) => showSkills(sessionId),
-    // A getter, not the list: the strip is mounted before config.json has been read.
     groups: () => groups.map(({ id, name }) => ({ id, name })),
     pinned: [
       {
@@ -4380,7 +3698,6 @@ async function boot(): Promise<void> {
           paintNav();
         },
         closeActive: () => runner.closeActive(),
-        // This tab shows every run in full, so the build bar stands down over it.
         ownsRuns: true,
       },
     ],
@@ -4419,11 +3736,7 @@ async function boot(): Promise<void> {
       runner.highlight(projectId);
     },
   });
-  // Home is its own screen and its own row, above the group — no strip index, no chord.
   el("homeButton").addEventListener("click", () => showHome());
-  // The sidebar's three doors into the workspace, each landing on its tab. Strip indexes, so
-  // they read straight off the ⌘ ladder: Runs 0, first terminal tab 1. Chat is not on it — it is
-  // a screen beside the workspace, not a tab of it, so it answers to ⌘⇧C instead.
   paintChatNav();
   el("notebookButton").addEventListener("click", () => showNotebook());
   el("opsMapButton").addEventListener("click", () => showOpsMap());
@@ -4431,19 +3744,12 @@ async function boot(): Promise<void> {
   el("fleetButton").addEventListener("click", () => showFleet());
   el("liveButton").addEventListener("click", () => showLive());
   el("forYouButton").addEventListener("click", () => showForYou());
-  // The row starts hidden and `refreshProjectSurfaces` turns it on once the module list says the
-  // module is installed. Until then it is not a place you can be.
   const paintNotebookHint = (): void => {
     el("notebookButton").title = `Notebook (${chordLabel("app.notebook")})`;
   };
   paintNotebookHint();
   window.addEventListener(KEYMAP_EVENT, paintNotebookHint);
 
-  // The chords are TAUGHT where they land, not only listed in Settings: hold ⌘ and every rung
-  // shows its key — K on the Runs row, J on the Terminals row, ⇧E/⇧G/⇧D on the rail, 1…9 on
-  // Work's file slots (files.ts). Nothing is on screen until the hand is already on the
-  // modifier, so a screen at rest stays quiet and the key is there the moment you reach for it.
-  // Repainted on rebind.
   const chordHints: [string, ActionId][] = [
     ["runButton", "app.runs"],
     ["terminalsButton", "app.wall"],
@@ -4479,14 +3785,10 @@ async function boot(): Promise<void> {
   el("runButton").addEventListener("click", () => showTerminals(TAB_RUNS));
   el("terminalsButton").addEventListener("click", () => showTerminals(TAB_WALL));
 
-  // Run owns the simulators. Its PTYs are real but never join the deck — the pane's verbs
-  // (run / r / R / stop) are the whole interface, and the Rust sim cap guards the memory.
-  // It has no screen of its own any more: it is tab 3 of the workspace, opened by the strip.
   runner = mountRunner(el("runScreen"), {
     start: (projectId, target, allowExtra, extraInstance, restart, fresh) =>
       invoke<SimStart>("start_sim", {
         project: projectId,
-        // Rust's parameter is still called `device`, but it now takes a target ADDRESS.
         device: target,
         allowExtra,
         extraInstance,
@@ -4508,16 +3810,11 @@ async function boot(): Promise<void> {
         idle: [],
       })),
     closeIdle: () => invoke<number>("close_idle_sims").catch(() => 0),
-    // The address decides WHAT gets raised: Simulator.app for an iOS run, the emulator window for
-    // an Android one, nothing at all for a phone on the desk. Without one, Rust falls back to
-    // Simulator.app — which is what a caller with no run in hand means.
     focus: (address) => void invoke("sim_focus", { address: address ?? null }).catch(() => undefined),
     openServer: (projectId) => void invoke("open_server", { project: projectId }).catch(() => undefined),
     jump: (projectId, sessionId) => jumpToSession(projectId, sessionId),
     isExited: (sessionId) => exited.has(sessionId),
   });
-  // The project's Terminals tab and the workspace's build bar mirror run state, and one of them
-  // is usually the only surface up when a build is talking. One truth (the runner), three readers.
   runner.onChange(syncProjectTerminals);
   runner.onChange(pushRunBar);
   const terminalZone = el("terminalZone");
@@ -4544,7 +3841,6 @@ async function boot(): Promise<void> {
     },
   });
   terminalsTabPane.append(terminalZone);
-  // Each shortcut opens its destination, or closes it when already there.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4576,33 +3872,19 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘1…⌘9 — the strip you are looking at, one for one, from inside a terminal too (capture
-  // phase beats xterm). On the wall that is the workspace strip: ⌘1 Runs, ⌘2 the first terminal
-  // tab. In the tabs layout the second row of terminals takes the digits while it is up, and the
-  // strip moves to ⌃⌘1…9. On a project it is Work's file slots. Two strips, one ladder, and ⌘J walks between
-  // them — the digits never leave the screen you are on. Home, Settings, Chat and the notebook
-  // own no digit. A digit past the last rung does nothing rather than landing you on a
-  // neighbour you did not ask for. ⌘1 is the app fallback: when this screen has no first
-  // rung, it opens the first terminal tab.
   window.addEventListener(
     "keydown",
     (event) => {
-      // A chord being RECORDED in Settings must not also fire the thing it is bound to today,
-      // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
       if (event.repeat || !/^Digit[1-9]$/.test(event.code)) return;
       if (!matchesShortcut(event, `Meta+${event.code}`)) return;
       const at = Number(event.code.slice(5)) - 1;
       if (terminalsActive) {
-        // The tabs layout's second row takes the digits while it is up; terminals.ts decides.
         if (terminals.digit(at)) {
-          // handled
         } else if (document.body.classList.contains("single-project")) {
-          // A single-project Panel has no portfolio to jump across.
           if (at !== 0) return;
           showTerminals(TAB_WALL);
         } else {
-        // Bounds are the strip's, not the keyboard's: with three tabs, ⌘6 is nobody's.
           if (at >= terminals.count()) return;
           showTerminals(at);
         }
@@ -4622,8 +3904,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘J, ⌘K, ⌘⇧E, ⌘⇧G, ⌘⇧D — the screens, by letter, from anywhere. The wall and Runs toggle;
-  // the three modules open on the project you are looking at.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4639,7 +3919,6 @@ async function boot(): Promise<void> {
       if (chordMatches(event, "app.git")) return go(() => void goSection("git"));
       if (chordMatches(event, "app.dash")) return go(() => void goSection("dash"));
       if (chordMatches(event, "term.waiting")) return go(goWaiting);
-      // The wall answers these itself while it is up (terminals.ts); here they walk the rail.
       if (offProject() || !active) return;
       if (chordMatches(event, "tab.next")) return go(() => stepRail(1));
       if (chordMatches(event, "tab.prev")) return go(() => stepRail(-1));
@@ -4647,9 +3926,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘R / ⌘⇧R — re-run or fresh-run the app you are looking at, from anywhere, including from
-  // inside a terminal. Capture phase and preventDefault are not optional here: in a webview both
-  // are RELOAD, and a reload of Panel would take every terminal on screen down with it.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4663,8 +3939,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘. — stop that run and release its simulator. Capture phase for the same reason ⌘R needs it:
-  // the keystroke must not reach a terminal on the way, and nothing else in Panel claims it.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4677,8 +3951,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘⌥R — a second instance of that app, on a second simulator. Capture phase like ⌘R, since the
-  // webview would still read the R as a reload.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4691,15 +3963,9 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘F — find in the terminal you are looking at. Capture phase, because xterm would otherwise
-  // eat the keystroke and send it to the shell. Only when a terminal is actually on screen:
-  // the wall, or an open terminal zone on a project. Everywhere else ⌘F is nobody's shortcut yet,
-  // so it is left alone rather than swallowed.
   window.addEventListener(
     "keydown",
     (event) => {
-      // A chord being RECORDED in Settings must not also fire the thing it is bound to today,
-      // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
       if (
         !chordMatches(event, "term.find") ||
@@ -4716,11 +3982,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ⌘+ / ⌘- / ⌘0 — terminal text size. Capture phase for the same reason as ⌘F: xterm would send
-  // the keystroke to the shell. `repeat` is deliberately ALLOWED here — holding ⌘- to shrink is
-  // the whole gesture, unlike a tab jump where a held key would be a mistake. On a Mac keyboard
-  // ⌘+ is physically ⌘⇧=, so "=" and "+" are the same request and shift is not disqualifying.
-  // Same visibility rule as ⌘F: only when a terminal is actually on screen.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4744,7 +4005,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // ^F opens the project's full-screen terminal tab. The wall owns its own zoom.
   window.addEventListener("keydown", (event) => {
     if (isRecording() || isLightboxOpen() || offProject() || event.repeat) return;
     if (!chordMatches(event, "term.fullscreen")) return;
@@ -4753,8 +4013,6 @@ async function boot(): Promise<void> {
     void setTab("terminals").then(() => deck.focus());
   }, true);
 
-  // Register before any project IO: even closing Panel during startup must be caught while its
-  // native runtime may already own a session.
   await listen<Session[]>("panel-shutdown-requested", async ({ payload }) => {
     if (shutdownPromptOpen) return;
     shutdownPromptOpen = true;
@@ -4775,9 +4033,6 @@ async function boot(): Promise<void> {
     }
     shutdownPromptOpen = false;
   });
-  // A quit asked of an earlier page (one that froze, or was reloaded mid-prompt) left Rust waiting
-  // for an answer that page can no longer give, and Rust swallowed every later ⌘Q. This page has
-  // no prompt open, so it says so. Without it the only way out was a force quit, which saves no wall.
   void invoke("cancel_shutdown").catch(() => undefined);
 
   const context = await invoke<{ single_project: string | null }>("launch_context");
@@ -4786,16 +4041,12 @@ async function boot(): Promise<void> {
   groups = await invoke<Group[]>("list_groups").catch(() => []);
   const list = await invoke<Project[]>("list_projects");
   for (const project of list) states.set(project.id, makeState(project));
-  // Before the wall comes back, or the manager's restored terminal has no owner and is closed.
-  // No ops tree means no manager; the pane then says why when you try to start it.
   const manager = await invoke<Project>("manager_project").catch(() => null);
   if (manager && !states.has(CPO_ID)) states.set(CPO_ID, makeState({ ...manager, name: "Manager" }));
   await refreshMainFolder();
   pulse.refreshPortfolio(projectNames());
   await restoreWall();
   paintProjects();
-  // The portfolio lands on Home. Only a Panel scoped to ONE project skips it — there is no
-  // portfolio to look across, so it goes straight in, exactly as before.
   const single = context.single_project
     ? list.find((project) => project.id === context.single_project) ?? list[0]
     : undefined;
@@ -4805,10 +4056,8 @@ async function boot(): Promise<void> {
     showHome();
   }
 
-  // Not awaited: a slow disk must not hold the window back. Home and the Inbox fill when it lands.
   void loadKeptPosts().catch((error: unknown) => console.warn("[panel] inbox load", error));
   await listen<ProjectEvent>("panel-agent-event", ({ payload }) => onEvent(payload));
-  // An agent opened this session (`/panel/session/open`): Rust forked it with nobody clicking.
   await listen<Wall["sessions"][number]>("panel-session-opened", ({ payload }) => {
     if (sessionById(payload.session.id)) return;
     adoptWall({ savedAt: 0, sessions: [payload] }, false);
@@ -4816,29 +4065,19 @@ async function boot(): Promise<void> {
     paintProjects();
   });
   await listen("panel-portfolio-changed", () => void refreshPortfolio());
-  // The plan is written by agents in their own terminals. The screen follows the file rather
-  // than waiting to be told, so an agent's plan lands without anyone pressing refresh.
-  // now.md, the log and the rollouts are written by agents too. The map follows the files.
   await listen("panel-ops-changed", () => opsMap?.sync());
-  // A link that launched Panel waited in Rust for this moment; later ones arrive as an event.
   await listen("panel-link", takeAppLinks);
   takeAppLinks();
   refreshHistorySignals();
-  // Transcripts grow without telling anyone; a rescan after the first is milliseconds.
   window.setInterval(refreshHistorySignals, 3 * 60_000);
-  // Memory moves without an event to say so. Read it often enough for the wall to stay honest,
-  // and look for agents left unused once a minute.
   void refreshMemory();
   window.setInterval(() => void refreshMemory(), 20_000);
   window.setInterval(sleepUnused, 60_000);
 
-  // Every module is a segment of the same rail now, so every one is wired the same way. Product Spine
-  // used to be special-cased here as a toggle — which is exactly why it never read as a module.
   for (const entry of TABS) {
     if (!entry.extension) el(entry.button).addEventListener("click", () => setTab(entry.tab));
   }
 
-  // ⌃1…⌃9 open a project from the sidebar: pins first, then rows in the order you see them.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -4854,8 +4093,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // Files dropped from Finder onto a project row go to that project's agent. Tauri hands drops
-  // over before the webview sees them, so this listens beside the terminal's own drop handler.
   void getCurrentWebview().onDragDropEvent(({ payload }) => {
     if (payload.type === "leave") {
       paintRowDrop(null);
@@ -4870,8 +4107,6 @@ async function boot(): Promise<void> {
     if (row?.dataset.projectId) void dropOnProject(row.dataset.projectId, payload.paths);
   });
 
-  // F5 is the debugger's one global door. It opens the project screen first, then starts the
-  // selected profile. A live session treats the second press as a no-op instead of duplicating.
   window.addEventListener("keydown", (event) => {
     if (event.key !== "F5" || event.repeat || event.metaKey || event.ctrlKey || event.altKey) return;
     if (document.querySelector(".skills-overlay")) return;
@@ -4882,14 +4117,9 @@ async function boot(): Promise<void> {
     void setTab("debug").then(() => projectTools.debugger?.start());
   }, true);
 
-  // Capture before xterm sees the keystroke. Cmd-W closes the visible terminal first: a simulator
-  // run, a tile on the Terminals wall, or the open project terminal. With no visible terminal it
-  // closes the Work file; falling through can only request an app close, which Rust always guards.
   window.addEventListener(
     "keydown",
     (event) => {
-      // A chord being RECORDED in Settings must not also fire the thing it is bound to today,
-      // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen() || document.querySelector(".skills-overlay")) return;
       if (
         !matchesShortcut(event, "Meta+KeyW") ||
@@ -4897,8 +4127,6 @@ async function boot(): Promise<void> {
       ) {
         return;
       }
-      // One door for the whole workspace: on the Runs tab it stops a run, otherwise it closes
-      // a terminal or an empty tab. The strip decides which — main.ts no longer has to.
       if (terminalsActive && terminals.closeActive()) {
         event.preventDefault();
         event.stopImmediatePropagation();
@@ -4906,7 +4134,6 @@ async function boot(): Promise<void> {
       }
       const here = active ? state(active) : undefined;
       if (!here) return;
-      // Home has no visible terminal. Let the native close request reach the confirmation guard.
       if (offProject()) return;
       if (
         here.activeSession &&
@@ -4917,7 +4144,6 @@ async function boot(): Promise<void> {
         void closeSession(here.activeSession);
         return;
       }
-      // Without an open terminal, Work keeps the familiar close-current-file behavior.
       if (here.tab === "files") {
         if (projectTools.files?.closeActiveTab()) {
           event.preventDefault();
@@ -4929,8 +4155,6 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // The head's button is the common case — start working on this project. Everything else about
-  // sessions (a second agent, a shell, closing one) lives on the strip, where they are visible.
   el("startAgent").addEventListener("click", () => {
     const button = el<HTMLButtonElement>("startAgent");
     const error = el("startAgentError");
@@ -4947,8 +4171,6 @@ async function boot(): Promise<void> {
 
   el("openProjectFolder").addEventListener("click", () => void openProjectFolder());
 
-  // The list holds still while your pointer (or focus) is inside it, and catches up the moment you
-  // leave — the one exception being a rule you set yourself, which applies immediately.
   projectList.addEventListener("pointerenter", () => {
     listHot = true;
   });
@@ -4965,8 +4187,6 @@ async function boot(): Promise<void> {
     if (repaintQueued || activeSort() === "recent" || activeSort() === "lanes") paintProjects();
   });
 
-  // One chip, one rule. Manual is the default and the only one that can be dragged; the other two
-  // exist because sometimes you want the machine's answer, and then you asked for it out loud.
   projectSort.addEventListener("click", () => {
     sortMode =
       sortMode === "lanes" ? "manual" : sortMode === "manual" ? "recent" : sortMode === "recent" ? "name" : "lanes";
@@ -4975,20 +4195,14 @@ async function boot(): Promise<void> {
     paintProjects();
   });
 
-  // "Where is the work" used to be answered by shoving rows to the top. Now it is a filter you
-  // press — the portfolio keeps its shape either way.
   projectLive.addEventListener("click", () => {
     liveOnly = !liveOnly;
     paintProjects();
   });
 
-  // Open the whole portfolio, or fold it back to the five. The choice sticks — a rail you opened
-  // on purpose has no business closing itself the next time you launch.
   projectShowAll.addEventListener("click", () => {
     showAllProjects = !showAllProjects;
     localStorage.setItem("panel-project-showall", showAllProjects ? "1" : "0");
-    // The pointer is on the button, not in the list, but the freeze is about the same gesture:
-    // release it so the new order lands with this click instead of one hover later.
     listHot = false;
     paintProjects();
   });
@@ -5012,10 +4226,6 @@ async function boot(): Promise<void> {
       paintProjects();
     }
   });
-  // ⌘⇧O with no pane claiming it — no Work tab, no script open — is "open a project": the same
-  // panel the Work tab uses for related files, listing the portfolio by name. Panes register
-  // their own ⌘⇧O in the capture phase and swallow it; this one listens late and only ever
-  // hears what they let through.
   mountQuickOpen({
     host: el("app"),
     shortcut: { key: "o", shift: true, late: true },
@@ -5027,7 +4237,6 @@ async function boot(): Promise<void> {
       targets: orderProjects().map((here) => ({
         path: here.project.id,
         detail: here.project.role === "collection" ? "collection" : here.project.path,
-        // The letter sits under the icon; a project without one shows the letter.
         icon: `<b>${here.project.name.trim().charAt(0).toUpperCase()}</b><img src="${projectIconUrl(here.project.id)}" alt="" onerror="this.remove()" />`,
         label: here.running ? "live" : "",
         name: here.project.name,
@@ -5035,14 +4244,9 @@ async function boot(): Promise<void> {
     }),
   });
 
-  // The project list is the portfolio's fastest switcher. ⌘K focuses its local filter from
-  // anywhere except single-project mode, where the rail is deliberately absent. Runs owns ⌘K by
-  // default (app.runs fires first), so this only answers once that chord is rebound in Settings.
   window.addEventListener(
     "keydown",
     (event) => {
-      // A chord being RECORDED in Settings must not also fire the thing it is bound to today,
-      // and an expanded picture owns the keyboard for as long as it is up.
       if (isRecording() || isLightboxOpen()) return;
       if (
         !matchesShortcut(event, "Meta+KeyK") ||
@@ -5059,14 +4263,10 @@ async function boot(): Promise<void> {
     true,
   );
 
-  // Settings — the gear in the sidebar's foot, and ⌘, the way every Mac app answers it. The
-  // sheet is its own module; nothing here knows what is in it.
   settings = mountSettings(el("settingsScreen"), {
     close: () => exitSettings(),
     skills: () => showSkills(),
   });
-  // Installing an extension changes which tabs a project has. Re-select the open project so its
-  // rail is right the moment Settings closes, rather than on the next click into the sidebar.
   window.addEventListener(EXTENSIONS_EVENT, () => {
     const open = active;
     void refreshProjectSurfaces().then(() => {
@@ -5080,7 +4280,6 @@ async function boot(): Promise<void> {
   };
   paintSettingsHint();
   window.addEventListener(KEYMAP_EVENT, paintSettingsHint);
-  // ⌘, both ways: the screen you opened with it is the screen it closes.
   window.addEventListener(
     "keydown",
     (event) => {
@@ -5095,17 +4294,11 @@ async function boot(): Promise<void> {
 
   el("addProject").addEventListener("click", () => void addProject());
 
-  // Theme. The <head> script already set data-theme before first paint (saved choice, else
-  // the OS preference); here we just flip and persist it. The glyph shows the destination:
-  // a filled-left moon in dark means "tap for light", and vice versa.
   const themeToggle = el("themeToggle");
   const paintToggle = (theme: string) => {
     themeToggle.innerHTML = icon(theme === "light" ? "moon" : "sun");
     themeToggle.title = theme === "light" ? "Switch to dark theme" : "Switch to light theme";
   };
-  // The native title bar only follows the OS appearance, not Panel's own theme — left alone it
-  // stays light on a light-mode Mac even while the app itself renders its (default) dark theme.
-  // Force it to track our theme instead, so the traffic-light strip never clashes with the body.
   const syncWindowChrome = (theme: string) => {
     void getCurrentWindow().setTheme(theme === "light" ? "light" : "dark");
   };
@@ -5117,19 +4310,12 @@ async function boot(): Promise<void> {
     try {
       localStorage.setItem("panel-theme", next);
     } catch {
-      /* private mode / storage disabled — the theme still applies for this session */
     }
-    // The CSS-driven surfaces flip via the attribute alone; the canvas terminals can't read
-    // CSS vars, so they listen for this and re-skin themselves.
     window.dispatchEvent(new Event("panel-theme-change"));
     paintToggle(next);
     syncWindowChrome(next);
   });
 
-  // Sidebar width. Same pre-paint arrangement as the theme: the <head> script already put
-  // `sidebar-compact` on <html> (it runs before <body> exists, so the class lives there and
-  // the CSS keys off it); here we just flip and persist. The chevron points where the edge
-  // will move: ‹ folds the rail away, › brings it back.
   const sidebarToggle = el("sidebarToggle");
   const paintSidebarToggle = (compact: boolean) => {
     sidebarToggle.innerHTML = icon(compact ? "panel-right" : "panel-left");
@@ -5143,7 +4329,6 @@ async function boot(): Promise<void> {
     try {
       localStorage.setItem("panel-sidebar-compact", compact ? "1" : "0");
     } catch {
-      /* private mode / storage disabled — the width still applies for this session */
     }
     paintSidebarToggle(compact);
   });
@@ -5158,17 +4343,11 @@ async function openProjectFolder(): Promise<void> {
   }
 }
 
-/**
- * Adding a project writes to the SHARED config.json, so it appears in the old Panel too.
- * The folder comes from the native picker — the human already has the folder in front of them,
- * and typing a path was the only reason adding a project felt like admin work.
- */
 async function addProject(): Promise<void> {
   let path: string | null = null;
   try {
     path = await invoke<string | null>("pick_project_folder");
   } catch {
-    // No picker on this platform build. A typed path still gets the project in.
     path = (await promptDialog("Path to the project folder")) ?? null;
   }
   if (!path?.trim()) return;
@@ -5182,11 +4361,6 @@ async function addProject(): Promise<void> {
   }
 }
 
-/**
- * `config.json` is shared, so it changes under us: the old Panel, an agent, a hand edit. The
- * rail follows it live rather than asking for a relaunch. Existing projects keep their state —
- * only the registry fields are refreshed, so a running session survives a portfolio edit.
- */
 async function refreshPortfolio(): Promise<void> {
   const [nextGroups, list, panelModules] = await Promise.all([
     invoke<Group[]>("list_groups").catch(() => groups),
@@ -5213,7 +4387,6 @@ async function refreshPortfolio(): Promise<void> {
   }
   const live = new Set(list.map((project) => project.id));
   for (const id of [...states.keys()]) {
-    // The open project is never yanked out from under the human, even if the file dropped it.
     if (!live.has(id) && id !== active && !offPortfolio(id)) states.delete(id);
   }
   await refreshMainFolder();
@@ -5221,17 +4394,11 @@ async function refreshPortfolio(): Promise<void> {
   paintProjects();
 }
 
-/**
- * Do not expose the placeholder shell while native project discovery and the first dashboard
- * snapshot are still changing its shape. Two frames let the settled layout paint underneath the
- * opening screen before it fades away.
- */
 function revealApp(): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       document.body.classList.remove("panel-booting");
       document.body.classList.add("panel-ready");
-      // Outlives the 360ms opacity fade; removing the node is also what ends the warp loop.
       window.setTimeout(() => document.getElementById("panelBoot")?.remove(), 420);
     });
   });

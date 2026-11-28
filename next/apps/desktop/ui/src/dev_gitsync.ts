@@ -1,9 +1,3 @@
-/**
- * Dev harness for the Pull all / Push all sweep and the Git card's action row. NOT part of the
- * app build — index.html never loads this. It fakes the git-manager module (repo lists, per-repo
- * phases, one conflict, one failure) so the panel can be styled, timed and screenshotted in a
- * plain browser without Tauri or a real remote. Nothing here touches a repository.
- */
 import "./style.css";
 import { openGitSweep } from "./features/git-sync";
 import { mountDashboard } from "./features/dashboard";
@@ -26,7 +20,6 @@ const REPOS = [
   { name: "CoinApp", branch: "main", behind: 0, ahead: 0, dirty: 0 },
 ].map((repo) => ({
   ...repo,
-  // ?clean renders the all-green finish: no failure, no uncommitted work left behind
   dirty: CLEAN ? 0 : repo.dirty,
   path: `/Users/dev/projects/${repo.name}`,
   remote: "origin",
@@ -39,7 +32,6 @@ const BROKEN = CLEAN ? "" : "/Users/dev/projects/SpeedRead";
 const phases = new Map<string, { phase: string; note: string }>();
 const wait = (ms: number) => new Promise((done) => setTimeout(done, ms));
 
-/** Fake the module host: same paths, same payload shapes, invented timings. */
 async function moduleRequest({ path, body }: Args): Promise<unknown> {
   const [route, query] = path.replace("/m/git-manager", "").split("?");
   const params = new URLSearchParams(query ?? "");
@@ -83,7 +75,6 @@ async function moduleRequest({ path, body }: Args): Promise<unknown> {
   return { error: `dev harness has no route ${route}` };
 }
 
-// modules.ts goes through @tauri-apps/api's invoke, which lands here.
 (window as unknown as { __TAURI_INTERNALS__: unknown }).__TAURI_INTERNALS__ = {
   invoke: (_cmd: string, args: Args) => moduleRequest(args),
   transformCallback: (cb: unknown) => cb,
@@ -92,13 +83,11 @@ async function moduleRequest({ path, body }: Args): Promise<unknown> {
 const stage = document.querySelector<HTMLElement>("#stage")!;
 stage.style.cssText = "min-height:100vh;background:var(--bg);";
 
-// The real dashboard, so the Git card's action row is styled in its actual neighbours' company.
 const dash = mountDashboard(stage, () => {}, {
   async runWithAgent(prompt) {
     // eslint-disable-next-line no-console
     console.log("[dev] agent prompt:", prompt);
   },
-  // The fixture is here for the Git card's action row. The rest of the bar only has to exist.
   openSession: () => {},
   run: () => {},
   stop: () => {},
@@ -106,7 +95,7 @@ const dash = mountDashboard(stage, () => {}, {
   openFolder: () => {},
   installed: (module) => module === "git-manager",
 });
-dash.setModules(new Set(["git", "release"]));
+dash.setModules(new Set(["git", "product-spine", "release"]));
 dash.setProject(
   {
     id: "wolf",

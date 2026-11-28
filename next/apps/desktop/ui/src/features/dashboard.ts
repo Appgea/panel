@@ -1,25 +1,3 @@
-/**
- * Dashboard — the screen a project opens on.
- *
- * It is not an IDE panel and not a git GUI: it is the answer to "what needs me here?", read in
- * about a second by someone running agents across a dozen apps who has to decide which one to
- * touch next — followed immediately by the buttons that act on the answer.
- *
- * SHAPE. A flat grid makes every fact look equally important and asks the human to interpret it.
- * This screen leads with the next move, puts the hands right under it, compresses repository state
- * into a quiet pulse, promotes real handoff files only when they exist, then keeps module
- * summaries as supporting doors.
- *
- * COLOUR IS INFORMATION, not decoration. Every module owns a hue (see style.css) and every card
- * wears its module's hue — so the screen is colourful as a CONSEQUENCE of being legible, and the
- * eye learns "green things are git, amber things are Product Spine" without being told. The facts
- * stay quiet: a number only takes a colour when it changes what you would do next.
- *
- * MOTION. `setProject` runs on every project switch AND on every git poll. The DOM is built once
- * in `mountDashboard` and thereafter only its text and its tone classes are mutated; the entrance
- * animation is re-armed ONLY when `project.id` actually changes. A refreshing number must never
- * make the pane move.
- */
 
 import type { GitState, Project, WorkFile } from "../types";
 import { icon, type IconName } from "../icons";
@@ -40,54 +18,28 @@ const esc = (value: unknown): string =>
       >)[c] ?? c,
   );
 
-/** Where a door leads. Mirrors the spine's `Tab` — the rail and the doors share one vocabulary. */
-export type Door = "files" | "git" | "release" | "revenuecat" | "analytics";
+export type Door = "files" | "git" | "product-spine" | "release" | "revenuecat" | "analytics";
 
 export type DashboardEvents = {
-  /** Open this project's agent and hand it a task as its first prompt. */
   runWithAgent(prompt: string): Promise<void>;
-  /** Open a new PTY on this project — any engine, or a plain shell. */
   openSession(kind: SessionKind): void;
-  /** Start the simulator run. Same run the Runs screen drives; there is only one. */
   run(): void;
   stop(): void;
-  /** "r" hot reload, "R" hot restart. Only a live flutter run offers these. */
   nudge(restart: boolean): void;
   openFolder(): void;
-  /** Whether a Panel module is installed. A card for a module that is not can only show an error. */
   installed(module: string): boolean;
 };
 
 export type DashboardHandle = {
   setModules(enabled: ReadonlySet<string>): void;
   setProject(project: Project, git: GitState, running: boolean): void;
-  /**
-   * The working set, on the card. The spine already routes this to the Files screen; the card is
-   * the same truth at a glance, so you can see there IS work waiting without opening the door.
-   */
   setWork(list: WorkFile[]): void;
-  /**
-   * The selected project's living workshop. Like stageHost, the spine swaps one already-live
-   * subtree per project so a task does not restart just because the human checked another app.
-   */
   workshopHost: HTMLElement;
-  /**
-   * Where the agent's rendered output lands. It used to be a tab of its own, which made the same
-   * event stream readable in three places at once (cards, PTY, ambient ticks). It belongs HERE:
-   * "what did the agent just produce" is a fact about the project's resting state, and this is
-   * the screen you are already looking at.
-   */
   stageHost: HTMLElement;
-  /** Hide the section's chrome while the agent has produced nothing. */
   syncStage(): void;
-  /**
-   * What is alive on this project right now: its open terminals and its simulator run. Fed from
-   * the same sync point the Terminals tab reads, so the two surfaces can never disagree.
-   */
   setLive(run: ProjectRunView | null, agents: number, shells: number): void;
 };
 
-/** How loud a fact is allowed to be. `mute` is the calm default — silence, not a green badge. */
 type Tone = MoveTone;
 
 const TONES: readonly Tone[] = ["mute", "ok", "warn", "risk", "live"];
@@ -129,12 +81,6 @@ function paintFact(
   fact.value.classList.toggle("is-mono", mono);
 }
 
-/**
- * One module's card: its hue, its icon, a live glance, and the door.
- *
- * The door is the whole point of the card. `open` is handed down from the spine, so a card never
- * knows how tabs work — it knows only which module it is a door to.
- */
 type Card = {
   root: HTMLElement;
   body: HTMLElement;
@@ -162,7 +108,6 @@ function makeCard(
       <button class="dash-door" type="button">${doorLabel} <span aria-hidden="true">→</span></button>
     </footer>`;
 
-  // The whole card is the affordance, not just the button — but the button is what says so.
   const go = (): void => open();
   root.querySelector<HTMLButtonElement>(".dash-door")!.addEventListener("click", go);
   root.addEventListener("click", (event) => {
@@ -177,11 +122,6 @@ function makeCard(
   };
 }
 
-/**
- * What the Git card hands to an agent. It is deliberately one message: the human pressed one
- * button, so the agent gets the whole job — inspect, check, commit, push — plus the standing
- * instruction to stop and ask rather than commit something it should not.
- */
 function commitAndPushPrompt(project: Project, git: GitState | null): string {
   const dirty = git?.dirty ?? 0;
   return [
@@ -201,7 +141,6 @@ export function mountDashboard(
   const root = document.createElement("div");
   root.className = "dash";
 
-  /* ------------------------------------------------------------------ head */
 
   const head = document.createElement("header");
   head.className = "dash-head";
@@ -220,10 +159,7 @@ export function mountDashboard(
   const verdict = head.querySelector<HTMLElement>(".dash-verdict")!;
   const verdictText = verdict.querySelector<HTMLElement>("span")!;
 
-  /* ------------------------------------------------------------- priority */
 
-  // The dashboard's first sentence. Everything below explains this recommendation; none of the
-  // lower-level repo facts should make the human work out the next move for themselves.
   const priority = document.createElement("section");
   priority.className = "dash-priority";
   priority.innerHTML = `
@@ -243,20 +179,7 @@ export function mountDashboard(
     if (priorityDoor) open(priorityDoor);
   });
 
-  /* --------------------------------------------------------------- actions */
 
-  /*
-   * The hands, right under the sentence.
-   *
-   * The dashboard used to be reading-only: it told you what was waiting and then made you walk
-   * to another tab to do anything about it. These are the four things a project is actually FOR
-   * — start an agent, open a shell, run the app, look at the folder — and they are here because
-   * this is the screen selecting a project lands on.
-   *
-   * Claude is the primary because it is the one you press ninety times out of a hundred. Every
-   * other engine lives behind the caret, in ENGINES order, so this row never grows into the
-   * Terminals strip's full launcher.
-   */
   const actions = document.createElement("section");
   actions.className = "dash-actions";
   actions.innerHTML = `
@@ -279,8 +202,6 @@ export function mountDashboard(
       ${icon("folder")}<span>Open folder</span></button>
     <span class="dash-live"></span>`;
 
-  // The rest of the engines. Hidden until asked for — a row of nine launchers is the Terminals
-  // tab's job, and repeating it here would make this screen a second copy of that one.
   const engines = document.createElement("div");
   engines.className = "dash-engines";
   engines.hidden = true;
@@ -332,7 +253,6 @@ export function mountDashboard(
     events.openSession(button.dataset.kind as SessionKind);
   });
 
-  /* ----------------------------------------------------------------- facts */
 
   const facts = document.createElement("section");
   facts.className = "dash-facts";
@@ -340,7 +260,6 @@ export function mountDashboard(
   const tree = makeFact(facts);
   const remote = makeFact(facts);
 
-  // The states where a number would be a lie: no repo at all, or no folder at all.
   const note = document.createElement("section");
   note.className = "dash-note";
   note.innerHTML = `<b></b><small></small><code></code>`;
@@ -348,7 +267,6 @@ export function mountDashboard(
   const noteBody = note.querySelector<HTMLElement>("small")!;
   const notePath = note.querySelector<HTMLElement>("code")!;
 
-  /* ----------------------------------------------------------- module grid */
 
   const grid = document.createElement("section");
   grid.className = "dash-grid";
@@ -356,10 +274,6 @@ export function mountDashboard(
   const work = makeCard(grid, "work", "work", "Work", "Open work", () => open("files"));
   const gitCard = makeCard(grid, "git", "git", "Git", "Open git", () => open("git"));
 
-  // The Git card is the only card that also DOES something in place. Three of the four actions are
-  // portfolio-wide on purpose — "is everything pushed?" is never a question about one app — and
-  // the third hands this project's whole commit to an agent. Built once, so the paint below only
-  // ever rewrites the chips and a poll can never make these buttons move under the cursor.
   const gitChips = document.createElement("div");
   gitChips.className = "dash-chips";
   const gitSync = document.createElement("div");
@@ -401,6 +315,14 @@ export function mountDashboard(
     }
   }
 
+  const productSpine = makeCard(
+    grid,
+    "spine",
+    "spine",
+    "Product Spine",
+    "Open Product Spine",
+    () => open("product-spine"),
+  );
   const release = makeCard(grid, "rel", "release", "Release", "Open release", () => open("release"));
   const revenuecat = makeCard(
     grid,
@@ -418,10 +340,7 @@ export function mountDashboard(
       );
     }
   });
-  // Analytics is portfolio-wide, so once its module is installed the card follows every project.
   const analytics = makeCard(grid, "an", "analytics", "Analytics", "Open analytics", () => open("analytics"));
-  // Standards has no tab. Drift is a sentence, not a screen: what this app owes, and a button that
-  // hands one of them to the agent. The door asks for the full read instead of opening anything.
   const standards = makeCard(grid, "std", "standards", "Standards", "Review all", () => {
     if (!currentProject) return;
     void events.runWithAgent(
@@ -431,18 +350,15 @@ export function mountDashboard(
     );
   });
 
+  productSpine.body.innerHTML = `
+    <p class="dash-lede">Every part of the product, how wide and deep it is, and where it
+    should grow.</p>`;
 
-  /* -------------------------------------------------------------- workshop */
 
-  // The useful game layer: real files and real milestones become a scene while work happens.
-  // The scene itself is owned per project by the spine; this is only its landing place.
   const workshop = document.createElement("section");
   workshop.className = "dash-workshop";
 
-  /* ----------------------------------------------------------------- stage */
 
-  // The agent's own output. Its children are the per-project stage DOM, swapped in wholesale by
-  // the spine on select — so it is not rebuilt here and its scroll survives a project switch.
   const stage = document.createElement("section");
   stage.className = "dash-stage";
   stage.innerHTML = `<label>AGENT OUTPUT</label><div class="dash-stage-list"></div>`;
@@ -452,20 +368,17 @@ export function mountDashboard(
   host.replaceChildren(root);
 
   const syncStage = (): void => {
-    // `.own` wrappers use display:contents, so the cards are the grandchildren that count.
     stage.hidden = !stageList.firstElementChild?.childElementCount;
   };
   syncStage();
 
-  /** Last project drawn. The entrance re-arms on a change of THIS, and on nothing else. */
   let shown: string | null = null;
-  let enabledModules = new Set(["git", "release"]);
+  let enabledModules = new Set(["git", "product-spine", "release"]);
   let currentProject: Project | null = null;
   let currentGit: GitState | null = null;
   let currentRunning = false;
   let currentWork: WorkFile[] = [];
 
-  /** How the run reads on a button. The Runs screen owns the vocabulary; this is the short form. */
   function paintRun(run: ProjectRunView | null): void {
     const busy = run?.busy === true;
     const alive = run?.live === true;
@@ -473,8 +386,6 @@ export function mountDashboard(
     stopButton.hidden = !alive;
     runButton.disabled = busy;
     stopButton.disabled = busy;
-    // Only flutter reloads. Everything else has to be stopped and started again, and offering a
-    // button that silently does nothing is worse than not offering one.
     reloadButton.hidden = !alive || run?.kind !== "flutter";
     if (run && (run.state === "launching" || run.state === "building")) {
       text(runButton.querySelector("span")!, run.state === "building" ? "Building…" : "Launching…");
@@ -483,7 +394,6 @@ export function mountDashboard(
     }
   }
 
-  /** "2 agents · app running" — the one line that says what this project is doing right now. */
   function paintLive(run: ProjectRunView | null, agents: number, shells: number): void {
     const parts: string[] = [];
     if (agents > 0) parts.push(plural(agents, "agent", "agents"));
@@ -529,6 +439,7 @@ export function mountDashboard(
     },
     setModules(enabled) {
       enabledModules = new Set(enabled);
+      productSpine.root.hidden = !enabledModules.has("product-spine");
       release.root.hidden = !enabledModules.has("release");
       revenuecat.root.hidden = !enabledModules.has("revenuecat");
       analytics.root.hidden = !events.installed("analytics");
@@ -536,10 +447,6 @@ export function mountDashboard(
       if (!enabledModules.has("git")) gitCard.root.hidden = true;
     },
 
-    /**
-     * Three files, then a count. A card that lists twenty is a file tree, and we already decided
-     * we did not want one of those — the `why` is what earns a file its place here.
-     */
     setWork(list) {
       currentWork = [...list];
       work.root.hidden = list.length === 0;
@@ -585,15 +492,11 @@ export function mountDashboard(
 
       paintPriority();
 
-      /* ------------------------------------------------------------ facts */
 
       facts.hidden = !repo;
       note.hidden = repo;
-      // A folder that is gone has no modules to offer — every door would be a dead end.
       grid.hidden = missing;
       workshop.hidden = missing;
-      // A folder that is gone can host neither a terminal nor a run — the bar would be five
-      // buttons that all fail. The note above it is the only honest thing left to show.
       actions.hidden = missing;
       if (missing) engines.hidden = true;
 
@@ -607,7 +510,6 @@ export function mountDashboard(
           true,
         );
 
-        // Dirty is not a fault — it is work in flight. It only gets loud when it is a pile.
         paintFact(
           tree,
           "changes",
@@ -616,7 +518,6 @@ export function mountDashboard(
           git.dirty === 0 ? "mute" : git.dirty >= 10 ? "warn" : null,
         );
 
-        // Behind is the one that changes your next move: you pull before you touch anything.
         const parts: string[] = [];
         if (git.ahead > 0) parts.push(`↑${git.ahead}`);
         if (git.behind > 0) parts.push(`↓${git.behind}`);
@@ -650,10 +551,7 @@ export function mountDashboard(
         tone(note, null);
       }
 
-      /* ------------------------------------------------------------ cards */
 
-      // Git's card says the one thing the facts strip cannot: whether the repo is CARRYING
-      // anything. Chips, because three small coloured truths read faster than a sentence.
       gitCard.root.hidden = !repo || !enabledModules.has("git");
       if (repo && enabledModules.has("git")) {
         text(gitCard.meta, git.branch || "detached");
@@ -663,14 +561,10 @@ export function mountDashboard(
         if (git.behind > 0) chips.push(`<span class="chip risk">↓${git.behind} to pull</span>`);
         if (!chips.length) chips.push(`<span class="chip mute">clean · in sync</span>`);
         gitChips.innerHTML = chips.join("");
-        // Nothing to commit means nothing for the agent to do — the button says so by leaving.
         agentButton.hidden = git.dirty === 0;
       }
 
-      /* ---------------------------------------------------------- release */
 
-      // Only on a real project switch: this shells out to Python, and a git poll every few
-      // seconds must not drag an interpreter along with it.
       if (shown !== project.id && project.exists && enabledModules.has("release")) {
         void import("./release").then(({ paintRelease }) =>
           paintRelease(project.path, release.body),
@@ -689,9 +583,7 @@ export function mountDashboard(
         );
       }
 
-      /* -------------------------------------------------------- standards */
 
-      // Same rule as release: a python one-shot runs on a real project switch, never on a poll.
       if (shown !== project.id && project.exists && events.installed("standards")) {
         void import("./standards").then(({ paintStandardsCard }) =>
           paintStandardsCard(project.path, standards.body, (prompt) => {
@@ -700,10 +592,7 @@ export function mountDashboard(
         );
       }
 
-      /* ----------------------------------------------------------- motion */
 
-      // The whole trick. A git poll lands here with the same id and takes neither branch, so the
-      // animation class is never removed and never re-added — no reflow, no re-fire.
       if (shown !== project.id) {
         shown = project.id;
         root.classList.remove("is-enter");
